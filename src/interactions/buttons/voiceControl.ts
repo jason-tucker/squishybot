@@ -220,15 +220,10 @@ export async function handleVoiceControlButton(interaction: ButtonInteraction): 
     const gameRow = new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(
       new StringSelectMenuBuilder()
         .setCustomId(`vc:${voiceChannelId}:game_apply`)
-        .setPlaceholder('Overwatch or Rocket League...')
+        .setPlaceholder('Overwatch or Rocket League — auto-detect mode...')
         .addOptions([
-          { label: '⚔️ OW Ranked 5-Stack', value: 'ow_ranked', description: 'Overwatch Ranked [x/5]' },
-          { label: '🎯 OW Quickplay', value: 'ow_quickplay', description: 'Overwatch Quickplay [x/5]' },
-          { label: '🛡️ OW 6v6', value: 'ow_6v6', description: 'Overwatch 6v6 [x/6]' },
-          { label: '🏟️ OW Scrimmage', value: 'ow_scrimmage', description: 'Overwatch Scrimmage [x/6]' },
-          { label: '🚀 RL 3v3 Standard', value: 'rl_3v3', description: 'Rocket League [x/3]' },
-          { label: '🚀 RL 2v2 Doubles', value: 'rl_2v2', description: 'Rocket League [x/2]' },
-          { label: '🚀 RL 1v1 Duels', value: 'rl_1v1', description: 'Rocket League [x/2]' },
+          { label: '🎮 Overwatch (auto-detect mode)', value: 'ow_auto', description: 'Reads rich presence: Comp / QP / 6v6 / Custom etc.' },
+          { label: '🚀 Rocket League (auto-detect playlist)', value: 'rl_auto', description: 'Reads rich presence: Doubles / Standard / 1v1 etc.' },
         ])
     )
 

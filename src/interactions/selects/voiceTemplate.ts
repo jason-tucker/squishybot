@@ -6,6 +6,7 @@ import { canControlChannel, isSudo } from '../../services/voice/permissions'
 import { postOrUpdateControlPanel } from '../../services/voice/controlPanel'
 import { decodeVcId } from '../../utils/customId'
 import { randomTechName } from '../../utils/randomName'
+import { findGameActivity, inferOverwatchMode, inferRocketLeagueMode } from '../../utils/richPresence'
 
 export async function handleVoiceTemplateSelect(interaction: StringSelectMenuInteraction): Promise<void> {
   const decoded = decodeVcId(interaction.customId)
@@ -55,54 +56,39 @@ export async function handleVoiceTemplateSelect(interaction: StringSelectMenuInt
       break
     }
 
-    case 'ow_ranked':
-      newName = `Overwatch Ranked [${memberCount}/5]`
-      userLimit = 5
+    case 'ow_auto': {
+      const activity = findGameActivity(member, /overwatch/i)
+      if (!activity) {
+        await interaction.editReply({
+          content: '⚠️ You\'re not currently playing Overwatch (no rich presence detected). Start the game and try again.',
+          components: [],
+        })
+        return
+      }
+      const { display, limit } = inferOverwatchMode(activity)
+      newName = `Overwatch — ${display} [${memberCount}/${limit}]`
+      userLimit = limit
       nameTemplate = 'counter'
-      manualName = 'Overwatch Ranked'
+      manualName = `Overwatch — ${display}`
       break
+    }
 
-    case 'ow_quickplay':
-      newName = `Overwatch Quickplay [${memberCount}/5]`
-      userLimit = 5
+    case 'rl_auto': {
+      const activity = findGameActivity(member, /rocket\s*league/i)
+      if (!activity) {
+        await interaction.editReply({
+          content: '⚠️ You\'re not currently playing Rocket League (no rich presence detected). Start the game and try again.',
+          components: [],
+        })
+        return
+      }
+      const { display, limit } = inferRocketLeagueMode(activity)
+      newName = `Rocket League — ${display} [${memberCount}/${limit}]`
+      userLimit = limit
       nameTemplate = 'counter'
-      manualName = 'Overwatch Quickplay'
+      manualName = `Rocket League — ${display}`
       break
-
-    case 'ow_6v6':
-      newName = `Overwatch 6v6 [${memberCount}/6]`
-      userLimit = 6
-      nameTemplate = 'counter'
-      manualName = 'Overwatch 6v6'
-      break
-
-    case 'ow_scrimmage':
-      newName = `Overwatch Scrimmage [${memberCount}/6]`
-      userLimit = 6
-      nameTemplate = 'counter'
-      manualName = 'Overwatch Scrimmage'
-      break
-
-    case 'rl_3v3':
-      newName = `Rocket League 3v3 [${memberCount}/3]`
-      userLimit = 3
-      nameTemplate = 'counter'
-      manualName = 'Rocket League 3v3'
-      break
-
-    case 'rl_2v2':
-      newName = `Rocket League 2v2 [${memberCount}/2]`
-      userLimit = 2
-      nameTemplate = 'counter'
-      manualName = 'Rocket League 2v2'
-      break
-
-    case 'rl_1v1':
-      newName = `Rocket League 1v1 [${memberCount}/2]`
-      userLimit = 2
-      nameTemplate = 'counter'
-      manualName = 'Rocket League 1v1'
-      break
+    }
 
     case 'comp5':
       newName = currentGame ? `${currentGame} [${memberCount}/5]` : `Competitive [${memberCount}/5]`
