@@ -15,6 +15,8 @@ export const autoChannels = pgTable('auto_channels', {
   userLimit: integer('user_limit').notNull().default(0),
   autoNameEnabled: boolean('auto_name_enabled').notNull().default(true),
   manualName: text('manual_name'),
+  // Template tracking: null=manual, 'auto'=presence-based, 'counter'=show [x/y] member count
+  nameTemplate: text('name_template'),
   controlPanelMsgId: text('control_panel_msg_id'),
   scheduledCleanupAt: timestamp('scheduled_cleanup_at'),
   createdAt: timestamp('created_at').notNull().defaultNow(),

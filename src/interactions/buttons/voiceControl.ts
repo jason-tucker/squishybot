@@ -7,6 +7,11 @@ import {
   TextInputBuilder,
   TextInputStyle,
   StringSelectMenuBuilder,
+  ContainerBuilder,
+  TextDisplayBuilder,
+  SeparatorBuilder,
+  SeparatorSpacingSize,
+  MessageFlags,
 } from 'discord.js'
 import { decodeVcId } from '../../utils/customId'
 import { db } from '../../db/client'
@@ -54,9 +59,9 @@ export async function handleVoiceControlButton(interaction: ButtonInteraction): 
       await interaction.reply({ content: '❌ You do not have permission.', ephemeral: true })
       return
     }
-    await interaction.deferUpdate()
+    await interaction.deferReply({ ephemeral: true })
     await deleteAutoChannel(interaction.client, record)
-    await interaction.editReply({ content: '✅ Channel deleted.', components: [] })
+    await interaction.editReply({ content: '✅ Channel deleted.' })
     return
   }
 
@@ -155,6 +160,66 @@ export async function handleVoiceControlButton(interaction: ButtonInteraction): 
         .addOptions(options)
     )
     await interaction.reply({ content: 'Choose a host to remove:', components: [row], ephemeral: true })
+    return
+  }
+
+  if (action === 'templates') {
+    if (!canControlChannel(member, record) && !isSudo(member)) {
+      await interaction.reply({ content: '❌ You do not have permission.', ephemeral: true })
+      return
+    }
+    const vc = await interaction.guild!.channels.fetch(record.voiceChannelId).catch(() => null)
+    const memberCount = vc?.isVoiceBased() ? vc.members.size : 1
+
+    const generalSection = new ContainerBuilder()
+      .addTextDisplayComponents(
+        new TextDisplayBuilder().setContent('### 📋 General Templates')
+      )
+      .addSeparatorComponents(
+        new SeparatorBuilder().setSpacing(SeparatorSpacingSize.Small).setDivider(true)
+      )
+
+    const generalRow = new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(
+      new StringSelectMenuBuilder()
+        .setCustomId(`vc:${voiceChannelId}:template_apply`)
+        .setPlaceholder('Choose a template...')
+        .addOptions([
+          { label: '🎮 Auto — follows your game', value: 'auto', description: 'Renames to your active game via rich presence' },
+          { label: `🔢 Counter — Game [${memberCount}/4]`, value: 'counter', description: 'Shows live member count in name' },
+          { label: '🎯 Competitive 5-stack', value: 'comp5', description: 'Game from presence, limit 5' },
+          { label: '🏆 Tryhard Mode', value: 'tryhard', description: 'Game + "Tryhard Mode", limit 5' },
+          { label: '💬 Chill Session', value: 'chill', description: 'Chill vibes, no limit' },
+        ])
+    )
+
+    const gameSection = new ContainerBuilder()
+      .addTextDisplayComponents(
+        new TextDisplayBuilder().setContent('### 🎮 Game Presets')
+      )
+      .addSeparatorComponents(
+        new SeparatorBuilder().setSpacing(SeparatorSpacingSize.Small).setDivider(true)
+      )
+
+    const gameRow = new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(
+      new StringSelectMenuBuilder()
+        .setCustomId(`vc:${voiceChannelId}:template_apply`)
+        .setPlaceholder('Overwatch or Rocket League...')
+        .addOptions([
+          { label: '⚔️ OW Ranked 5-Stack', value: 'ow_ranked', description: 'Overwatch Ranked [x/5]' },
+          { label: '🎯 OW Quickplay', value: 'ow_quickplay', description: 'Overwatch Quickplay [x/5]' },
+          { label: '🛡️ OW 6v6', value: 'ow_6v6', description: 'Overwatch 6v6 [x/6]' },
+          { label: '🏟️ OW Scrimmage', value: 'ow_scrimmage', description: 'Overwatch Scrimmage [x/6]' },
+          { label: '🚀 RL 3v3 Standard', value: 'rl_3v3', description: 'Rocket League [x/3]' },
+          { label: '🚀 RL 2v2 Doubles', value: 'rl_2v2', description: 'Rocket League [x/2]' },
+          { label: '🚀 RL 1v1 Duels', value: 'rl_1v1', description: 'Rocket League [x/2]' },
+        ])
+    )
+
+    await interaction.reply({
+      flags: MessageFlags.IsComponentsV2 as number,
+      components: [generalSection, generalRow, gameSection, gameRow],
+      ephemeral: true,
+    } as any)
     return
   }
 

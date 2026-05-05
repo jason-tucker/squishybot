@@ -1,4 +1,5 @@
 import { ActivityType, type GuildMember } from 'discord.js'
+import { randomTechName } from './randomName'
 
 export function generateChannelName(member: GuildMember, existingNames: string[]): string {
   const base = sanitizeChannelName(buildBaseName(member))
@@ -12,18 +13,9 @@ export function generateChannelName(member: GuildMember, existingNames: string[]
 
 function buildBaseName(member: GuildMember): string {
   const activities = member.presence?.activities ?? []
-
-  // Find a Playing activity (type 0) — skip Spotify/streaming/custom
   const game = activities.find(a => a.type === ActivityType.Playing)
-
-  if (game) {
-    const partySize = game.party?.size
-    const gameName = game.name.slice(0, 50)
-    const party = partySize ? ` (${partySize[0]}/${partySize[1]})` : ''
-    return `${member.displayName}'s ${gameName}${party}`
-  }
-
-  return `${member.displayName}'s Channel`
+  if (game) return game.name.slice(0, 100)
+  return randomTechName()
 }
 
 export function sanitizeChannelName(name: string): string {

@@ -13,3 +13,4 @@ export type VoiceAction =
   | 'add_host'
   | 'remove_host'
   | 'claim'
+  | 'templates'
