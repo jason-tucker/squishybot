@@ -27,6 +27,8 @@ services:
       POSTGRES_USER: squishybot
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-squishybot_dev}
       POSTGRES_DB: squishybot
+    ports:
+      - "5434:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
