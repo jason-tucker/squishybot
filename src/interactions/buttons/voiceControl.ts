@@ -1,4 +1,13 @@
-import type { ButtonInteraction } from 'discord.js'
+import {
+  type ButtonInteraction,
+  ActionRowBuilder,
+  ButtonBuilder,
+  ButtonStyle,
+  ModalBuilder,
+  TextInputBuilder,
+  TextInputStyle,
+  StringSelectMenuBuilder,
+} from 'discord.js'
 import { decodeVcId } from '../../utils/customId'
 import { db } from '../../db/client'
 import { autoChannels } from '../../db/schema'
@@ -26,8 +35,6 @@ export async function handleVoiceControlButton(interaction: ButtonInteraction): 
       await interaction.reply({ content: '❌ You do not have permission to delete this channel.', ephemeral: true })
       return
     }
-    // Show confirmation
-    const { ActionRowBuilder, ButtonBuilder, ButtonStyle } = await import('discord.js')
     const row = new ActionRowBuilder<ButtonBuilder>().addComponents(
       new ButtonBuilder()
         .setCustomId(`vc:${voiceChannelId}:delete_confirm`)
@@ -58,7 +65,6 @@ export async function handleVoiceControlButton(interaction: ButtonInteraction): 
       await interaction.reply({ content: '❌ You do not have permission to rename this channel.', ephemeral: true })
       return
     }
-    const { ModalBuilder, TextInputBuilder, TextInputStyle, ActionRowBuilder } = await import('discord.js')
     const modal = new ModalBuilder()
       .setCustomId(`vc:${voiceChannelId}:rename`)
       .setTitle('Rename Channel')
@@ -87,7 +93,6 @@ export async function handleVoiceControlButton(interaction: ButtonInteraction): 
     const isLocked = action === 'lock'
     const vc = await interaction.guild!.channels.fetch(record.voiceChannelId).catch(() => null)
     if (vc?.isVoiceBased()) {
-      const { PermissionFlagsBits } = await import('discord.js')
       if (isLocked) {
         await vc.permissionOverwrites.edit(interaction.guild!.roles.everyone, { Connect: false }).catch(() => {})
       } else {
@@ -111,7 +116,6 @@ export async function handleVoiceControlButton(interaction: ButtonInteraction): 
       await interaction.reply({ content: '❌ No members are in the channel to add as host.', ephemeral: true })
       return
     }
-    const { ActionRowBuilder, StringSelectMenuBuilder } = await import('discord.js')
     const eligibleMembers = vc.members.filter(m => m.id !== record.ownerUserId && !record.hostUserIds.includes(m.id))
     if (eligibleMembers.size === 0) {
       await interaction.reply({ content: 'ℹ️ All current members are already hosts.', ephemeral: true })
@@ -137,7 +141,6 @@ export async function handleVoiceControlButton(interaction: ButtonInteraction): 
       await interaction.reply({ content: 'ℹ️ There are no hosts to remove.', ephemeral: true })
       return
     }
-    const { ActionRowBuilder, StringSelectMenuBuilder } = await import('discord.js')
     const guild = interaction.guild!
     const options = await Promise.all(
       record.hostUserIds.slice(0, 25).map(async id => {

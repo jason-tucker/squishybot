@@ -1,4 +1,4 @@
-import type { GuildMember, VoiceChannel, TextChannel } from 'discord.js'
+import type { GuildMember, VoiceChannel, TextChannel, OverwriteResolvable } from 'discord.js'
 import { PermissionFlagsBits, OverwriteType } from 'discord.js'
 import { env } from '../../config/env'
 import type { AutoChannelRecord } from '../../types/voice'
@@ -39,7 +39,7 @@ export async function syncTextChannelPermissions(
   botId: string,
 ): Promise<void> {
   // Start fresh: deny everyone, allow bot
-  const overwrites: Parameters<typeof textChannel.permissionOverwrites.set>[0] = [
+  const overwrites: OverwriteResolvable[] = [
     {
       id: textChannel.guild.roles.everyone,
       deny: [PermissionFlagsBits.ViewChannel],
