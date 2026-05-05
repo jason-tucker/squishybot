@@ -6,6 +6,7 @@ import { eq } from 'drizzle-orm'
 import { env } from '../../config/env'
 import type { AutoChannelRecord } from '../../types/voice'
 import { postOrUpdateControlPanel } from './controlPanel'
+import { postOrUpdateSticky } from './sticky'
 import { scheduleCleanup, cancelCleanup } from './cleanupScheduler'
 import { logger } from '../logger'
 
@@ -58,8 +59,9 @@ export async function createAutoChannel(
     sourceHubId,
   }).returning()
 
-  // 4. Post control panel
+  // 4. Post control panel + sticky
   await postOrUpdateControlPanel(client, record)
+  await postOrUpdateSticky(client, record)
 
   logger.info(`Auto channel created: ${channelName} (vc=${existingVoiceChannel.id}, tc=${textChannel.id})`)
   return record

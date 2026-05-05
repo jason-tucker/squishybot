@@ -4,12 +4,16 @@ import { client } from './bot/client'
 import { registerReadyEvent } from './bot/events/ready'
 import { registerInteractionCreate } from './bot/events/interactionCreate'
 import { registerVoiceStateUpdate } from './bot/events/voiceStateUpdate'
+import { registerMessageCreate } from './bot/events/messageCreate'
+import { registerPresenceUpdate } from './bot/events/presenceUpdate'
 import { logger } from './services/logger'
 import { setDnd } from './services/presence'
 
 registerReadyEvent(client)
 registerInteractionCreate(client)
 registerVoiceStateUpdate(client)
+registerMessageCreate(client)
+registerPresenceUpdate(client)
 
 process.on('unhandledRejection', async (reason) => {
   setDnd('Unhandled error — check logs')

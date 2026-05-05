@@ -18,6 +18,7 @@ export const autoChannels = pgTable('auto_channels', {
   // Template tracking: null=manual, 'auto'=presence-based, 'counter'=show [x/y] member count
   nameTemplate: text('name_template'),
   controlPanelMsgId: text('control_panel_msg_id'),
+  stickyMsgId: text('sticky_msg_id'),
   scheduledCleanupAt: timestamp('scheduled_cleanup_at'),
   createdAt: timestamp('created_at').notNull().defaultNow(),
   lastActiveAt: timestamp('last_active_at').notNull().defaultNow(),

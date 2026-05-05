@@ -6,6 +6,7 @@ import { eq } from 'drizzle-orm'
 import { env } from '../../config/env'
 import { scheduleCleanup, restoreScheduledCleanups } from './cleanupScheduler'
 import { postOrUpdateControlPanel } from './controlPanel'
+import { postOrUpdateSticky } from './sticky'
 import { syncTextChannelPermissions } from './permissions'
 import { seedHubsFromEnv } from './hubManager'
 import { createAutoChannel } from './autoChannel'
@@ -63,13 +64,15 @@ export async function runReconciler(client: Client): Promise<ReconcilerResult> {
       await syncTextChannelPermissions(tc as any, vc as any, record, client.user!.id).catch(() => {})
     }
 
-    // Re-post control panel if missing — but first sweep any leftover bot messages
-    // so we don't accumulate duplicate panels across restarts
+    // Re-post control panel + sticky if missing. Sweep any leftover bot messages
+    // (not the tracked panel or sticky) so duplicates don't accumulate.
     if (tc?.isTextBased()) {
-      const recent = await (tc as any).messages.fetch({ limit: 20 }).catch(() => null)
+      const recent = await (tc as any).messages.fetch({ limit: 30 }).catch(() => null)
       if (recent) {
         const stale = recent.filter((m: any) =>
-          m.author?.id === client.user!.id && m.id !== record.controlPanelMsgId
+          m.author?.id === client.user!.id
+          && m.id !== record.controlPanelMsgId
+          && m.id !== record.stickyMsgId
         )
         for (const [, m] of stale) {
           await m.delete().catch(() => {})
@@ -87,6 +90,9 @@ export async function runReconciler(client: Client): Promise<ReconcilerResult> {
           result.panels++
         }
       }
+
+      // Always re-post the sticky on startup so it's at the bottom and current
+      await postOrUpdateSticky(client, record)
     }
   }
 

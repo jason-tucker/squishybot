@@ -35,6 +35,15 @@ export async function handleVoiceControlButton(interaction: ButtonInteraction): 
 
   const member = await interaction.guild!.members.fetch(interaction.user.id)
 
+  if (action === 'open_panel') {
+    const payload = await buildPanelPayloadForRecord(interaction.client, record)
+    await interaction.reply({
+      ...payload,
+      ephemeral: true,
+    } as any)
+    return
+  }
+
   if (action === 'delete') {
     if (!canControlChannel(member, record) && !isSudo(member)) {
       await interaction.reply({ content: '❌ You do not have permission to delete this channel.', ephemeral: true })
