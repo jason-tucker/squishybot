@@ -2,6 +2,20 @@
 
 A multipurpose Discord bot for a single server. Built with discord.js v14, TypeScript, PostgreSQL, and Drizzle ORM.
 
+## Quick install (any VPS with Docker)
+
+```bash
+# 1. Install Docker (skip if already installed)
+curl -fsSL https://get.docker.com | sudo sh && sudo usermod -aG docker $USER && newgrp docker
+
+# 2. Install SquishyBot (replace YOURUSER with your GitHub username)
+GITHUB_OWNER=YOURUSER bash <(curl -fsSL https://raw.githubusercontent.com/YOURUSER/squishybot/main/scripts/install.sh)
+```
+
+The installer verifies Docker, clones the repo, generates a strong Postgres password, opens `.env` so you can paste your Discord token + IDs, pulls the GHCR image, and starts the bot.
+
+See [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) for the full setup guide and CI/CD configuration.
+
 ## Features
 
 ### Auto Voice Channels
