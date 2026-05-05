@@ -7,6 +7,10 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+---
+
+## [0.7.0] — 2026-05-05
+
 ### Added
 - `/report` slash command — opens a modal (Title / Type / Description / Steps to reproduce); on submit, the bot DMs the owner (`BOT_OWNER_ID`) with the full content and four review buttons: ✅ Approve + Notify, ✅ Approve Silent, ❌ Reject + Notify, ❌ Reject Silent. Approve files a GitHub issue to `GITHUB_REPO` via the GitHub REST API.
 - Silent sticky button at the bottom of every auto-channel text channel — single "📋 Open Panel" button + a `-#` subtext warning that the channel is temporary; re-posted at the bottom whenever a new message lands, with `MessageFlags.SuppressNotifications` so it never pings.
