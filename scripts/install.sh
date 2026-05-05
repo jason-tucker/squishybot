@@ -108,9 +108,11 @@ if [ ! -f .env ]; then
         echo "BOT_IMAGE=$GHCR_IMAGE" >> .env
     fi
 
-    # Generate a strong default Postgres password if user hasn't set one
+    # Generate a strong default Postgres password if user hasn't set one.
+    # Restricted to URL-safe alphanumerics so the DATABASE_URL parses correctly
+    # (postgresql://user:PASSWORD@host — chars like # * ? @ break URL parsing).
     if grep -qE '^POSTGRES_PASSWORD=(change_me|squishybot_dev|)?$' .env; then
-        STRONG_PW=$(openssl rand -base64 24 2>/dev/null || head -c 32 /dev/urandom | base64 | tr -d '/+=' | head -c 32)
+        STRONG_PW=$(openssl rand -hex 24 2>/dev/null || head -c 64 /dev/urandom | base64 | tr -dc 'a-zA-Z0-9' | head -c 32)
         sed -i "s|^POSTGRES_PASSWORD=.*|POSTGRES_PASSWORD=$STRONG_PW|" .env
         ok "Generated random POSTGRES_PASSWORD"
     fi
@@ -157,12 +159,26 @@ if docker compose ps "$BOT_NAME" 2>/dev/null | grep -qE "running|Up"; then
     echo ""
     docker compose ps
     echo ""
+
+    # ── Step 8: install CLI helper to /usr/local/bin ──────────────────────────
+    if [ -f "scripts/$BOT_NAME" ] && [ ! -x "/usr/local/bin/$BOT_NAME" ]; then
+        info "Installing '$BOT_NAME' command to /usr/local/bin/ (needs sudo)..."
+        if sudo cp "scripts/$BOT_NAME" "/usr/local/bin/$BOT_NAME" 2>/dev/null && \
+           sudo chmod +x "/usr/local/bin/$BOT_NAME" 2>/dev/null; then
+            ok "Installed: you can now run '$BOT_NAME' from anywhere"
+        else
+            warn "Could not install /usr/local/bin/$BOT_NAME (sudo may have failed)"
+            echo "  Manual: sudo cp scripts/$BOT_NAME /usr/local/bin/ && sudo chmod +x /usr/local/bin/$BOT_NAME"
+        fi
+    fi
+
     info "Useful commands:"
-    echo "    cd $PROJECT_DIR"
-    echo "    docker compose logs $BOT_NAME -f       # live logs"
-    echo "    docker compose logs $BOT_NAME --tail=50"
-    echo "    docker compose restart $BOT_NAME       # restart"
-    echo "    docker compose down                    # stop everything"
+    echo "    $BOT_NAME logs              # live logs"
+    echo "    $BOT_NAME tail 50           # last 50 lines"
+    echo "    $BOT_NAME restart           # restart bot"
+    echo "    $BOT_NAME update            # pull latest code + image + restart"
+    echo "    $BOT_NAME stop              # stop the stack"
+    echo "    $BOT_NAME                   # show all available commands"
     echo ""
     ok "Setup complete."
 else

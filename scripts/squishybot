@@ -1,117 +1,156 @@
-#!/bin/bash
-# squishybot — management CLI for the SquishyBot Discord bot
-# Install: sudo cp scripts/squishybot /usr/local/bin/squishybot && sudo chmod +x /usr/local/bin/squishybot
+#!/usr/bin/env bash
+# squishybot — management CLI for the Docker-based SquishyBot deployment
+#
+# Install once on a server:
+#   sudo cp scripts/squishybot /usr/local/bin/squishybot
+#   sudo chmod +x /usr/local/bin/squishybot
+#
+# All commands operate on the docker compose stack found in $PROJECT_DIR
+# (auto-detected). Override with `PROJECT_DIR=/path squishybot <cmd>`.
 
-BOTDIR="/home/botuser/projects/squishybot"
+set -Eeuo pipefail
+
 SERVICE="squishybot"
 
-_installed() {
-  systemctl list-unit-files "${SERVICE}.service" &>/dev/null && \
-    systemctl list-unit-files "${SERVICE}.service" | grep -q "${SERVICE}"
+# Auto-detect project dir
+detect_project_dir() {
+    if [ -n "${PROJECT_DIR:-}" ] && [ -f "$PROJECT_DIR/docker-compose.yml" ]; then
+        echo "$PROJECT_DIR"; return
+    fi
+    for candidate in \
+        "$HOME/projects/squishybot" \
+        "/home/botuser/projects/squishybot" \
+        "/root/projects/squishybot" \
+        "$(pwd)"; do
+        if [ -f "$candidate/docker-compose.yml" ]; then
+            echo "$candidate"; return
+        fi
+    done
+    echo "ERROR: squishybot project directory not found." >&2
+    echo "Set PROJECT_DIR=/path/to/squishybot or run from inside the repo." >&2
+    exit 1
 }
 
-_install_service() {
-  echo "Installing systemd service..."
-  sudo cp "${BOTDIR}/deploy/systemd/squishybot.service" /etc/systemd/system/
-  sudo cp "${BOTDIR}/deploy/systemd/squishybot-restart.service" /etc/systemd/system/
-  sudo cp "${BOTDIR}/deploy/systemd/squishybot-restart.timer" /etc/systemd/system/
-  sudo systemctl daemon-reload
-  sudo systemctl enable "${SERVICE}.service"
-  sudo systemctl enable squishybot-restart.timer
-  sudo systemctl start squishybot-restart.timer
-  echo "Service installed and weekly restart timer enabled."
-}
+PROJECT_DIR=$(detect_project_dir)
+cd "$PROJECT_DIR"
 
 cmd="${1:-status}"
+shift || true
 
 case "$cmd" in
 
-  start)
-    cd "$BOTDIR"
-    echo "→ Checking for database migrations..."
-    pnpm db:migrate --silent 2>/dev/null || pnpm db:migrate
-    if ! _installed; then
-      _install_service
-    fi
-    sudo systemctl start "$SERVICE"
-    echo "✓ SquishyBot started."
-    sudo systemctl status "$SERVICE" --no-pager -l | tail -5
-    ;;
+    start)
+        docker compose up -d "$@"
+        docker compose ps
+        ;;
 
-  stop)
-    sudo systemctl stop "$SERVICE"
-    echo "✓ SquishyBot stopped."
-    ;;
+    stop)
+        docker compose stop
+        echo "✓ squishybot stack stopped."
+        ;;
 
-  restart)
-    cd "$BOTDIR"
-    echo "→ Checking for database migrations..."
-    pnpm db:migrate --silent 2>/dev/null || pnpm db:migrate
-    sudo systemctl restart "$SERVICE"
-    echo "✓ SquishyBot restarted."
-    ;;
+    down)
+        docker compose down "$@"
+        echo "✓ squishybot stack removed."
+        ;;
 
-  status)
-    sudo systemctl status "$SERVICE" --no-pager -l
-    ;;
+    restart)
+        docker compose restart "$SERVICE"
+        echo "✓ squishybot restarted."
+        docker compose ps "$SERVICE"
+        ;;
 
-  logs)
-    sudo journalctl -u "$SERVICE" -f --no-pager
-    ;;
+    status|ps)
+        docker compose ps
+        ;;
 
-  tail)
-    sudo journalctl -u "$SERVICE" -n "${2:-30}" --no-pager
-    ;;
+    logs)
+        docker compose logs "$SERVICE" -f --tail=50 "$@"
+        ;;
 
-  update)
-    cd "$BOTDIR"
-    echo "→ Pulling latest code..."
-    git pull
-    echo "→ Installing dependencies..."
-    pnpm install
-    echo "→ Running migrations..."
-    pnpm db:migrate
-    echo "→ Redeploying commands..."
-    pnpm commands:deploy
-    sudo systemctl restart "$SERVICE"
-    echo "✓ SquishyBot updated and restarted."
-    ;;
+    tail)
+        N="${1:-30}"
+        docker compose logs "$SERVICE" --tail="$N"
+        ;;
 
-  install)
-    cd "$BOTDIR"
-    _install_service
-    echo "→ Running initial setup..."
-    pnpm install
-    pnpm db:migrate
-    pnpm commands:deploy
-    sudo systemctl start "$SERVICE"
-    echo "✓ SquishyBot installed and running."
-    ;;
+    pull)
+        docker compose pull "$@"
+        ;;
 
-  deploy)
-    cd "$BOTDIR"
-    echo "→ Deploying slash commands to guild..."
-    pnpm commands:deploy
-    echo "✓ Commands deployed."
-    ;;
+    update)
+        echo "▶ Pulling latest source..."
+        git fetch --all
+        git reset --hard origin/main
+        echo "▶ Pulling latest image..."
+        docker compose pull "$SERVICE"
+        echo "▶ Restarting..."
+        docker compose up -d --remove-orphans
+        echo "✓ squishybot updated."
+        docker compose ps
+        ;;
 
-  migrate)
-    cd "$BOTDIR"
-    pnpm db:migrate
-    ;;
+    build)
+        docker compose build "$@"
+        ;;
 
-  *)
-    echo "Usage: squishybot [start|stop|restart|status|logs|tail|update|install|deploy|migrate]"
-    echo ""
-    echo "  start    — start the bot (auto-installs service if needed)"
-    echo "  stop     — stop the bot"
-    echo "  restart  — restart the bot (runs migrations first)"
-    echo "  status   — show service status"
-    echo "  logs     — tail live logs (Ctrl+C to exit)"
-    echo "  tail [N] — show last N lines (default 30)"
-    echo "  update   — pull code, migrate DB, redeploy commands, restart"
-    echo "  install  — first-time full setup"
-    echo "  deploy   — redeploy slash commands to guild"
-    echo "  migrate  — run database migrations"
-    ;;
+    rebuild)
+        docker compose up -d --build --remove-orphans
+        ;;
+
+    deploy)
+        # Slash command deployment by running the built image
+        if [ -z "${DISCORD_BOT_TOKEN:-}" ] || [ -z "${DISCORD_CLIENT_ID:-}" ] || [ -z "${GUILD_ID:-}" ]; then
+            # Fall back to .env values
+            set -a
+            # shellcheck disable=SC1091
+            . ./.env
+            set +a
+        fi
+        docker compose run --rm "$SERVICE" node dist/bot/registerCommands.js
+        ;;
+
+    shell|exec)
+        docker compose exec "$SERVICE" sh
+        ;;
+
+    db:shell|psql)
+        # shellcheck disable=SC1091
+        . <(grep '^POSTGRES_PASSWORD=' .env)
+        docker compose exec db psql -U squishybot squishybot
+        ;;
+
+    env)
+        ${EDITOR:-nano} .env
+        echo "▶ Reloading containers to pick up env changes..."
+        docker compose up -d
+        ;;
+
+    where)
+        echo "$PROJECT_DIR"
+        ;;
+
+    *)
+        cat <<EOF
+Usage: squishybot <command>
+
+  start         start the stack (squishybot + db)
+  stop          stop the stack (preserves volumes)
+  restart       restart just the squishybot container
+  down          stop and remove containers (preserves volumes)
+  status / ps   show container status
+  logs          tail live logs (Ctrl+C to exit)
+  tail [N]      show last N lines (default 30)
+  pull          pull latest image from registry
+  update        git pull + docker compose pull + up -d
+  build         build image locally
+  rebuild       up -d with --build (rebuild and restart)
+  deploy        register slash commands (uses .env values)
+  shell / exec  open a shell inside the bot container
+  db:shell      open a psql shell against the postgres container
+  env           edit .env and restart to apply
+  where         print the auto-detected project directory
+
+Project dir: $PROJECT_DIR
+EOF
+        ;;
 esac
