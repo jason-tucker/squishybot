@@ -2,11 +2,13 @@ import type { Client } from 'discord.js'
 import { startHealthPush } from '../healthPush'
 import { runReconciler } from '../../services/voice/reconciler'
 import { logger, attachClientToLogger } from '../../services/logger'
+import { initPresence } from '../../services/presence'
 import { env } from '../../config/env'
 
 export function registerReadyEvent(client: Client) {
   client.once('clientReady', async (c) => {
     attachClientToLogger(c)
+    initPresence(c)
     logger.info(`Logged in as ${c.user.tag}`)
     startHealthPush()
 

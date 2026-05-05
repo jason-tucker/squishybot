@@ -7,6 +7,7 @@ import { addMemberToTextChannel, removeMemberFromTextChannel } from '../../servi
 import { scheduleCleanup, cancelCleanup } from '../../services/voice/cleanupScheduler'
 import { postOrUpdateControlPanel } from '../../services/voice/controlPanel'
 import { logger } from '../../services/logger'
+import { recordActivity } from '../../services/presence'
 import { env } from '../../config/env'
 
 export function registerVoiceStateUpdate(client: Client): void {
@@ -16,6 +17,8 @@ export function registerVoiceStateUpdate(client: Client): void {
 
     const member = newState.member ?? oldState.member
     if (!member || member.user.bot) return
+
+    recordActivity()
 
     const guild = newState.guild.id === env.GUILD_ID ? newState.guild : oldState.guild
     const leftChannelId = oldState.channelId

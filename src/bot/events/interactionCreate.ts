@@ -12,6 +12,7 @@ import { execute as helpExecute } from '../../commands/help'
 import { execute as sudoExecute } from '../../commands/sudo'
 import { execute as staffExecute } from '../../commands/staff'
 import { isVcCustomId } from '../../utils/customId'
+import { recordActivity } from '../../services/presence'
 
 const commandHandlers = new Map<string, (i: ChatInputCommandInteraction) => Promise<void>>([
   ['squishy', squishyExecute],
@@ -24,6 +25,7 @@ const commandHandlers = new Map<string, (i: ChatInputCommandInteraction) => Prom
 export function registerInteractionCreate(client: Client) {
   client.on('interactionCreate', async (interaction: Interaction) => {
     try {
+      recordActivity()
       if (interaction.isChatInputCommand()) {
         const handler = commandHandlers.get(interaction.commandName)
         if (handler) await handler(interaction)
