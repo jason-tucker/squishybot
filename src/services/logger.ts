@@ -30,10 +30,12 @@ async function getOwnerUser(client: Client): Promise<User | null> {
   return ownerUser
 }
 
-async function dmOwner(client: Client, content: string): Promise<void> {
+async function dmOwner(client: Client, content: string, silent = false): Promise<void> {
   const user = await getOwnerUser(client)
   if (!user) return
-  await user.send({ content: content.slice(0, 2000) }).catch(() => {})
+  // 4096 = MessageFlags.SuppressNotifications
+  const flags = silent ? 4096 : undefined
+  await user.send({ content: content.slice(0, 2000), flags } as any).catch(() => {})
 }
 
 export const logger = {
@@ -53,10 +55,10 @@ export const logger = {
     }
   },
 
-  async dmOwner(message: string, client?: Client): Promise<void> {
+  async dmOwner(message: string, client?: Client, opts?: { silent?: boolean }): Promise<void> {
     const c = client ?? cachedClient
     if (!c) return
-    await dmOwner(c, message)
+    await dmOwner(c, message, opts?.silent ?? false)
   },
 
   async errorAndDm(message: string, err: unknown, client?: Client): Promise<void> {

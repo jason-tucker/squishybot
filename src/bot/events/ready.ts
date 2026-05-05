@@ -32,6 +32,7 @@ export function registerReadyEvent(client: Client) {
         ? `Reconciler: recovered=${result.recovered} cleaned=${result.cleaned} hubs=${result.hubs} panels=${result.panels}`
         : '')
 
-    await logger.dmOwner(startupMsg, c)
+    // Silent — successful boot is informational, not a notification.
+    await logger.dmOwner(startupMsg, c, { silent: true })
   })
 }
