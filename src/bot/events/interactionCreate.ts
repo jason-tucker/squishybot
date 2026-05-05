@@ -55,7 +55,7 @@ export function registerInteractionCreate(client: Client) {
         } else if (id.startsWith('sudo_user:')) {
           const { handleSudoUserButton } = await import('../../interactions/buttons/sudoUser')
           await handleSudoUserButton(interaction as ButtonInteraction)
-        } else if (id.startsWith('report_approve:') || id.startsWith('report_reject:')) {
+        } else if (id.startsWith('report_approve_') || id.startsWith('report_reject_')) {
           const { handleReportReview } = await import('../../interactions/buttons/reportReview')
           await handleReportReview(interaction as ButtonInteraction)
         }

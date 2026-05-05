@@ -11,8 +11,14 @@ export async function handleReportReview(interaction: ButtonInteraction): Promis
 
   await interaction.deferUpdate()
 
-  const [action, sessionKey] = interaction.customId.split(':')
-  const session = getReportSession(sessionKey ?? '')
+  // customId is one of:
+  //   report_approve_notice:{key}, report_approve_silent:{key}
+  //   report_reject_notice:{key},  report_reject_silent:{key}
+  const colonIdx = interaction.customId.indexOf(':')
+  const action = interaction.customId.slice(0, colonIdx)
+  const sessionKey = interaction.customId.slice(colonIdx + 1)
+
+  const session = getReportSession(sessionKey)
   if (!session) {
     await interaction.editReply({
       content: '⚠️ Report session expired or already handled.',
@@ -21,19 +27,25 @@ export async function handleReportReview(interaction: ButtonInteraction): Promis
     return
   }
 
-  if (action === 'report_reject') {
-    deleteReportSession(sessionKey!)
+  const notify = action.endsWith('_notice')
+  const isApprove = action.startsWith('report_approve')
+
+  if (!isApprove) {
+    deleteReportSession(sessionKey)
     await interaction.editReply({
-      content: `❌ **Rejected** — /report from <@${session.reporterId}> (\`${session.reporterTag}\`)\n**Title:** ${session.title}`,
+      content: `❌ **Rejected${notify ? '' : ' silently'}** — /report from <@${session.reporterId}> (\`${session.reporterTag}\`)\n**Title:** ${session.title}`,
       components: [],
     })
-    try {
-      const reporter = await interaction.client.users.fetch(session.reporterId)
-      await reporter.send(`Your /report — **${session.title}** — was reviewed and not filed.`)
-    } catch {}
+    if (notify) {
+      try {
+        const reporter = await interaction.client.users.fetch(session.reporterId)
+        await reporter.send(`Your /report — **${session.title}** — was reviewed and not filed.`)
+      } catch {}
+    }
     return
   }
 
+  // Approve path
   if (!env.GITHUB_TOKEN || !env.GITHUB_REPO) {
     await interaction.editReply({
       content: '❌ Cannot file: `GITHUB_TOKEN` / `GITHUB_REPO` not set on the bot.',
@@ -63,15 +75,17 @@ export async function handleReportReview(interaction: ButtonInteraction): Promis
   }
 
   const data = (await res.json()) as { html_url: string; number: number }
-  deleteReportSession(sessionKey!)
+  deleteReportSession(sessionKey)
 
   await interaction.editReply({
-    content: `✅ **Filed** Issue **#${data.number}** — ${data.html_url}\nReporter: <@${session.reporterId}> (\`${session.reporterTag}\`)`,
+    content: `✅ **Filed${notify ? ' + notified reporter' : ' silently'}** — Issue **#${data.number}** — ${data.html_url}\nReporter: <@${session.reporterId}> (\`${session.reporterTag}\`)`,
     components: [],
   })
 
-  try {
-    const reporter = await interaction.client.users.fetch(session.reporterId)
-    await reporter.send(`✅ Your /report has been filed: **#${data.number}** — ${data.html_url}`)
-  } catch {}
+  if (notify) {
+    try {
+      const reporter = await interaction.client.users.fetch(session.reporterId)
+      await reporter.send(`✅ Your /report has been filed: **#${data.number}** — ${data.html_url}`)
+    } catch {}
+  }
 }

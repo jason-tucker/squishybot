@@ -64,15 +64,25 @@ export async function handleReportSubmit(interaction: ModalSubmitInteraction): P
 
     const row = new ActionRowBuilder<ButtonBuilder>().addComponents(
       new ButtonBuilder()
-        .setCustomId(`report_approve:${sessionKey}`)
-        .setLabel('Approve & File')
+        .setCustomId(`report_approve_notice:${sessionKey}`)
+        .setLabel('Approve + Notify')
         .setEmoji('✅')
         .setStyle(ButtonStyle.Success),
       new ButtonBuilder()
-        .setCustomId(`report_reject:${sessionKey}`)
-        .setLabel('Reject')
+        .setCustomId(`report_approve_silent:${sessionKey}`)
+        .setLabel('Approve, Silent')
+        .setEmoji('✅')
+        .setStyle(ButtonStyle.Secondary),
+      new ButtonBuilder()
+        .setCustomId(`report_reject_notice:${sessionKey}`)
+        .setLabel('Reject + Notify')
         .setEmoji('❌')
         .setStyle(ButtonStyle.Danger),
+      new ButtonBuilder()
+        .setCustomId(`report_reject_silent:${sessionKey}`)
+        .setLabel('Reject, Silent')
+        .setEmoji('❌')
+        .setStyle(ButtonStyle.Secondary),
     )
 
     await owner.send({ content: truncated, components: [row] })
