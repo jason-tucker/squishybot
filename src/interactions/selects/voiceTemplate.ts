@@ -6,7 +6,6 @@ import { canControlChannel, isSudo } from '../../services/voice/permissions'
 import { postOrUpdateControlPanel } from '../../services/voice/controlPanel'
 import { decodeVcId } from '../../utils/customId'
 import { randomTechName } from '../../utils/randomName'
-import { getSmartGameName } from '../../utils/richPresence'
 
 export async function handleVoiceTemplateSelect(interaction: StringSelectMenuInteraction): Promise<void> {
   const decoded = decodeVcId(interaction.customId)
@@ -30,8 +29,7 @@ export async function handleVoiceTemplateSelect(interaction: StringSelectMenuInt
   await interaction.deferUpdate()
 
   const vc = await interaction.guild!.channels.fetch(record.voiceChannelId).catch(() => null)
-  const activity = member.presence?.activities.find(a => a.type === ActivityType.Playing) ?? null
-  const smartName = activity ? getSmartGameName(activity) : null
+  const currentGame = member.presence?.activities.find(a => a.type === ActivityType.Playing)?.name ?? null
   const memberCount = vc?.isVoiceBased() ? vc.members.size : 1
 
   let newName: string
@@ -42,14 +40,13 @@ export async function handleVoiceTemplateSelect(interaction: StringSelectMenuInt
 
   switch (template) {
     case 'auto':
-      // Mode-aware: "Overwatch — Competitive" / "Rocket League — Doubles" / game name / random
-      newName = smartName ?? randomTechName()
+      newName = currentGame ?? randomTechName()
       autoNameEnabled = true
       nameTemplate = 'auto'
       break
 
     case 'counter': {
-      const base = smartName ?? randomTechName()
+      const base = currentGame ?? randomTechName()
       const limit = userLimit > 0 ? userLimit : 4
       newName = `${base} [${memberCount}/${limit}]`
       if (userLimit === 0) userLimit = limit
@@ -59,14 +56,14 @@ export async function handleVoiceTemplateSelect(interaction: StringSelectMenuInt
     }
 
     case 'comp5':
-      newName = smartName ? `${smartName} [${memberCount}/5]` : `Competitive [${memberCount}/5]`
+      newName = currentGame ? `${currentGame} [${memberCount}/5]` : `Competitive [${memberCount}/5]`
       userLimit = 5
       nameTemplate = 'counter'
-      manualName = smartName ?? 'Competitive'
+      manualName = currentGame ?? 'Competitive'
       break
 
     case 'tryhard':
-      newName = smartName ? `${smartName} — Tryhard Mode` : 'Tryhard Mode'
+      newName = currentGame ? `${currentGame} — Tryhard Mode` : 'Tryhard Mode'
       userLimit = 5
       nameTemplate = null
       manualName = newName

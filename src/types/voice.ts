@@ -16,4 +16,3 @@ export type VoiceAction =
   | 'templates'
   | 'open_panel'
   | 'template_apply'
-  | 'game_apply'

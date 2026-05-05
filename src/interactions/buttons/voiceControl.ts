@@ -191,7 +191,7 @@ export async function handleVoiceControlButton(interaction: ButtonInteraction): 
     const header = new ContainerBuilder()
       .addTextDisplayComponents(
         new TextDisplayBuilder().setContent(
-          '### 📋 Templates\n_Auto detects what you\'re playing — including the game mode for Overwatch & Rocket League._'
+          '### 📋 Templates\n_Auto detects what you\'re playing from your rich presence._'
         )
       )
       .addSeparatorComponents(
