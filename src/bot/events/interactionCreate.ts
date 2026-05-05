@@ -39,6 +39,11 @@ export function registerInteractionCreate(client: Client) {
         if (isVcCustomId(id)) {
           const { handleVoiceControlButton } = await import('../../interactions/buttons/voiceControl')
           await handleVoiceControlButton(interaction as ButtonInteraction)
+        } else if (id === 'squishy:back') {
+          const member = await interaction.guild!.members.fetch(interaction.user.id)
+          const { sendMainPanel } = await import('../../commands/squishy')
+          const { isSudo } = await import('../../services/voice/permissions')
+          await sendMainPanel(interaction as any, isSudo(member))
         } else if (id === 'open_staff_request') {
           const { showStaffRequestModal } = await import('../../commands/staff')
           await showStaffRequestModal(interaction as ButtonInteraction)
@@ -58,6 +63,9 @@ export function registerInteractionCreate(client: Client) {
         } else if (id === 'sudo:action') {
           const { handleSudoPanelSelect } = await import('../../interactions/selects/sudoPanel')
           await handleSudoPanelSelect(interaction as StringSelectMenuInteraction)
+        } else if (id === 'squishy:section') {
+          const { handleSquishyPanelSelect } = await import('../../interactions/selects/squishyPanel')
+          await handleSquishyPanelSelect(interaction as StringSelectMenuInteraction)
         }
 
       } else if (interaction.isModalSubmit()) {

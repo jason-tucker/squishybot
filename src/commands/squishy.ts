@@ -1,6 +1,7 @@
 import {
   SlashCommandBuilder,
   ChatInputCommandInteraction,
+  StringSelectMenuInteraction,
   ContainerBuilder,
   TextDisplayBuilder,
   SeparatorBuilder,
@@ -8,21 +9,30 @@ import {
   ActionRowBuilder,
   ButtonBuilder,
   ButtonStyle,
+  StringSelectMenuBuilder,
   MessageFlags,
 } from 'discord.js'
 import { db } from '../db/client'
 import { autoChannels, hubChannels } from '../db/schema'
 import { eq } from 'drizzle-orm'
+import { isSudo } from '../services/voice/permissions'
 import { env } from '../config/env'
 
 export const data = new SlashCommandBuilder()
   .setName('squishy')
-  .setDescription('SquishyBot menu')
+  .setDescription('SquishyBot help and user menu')
   .setDMPermission(false)
+
+function sep() {
+  return new SeparatorBuilder().setSpacing(SeparatorSpacingSize.Small).setDivider(true)
+}
 
 export async function execute(interaction: ChatInputCommandInteraction): Promise<void> {
   await interaction.deferReply({ ephemeral: true })
+  await sendMainPanel(interaction, await interaction.guild!.members.fetch(interaction.user.id).then(m => isSudo(m)))
+}
 
+export async function sendMainPanel(interaction: ChatInputCommandInteraction | StringSelectMenuInteraction, isSudoUser: boolean): Promise<void> {
   const [activeChannels, hubs] = await Promise.all([
     db.select().from(autoChannels).where(eq(autoChannels.guildId, env.GUILD_ID)),
     db.select().from(hubChannels).where(eq(hubChannels.guildId, env.GUILD_ID)),
@@ -32,21 +42,34 @@ export async function execute(interaction: ChatInputCommandInteraction): Promise
     .setAccentColor(0x5865f2)
     .addTextDisplayComponents(
       new TextDisplayBuilder().setContent(
-        `## SquishyBot\n**Active voice channels:** ${activeChannels.length}  •  **Hubs:** ${hubs.length}`
+        `## 🤖 SquishyBot\n` +
+        `**Active voice channels:** ${activeChannels.length}  •  **Hubs:** ${hubs.length}\n\n` +
+        `Use the menu below to explore what SquishyBot can do, or hit the button to request a staff role.`
       )
     )
-    .addSeparatorComponents(
-      new SeparatorBuilder().setSpacing(SeparatorSpacingSize.Small).setDivider(true)
-    )
+    .addSeparatorComponents(sep())
     .addTextDisplayComponents(
       new TextDisplayBuilder().setContent(
-        'Join a **hub** voice channel to create your own private room.\n' +
-        'Use **/voice** while in your channel to open the control panel.\n\n' +
-        'Want a staff role? Use the button below to submit a request.'
+        `**Voice channels** — Join a hub to create your own private room with a control panel.\n` +
+        `**Staff roles** — Submit a request to join the server staff team.`
       )
     )
 
-  const row = new ActionRowBuilder<ButtonBuilder>().addComponents(
+  const sections = [
+    { label: 'Auto Voice Channels', value: 'voice', emoji: '🔊', description: 'How hub and auto channels work' },
+    { label: 'Staff Requests', value: 'staff', emoji: '📝', description: 'How to request a staff role' },
+    { label: 'Voice Control Panel', value: 'panel', emoji: '🎛️', description: 'What buttons the control panel has' },
+    ...(isSudoUser ? [{ label: 'Admin Tools', value: 'admin', emoji: '🛡️', description: 'Sudo commands and controls' }] : []),
+  ]
+
+  const selectRow = new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(
+    new StringSelectMenuBuilder()
+      .setCustomId('squishy:section')
+      .setPlaceholder('Explore sections...')
+      .addOptions(sections)
+  )
+
+  const buttonRow = new ActionRowBuilder<ButtonBuilder>().addComponents(
     new ButtonBuilder()
       .setCustomId('open_staff_request')
       .setLabel('Request Staff Role')
@@ -54,8 +77,10 @@ export async function execute(interaction: ChatInputCommandInteraction): Promise
       .setStyle(ButtonStyle.Primary),
   )
 
-  await interaction.editReply({
-    flags: MessageFlags.IsComponentsV2,
-    components: [container, row],
-  } as any)
+  const payload = { flags: MessageFlags.IsComponentsV2, components: [container, selectRow, buttonRow] }
+  if ((interaction as StringSelectMenuInteraction).update) {
+    await (interaction as StringSelectMenuInteraction).update(payload as any)
+  } else {
+    await (interaction as ChatInputCommandInteraction).editReply(payload as any)
+  }
 }
