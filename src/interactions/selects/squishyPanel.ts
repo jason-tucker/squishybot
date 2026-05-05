@@ -82,9 +82,34 @@ export async function handleSquishyPanelSelect(interaction: StringSelectMenuInte
         '🔒 **Lock / Unlock** — prevent new people from joining\n' +
         '👑 **Add Host** — give another member control over the channel\n' +
         '➖ **Remove Host** — take away host permissions\n' +
+        '📋 **Templates** — Auto (follows your game) / Counter ([x/y]) / Comp 5-stack / Tryhard / Chill\n' +
         '👤 **Claim** — become the owner if the previous owner left\n' +
         '🗑️ **Delete** — immediately delete the channel and text channel\n\n' +
-        'Use **/voice** from any channel to get an ephemeral copy of the panel.'
+        'A silent **📋 Open Panel** sticky stays at the bottom of the text channel so the panel ' +
+        'is always one click away. Use **/voice** from any channel for an ephemeral copy too.'
+      ))
+
+    const backRow = new ActionRowBuilder<ButtonBuilder>().addComponents(
+      new ButtonBuilder().setCustomId('squishy:back').setLabel('Back').setStyle(ButtonStyle.Secondary)
+    )
+    await interaction.update({ flags: MessageFlags.IsComponentsV2, components: [container, backRow] } as any)
+
+  } else if (section === 'report') {
+    const container = new ContainerBuilder()
+      .setAccentColor(0xfee75c)
+      .addTextDisplayComponents(new TextDisplayBuilder().setContent('## 🐛 Bug & Feature Reports'))
+      .addSeparatorComponents(sep())
+      .addTextDisplayComponents(new TextDisplayBuilder().setContent(
+        'Use **/report** to send a bug report or feature request straight to the bot owner. ' +
+        'You\'ll fill out a short form:\n\n' +
+        '- **Title** — one-line summary\n' +
+        '- **Type** — bug / feature / question\n' +
+        '- **Description** — what happened, what you expected\n' +
+        '- **Steps to reproduce** (optional)\n\n' +
+        'Your report is **not** posted publicly. The bot DMs the owner with the contents and ' +
+        'four review buttons (Approve+Notify / Approve Silent / Reject+Notify / Reject Silent). ' +
+        'If approved, a GitHub issue is filed and you may get a DM with the link. ' +
+        'If rejected, you may get a DM letting you know.'
       ))
 
     const backRow = new ActionRowBuilder<ButtonBuilder>().addComponents(

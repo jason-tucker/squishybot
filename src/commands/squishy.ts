@@ -57,8 +57,9 @@ export async function sendMainPanel(interaction: ChatInputCommandInteraction | S
 
   const sections = [
     { label: 'Auto Voice Channels', value: 'voice', emoji: '🔊', description: 'How hub and auto channels work' },
+    { label: 'Voice Control Panel', value: 'panel', emoji: '🎛️', description: 'What every button on the panel does' },
     { label: 'Staff Requests', value: 'staff', emoji: '📝', description: 'How to request a staff role' },
-    { label: 'Voice Control Panel', value: 'panel', emoji: '🎛️', description: 'What buttons the control panel has' },
+    { label: 'Bug & Feature Reports', value: 'report', emoji: '🐛', description: 'How /report works (owner-reviewed GitHub issues)' },
     ...(isSudoUser ? [{ label: 'Admin Tools', value: 'admin', emoji: '🛡️', description: 'Sudo commands and controls' }] : []),
   ]
 

@@ -7,6 +7,30 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### Added
+- `/report` slash command — opens a modal (Title / Type / Description / Steps to reproduce); on submit, the bot DMs the owner (`BOT_OWNER_ID`) with the full content and four review buttons: ✅ Approve + Notify, ✅ Approve Silent, ❌ Reject + Notify, ❌ Reject Silent. Approve files a GitHub issue to `GITHUB_REPO` via the GitHub REST API.
+- Silent sticky button at the bottom of every auto-channel text channel — single "📋 Open Panel" button + a `-#` subtext warning that the channel is temporary; re-posted at the bottom whenever a new message lands, with `MessageFlags.SuppressNotifications` so it never pings.
+- Templates feature — `📋 Templates` button on the voice control panel opens an ephemeral picker with Auto / Counter / Competitive 5-stack / Tryhard / Chill. Auto follows your rich presence; Counter shows live `[x/y]` member count.
+- Random tech default channel names — when no game is detected, channels get names like "Sloppy Ethernet" / "Yelling Switch" / "Happy DNS" instead of "User's Channel".
+- New env vars: `GITHUB_TOKEN`, `GITHUB_REPO` (both optional — `/report` no-ops with a friendly error if unset).
+- New schema column `auto_channels.sticky_msg_id` (nullable) to track the sticky message ID for re-post-on-message.
+- New schema column `auto_channels.name_template` (nullable) to track which template a channel is using.
+- `messageCreate` event handler with 1.5 s per-channel debounce — re-posts the sticky when a user messages in an auto text channel.
+- `presenceUpdate` event handler is now actually registered (previously orphaned in source).
+
+### Changed
+- Lock / Unlock and Claim buttons now use `interaction.update()` so the clicked panel always reflects the new state, even if there are duplicate panel messages.
+- Reconciler now sweeps stale bot messages in auto-channel text channels (preserving the tracked panel + sticky) so duplicates don't accumulate across restarts.
+- `seedHubsFromEnv` skips registering a `HUB_CHANNEL_IDS` entry when that channel is already an active auto channel — prevents the corrupt-hub-row pattern that caused a fresh duplicate channel on every boot.
+- Reconciler hub recreation now checks the category for an existing channel matching the stale hub's label before recreating; if found, the corrupt row is deleted instead.
+- Default channel name dropped the `displayName's` prefix — a Playing activity yields just the game name, otherwise a random tech name.
+
+### Fixed
+- `delete_confirm` no longer crashes with `DiscordAPIError[10008] Unknown Message` when the auto channel was deleted faster than `editReply` could resolve — switched to `deferReply({ ephemeral: true })` so the confirmation lives in a separate ephemeral message.
+- Templates select-menu interactions previously routed to the wrong handler (`handleVoiceControlSelect`) and silently failed; routing now matches `:template_apply` first.
+- Templates popup crashed with `COMPONENT_CUSTOM_ID_DUPLICATED` when both select menus shared a customId.
+- CI deploy step `node dist/bot/registerCommands.js` now overrides the Docker `ENTRYPOINT` so it doesn't run `drizzle-kit push` against a placeholder DB.
+
 ---
 
 ## [0.6.0] — 2026-05-05

@@ -23,15 +23,24 @@ See [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) for the full setup guide and CI/CD 
 - Join a **hub** voice channel → the hub converts into your personal voice channel (you stay in it)
 - A replacement hub is immediately created
 - An attached **text channel** appears, visible only to users in the voice channel + sudo users
-- A persistent **control panel** message lets you rename, lock, add/remove hosts, or delete the channel
+- A persistent **control panel** message lets you rename, lock, add/remove hosts, claim, delete, or apply a template
+- A silent **sticky button** stays at the bottom of the text channel (always `📋 Open Panel`) so the panel is one click away even after lots of chat
+- **Templates** — Auto (follows your rich presence), Counter (live `[x/y]` member count), Comp 5-stack, Tryhard Mode, Chill Session
+- Default channel name uses your active game; if you're not playing anything, you get a random tech-themed name like *Sloppy Ethernet*
 - When the channel becomes empty, both voice + text channels are cleaned up automatically
-- Bot repairs itself on restart (reconciler recovers orphaned channels and missing hubs)
+- Bot repairs itself on restart (reconciler recovers orphaned channels, missing hubs, and stale panels)
 
 ### Staff Requests
 
-- Users can submit a `/staff request` form
+- Submit a request via the `/squishy` panel
 - Bot posts the request in a configured admin thread, pinging the designated reviewer
 - Sudo can Approve or Deny in place; the requester gets a DM with the result
+
+### Bug & Feature Reports
+
+- `/report` opens a modal (Title / Type / Description / Steps to reproduce)
+- The bot DMs the owner with the contents and four buttons: **Approve+Notify**, **Approve Silent**, **Reject+Notify**, **Reject Silent**
+- On approve, the bot files the issue against `GITHUB_REPO` via the GitHub REST API and (optionally) DMs the reporter the issue URL
 
 ### Planned Features
 

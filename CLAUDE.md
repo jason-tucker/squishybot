@@ -28,23 +28,32 @@ creation.
 
 ## Commands
 
+Slash commands are consolidated to four top-level commands plus one context menu.
+
 | Command | Description | Permission |
 |---|---|---|
-| `/help` | List available commands; sudo section appears only for sudo | Everyone |
-| `/squishy status` | Bot status: uptime, active channels, hub count | Everyone |
-| `/squishy repair` | Manually run the reconciler | Sudo |
-| `/voice panel` | Re-post or open control panel | Owner/Host/Sudo |
-| `/voice claim` | Claim ownership of an auto channel whose owner left | Voice members |
-| `/voice delete` | Delete your auto channel | Owner/Host/Sudo |
-| `/staff request` | Submit a staff role request | Everyone |
-| `/sudo channels` | List active auto channels | Sudo |
-| `/sudo hubs` | List managed hub channels | Sudo |
-| `/sudo cleanup` | Force cleanup of empty/orphaned channels | Sudo |
-| `/sudo approvals` | List pending staff approvals | Sudo |
-| `/sudo restart` | Show terminal restart instructions | Sudo |
+| `/voice` | Open an ephemeral copy of the control panel for the channel you're currently in | Owner/Host/Sudo |
+| `/squishy` | User-facing menu: bot status, feature explainers, staff request button | Everyone |
+| `/sudo` | Admin select-menu panel (channels, hubs, cleanup, approvals, restart) | Sudo |
+| `/report` | Open a modal to file a GitHub issue (Title / Type / Description / Steps); owner approves via DM before it lands on GitHub | Everyone |
+| Right-click user → **Manage User** | Roles, voice status, disconnect, staff history | Sudo |
 
-The control panel in the auto text channel is the primary interface — `/voice` commands are
-fallback escape hatches.
+The persistent control panel (in each auto-channel text channel) is the primary
+interaction surface. A silent sticky message at the bottom of every auto-channel
+text channel keeps a quick `📋 Open Panel` button visible no matter how much
+chat scrolls; clicking it gives you an ephemeral copy of the panel.
+
+### Voice control panel buttons
+
+| Button | What it does |
+|---|---|
+| ✏️ **Rename** | Modal to set a custom name |
+| 🔒 **Lock** / 🔓 **Unlock** | Toggle Connect permission on `@everyone` |
+| 👑 **Add Host** | Pick a current member as a host |
+| ➖ **Remove Host** | Remove a host |
+| 📋 **Templates** | Auto / Counter / Comp 5-stack / Tryhard / Chill — sets name + user limit in one click |
+| 👤 **Claim** | Take ownership when the owner has left |
+| 🗑️ **Delete** | Delete the voice + text channels right away |
 
 ## Terminal management
 
@@ -89,6 +98,9 @@ Weekly auto-restart at Tuesday 4 AM via `squishybot-restart.timer`.
 | `CLIPS_CHANNEL_ID` | No | Future: auto-thread on clips channel |
 | `FOOD_CHANNEL_ID` | No | Future: auto-thread channel |
 | `UPTIME_KUMA_PUSH_URL` | No | Push monitor URL |
+| `BOT_OWNER_ID` | No (Yes for `/report`) | Receives DM on every `/report` for review approval, plus startup DMs |
+| `GITHUB_TOKEN` | No | Fine-grained PAT with `Issues: Read & Write` on `GITHUB_REPO`; required for `/report` |
+| `GITHUB_REPO` | No | `owner/name` of the repo issues land in (e.g. `jason-tucker/squishybot`); required for `/report` |
 
 ---
 
@@ -109,7 +121,12 @@ Weekly auto-restart at Tuesday 4 AM via `squishybot-restart.timer`.
 
 All voice control interactions use: `vc:{voiceChannelId}:{action}`
 
-Actions: `delete`, `delete_confirm`, `rename`, `rename_submit`, `lock`, `unlock`, `add_host`, `remove_host`
+Actions: `delete`, `delete_confirm`, `rename`, `rename_submit`, `lock`, `unlock`, `add_host`, `remove_host`, `claim`, `templates`, `template_apply` (select), `open_panel` (sticky button)
+
+`/report` uses three customIds (no vc prefix):
+- `report:submit` — modal submission
+- `report_approve_notice:{sessionKey}` / `report_approve_silent:{sessionKey}` — file the issue (with/without DMing reporter)
+- `report_reject_notice:{sessionKey}` / `report_reject_silent:{sessionKey}` — drop the session (with/without DMing reporter)
 
 ---
 
