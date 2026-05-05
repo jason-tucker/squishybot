@@ -188,48 +188,32 @@ export async function handleVoiceControlButton(interaction: ButtonInteraction): 
     const vc = await interaction.guild!.channels.fetch(record.voiceChannelId).catch(() => null)
     const memberCount = vc?.isVoiceBased() ? vc.members.size : 1
 
-    const generalSection = new ContainerBuilder()
+    const header = new ContainerBuilder()
       .addTextDisplayComponents(
-        new TextDisplayBuilder().setContent('### 📋 General Templates')
+        new TextDisplayBuilder().setContent(
+          '### 📋 Templates\n_Auto detects what you\'re playing — including the game mode for Overwatch & Rocket League._'
+        )
       )
       .addSeparatorComponents(
         new SeparatorBuilder().setSpacing(SeparatorSpacingSize.Small).setDivider(true)
       )
 
-    const generalRow = new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(
+    const row = new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(
       new StringSelectMenuBuilder()
         .setCustomId(`vc:${voiceChannelId}:template_apply`)
         .setPlaceholder('Choose a template...')
         .addOptions([
-          { label: '🎮 Auto — follows your game', value: 'auto', description: 'Renames to your active game via rich presence' },
-          { label: `🔢 Counter — Game [${memberCount}/4]`, value: 'counter', description: 'Shows live member count in name' },
-          { label: '🎯 Competitive 5-stack', value: 'comp5', description: 'Game from presence, limit 5' },
-          { label: '🏆 Tryhard Mode', value: 'tryhard', description: 'Game + "Tryhard Mode", limit 5' },
-          { label: '💬 Chill Session', value: 'chill', description: 'Chill vibes, no limit' },
-        ])
-    )
-
-    const gameSection = new ContainerBuilder()
-      .addTextDisplayComponents(
-        new TextDisplayBuilder().setContent('### 🎮 Game Presets')
-      )
-      .addSeparatorComponents(
-        new SeparatorBuilder().setSpacing(SeparatorSpacingSize.Small).setDivider(true)
-      )
-
-    const gameRow = new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(
-      new StringSelectMenuBuilder()
-        .setCustomId(`vc:${voiceChannelId}:game_apply`)
-        .setPlaceholder('Overwatch or Rocket League — auto-detect mode...')
-        .addOptions([
-          { label: '🎮 Overwatch (auto-detect mode)', value: 'ow_auto', description: 'Reads rich presence: Comp / QP / 6v6 / Custom etc.' },
-          { label: '🚀 Rocket League (auto-detect playlist)', value: 'rl_auto', description: 'Reads rich presence: Doubles / Standard / 1v1 etc.' },
+          { label: '🎮 Auto — follows your game', value: 'auto', description: 'Detects game + OW/RL mode from rich presence' },
+          { label: `🔢 Counter — [${memberCount}/4]`, value: 'counter', description: 'Live member count in name' },
+          { label: '🎯 Competitive 5-stack', value: 'comp5', description: 'Limit 5' },
+          { label: '🏆 Tryhard Mode', value: 'tryhard', description: 'Limit 5' },
+          { label: '💬 Chill Session', value: 'chill', description: 'No limit' },
         ])
     )
 
     await interaction.reply({
       flags: MessageFlags.IsComponentsV2 as number,
-      components: [generalSection, generalRow, gameSection, gameRow],
+      components: [header, row],
       ephemeral: true,
     } as any)
     return

@@ -26,6 +26,21 @@ export function inferOverwatchMode(activity: Activity): ModeInfo {
   return { display: fallback.slice(0, 40), limit: 5 }
 }
 
+/**
+ * Returns a channel-name-friendly string for the activity, with mode detection
+ * for Overwatch and Rocket League. Falls back to the raw game name.
+ */
+export function getSmartGameName(activity: Activity): string {
+  const name = activity.name ?? ''
+  if (/overwatch/i.test(name)) {
+    return `Overwatch — ${inferOverwatchMode(activity).display}`
+  }
+  if (/rocket\s*league/i.test(name)) {
+    return `Rocket League — ${inferRocketLeagueMode(activity).display}`
+  }
+  return name.slice(0, 100) || 'Match'
+}
+
 export function inferRocketLeagueMode(activity: Activity): ModeInfo {
   const text = [activity.state, activity.details].filter(Boolean).join(' ').toLowerCase()
 

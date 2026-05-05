@@ -6,7 +6,7 @@ import { canControlChannel, isSudo } from '../../services/voice/permissions'
 import { postOrUpdateControlPanel } from '../../services/voice/controlPanel'
 import { decodeVcId } from '../../utils/customId'
 import { randomTechName } from '../../utils/randomName'
-import { findGameActivity, inferOverwatchMode, inferRocketLeagueMode } from '../../utils/richPresence'
+import { getSmartGameName } from '../../utils/richPresence'
 
 export async function handleVoiceTemplateSelect(interaction: StringSelectMenuInteraction): Promise<void> {
   const decoded = decodeVcId(interaction.customId)
@@ -30,7 +30,8 @@ export async function handleVoiceTemplateSelect(interaction: StringSelectMenuInt
   await interaction.deferUpdate()
 
   const vc = await interaction.guild!.channels.fetch(record.voiceChannelId).catch(() => null)
-  const currentGame = member.presence?.activities.find(a => a.type === ActivityType.Playing)?.name ?? null
+  const activity = member.presence?.activities.find(a => a.type === ActivityType.Playing) ?? null
+  const smartName = activity ? getSmartGameName(activity) : null
   const memberCount = vc?.isVoiceBased() ? vc.members.size : 1
 
   let newName: string
@@ -41,13 +42,14 @@ export async function handleVoiceTemplateSelect(interaction: StringSelectMenuInt
 
   switch (template) {
     case 'auto':
-      newName = currentGame ?? randomTechName()
+      // Mode-aware: "Overwatch — Competitive" / "Rocket League — Doubles" / game name / random
+      newName = smartName ?? randomTechName()
       autoNameEnabled = true
       nameTemplate = 'auto'
       break
 
     case 'counter': {
-      const base = currentGame ?? randomTechName()
+      const base = smartName ?? randomTechName()
       const limit = userLimit > 0 ? userLimit : 4
       newName = `${base} [${memberCount}/${limit}]`
       if (userLimit === 0) userLimit = limit
@@ -56,49 +58,15 @@ export async function handleVoiceTemplateSelect(interaction: StringSelectMenuInt
       break
     }
 
-    case 'ow_auto': {
-      const activity = findGameActivity(member, /overwatch/i)
-      if (!activity) {
-        await interaction.editReply({
-          content: '⚠️ You\'re not currently playing Overwatch (no rich presence detected). Start the game and try again.',
-          components: [],
-        })
-        return
-      }
-      const { display, limit } = inferOverwatchMode(activity)
-      newName = `Overwatch — ${display} [${memberCount}/${limit}]`
-      userLimit = limit
-      nameTemplate = 'counter'
-      manualName = `Overwatch — ${display}`
-      break
-    }
-
-    case 'rl_auto': {
-      const activity = findGameActivity(member, /rocket\s*league/i)
-      if (!activity) {
-        await interaction.editReply({
-          content: '⚠️ You\'re not currently playing Rocket League (no rich presence detected). Start the game and try again.',
-          components: [],
-        })
-        return
-      }
-      const { display, limit } = inferRocketLeagueMode(activity)
-      newName = `Rocket League — ${display} [${memberCount}/${limit}]`
-      userLimit = limit
-      nameTemplate = 'counter'
-      manualName = `Rocket League — ${display}`
-      break
-    }
-
     case 'comp5':
-      newName = currentGame ? `${currentGame} [${memberCount}/5]` : `Competitive [${memberCount}/5]`
+      newName = smartName ? `${smartName} [${memberCount}/5]` : `Competitive [${memberCount}/5]`
       userLimit = 5
       nameTemplate = 'counter'
-      manualName = currentGame ?? 'Competitive'
+      manualName = smartName ?? 'Competitive'
       break
 
     case 'tryhard':
-      newName = currentGame ? `${currentGame} — Tryhard Mode` : 'Tryhard Mode'
+      newName = smartName ? `${smartName} — Tryhard Mode` : 'Tryhard Mode'
       userLimit = 5
       nameTemplate = null
       manualName = newName

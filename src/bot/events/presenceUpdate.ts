@@ -5,6 +5,7 @@ import { autoChannels } from '../../db/schema'
 import { eq } from 'drizzle-orm'
 import { env } from '../../config/env'
 import { logger } from '../../services/logger'
+import { getSmartGameName } from '../../utils/richPresence'
 
 // Debounce: don't rename more than once per 10 minutes per channel (Discord rate limit)
 const lastRename = new Map<string, number>()
@@ -39,12 +40,14 @@ export function registerPresenceUpdate(client: Client): void {
     const vc = await guild.channels.fetch(record.voiceChannelId).catch(() => null)
     if (!vc?.isVoiceBased()) return
 
+    const baseName = getSmartGameName(game)
+
     let newName: string
     if (record.nameTemplate === 'counter') {
       const limit = record.userLimit > 0 ? record.userLimit : 4
-      newName = `${game.name} [${vc.members.size}/${limit}]`
+      newName = `${baseName} [${vc.members.size}/${limit}]`
     } else {
-      newName = game.name
+      newName = baseName
     }
 
     // Don't rename if the name didn't actually change
