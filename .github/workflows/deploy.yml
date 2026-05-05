@@ -1,0 +1,134 @@
+name: Deploy SquishyBot
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+# Never cancel an in-progress deploy — wait for it to finish first
+concurrency:
+  group: deploy-squishybot
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: Build & Deploy
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      # ── 1. Checkout ──────────────────────────────────────────────────────────
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # ── 2. Node + pnpm ───────────────────────────────────────────────────────
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+
+      # ── 3. Install dependencies ───────────────────────────────────────────────
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      # ── 4. Build (TypeScript → dist/) ─────────────────────────────────────────
+      # tsc runs here on the runner (7 GB RAM), never on the VPS (OOMs at ~900 MB).
+      - name: Build
+        run: pnpm run build
+
+      # ── 5. Deploy slash commands (from built dist/) ────────────────────────────
+      - name: Deploy slash commands
+        env:
+          DISCORD_BOT_TOKEN: ${{ secrets.DISCORD_BOT_TOKEN }}
+          DISCORD_CLIENT_ID: ${{ secrets.DISCORD_CLIENT_ID }}
+          GUILD_ID: ${{ secrets.GUILD_ID }}
+          DATABASE_URL: placeholder  # not used by registerCommands, but env.ts requires it
+        run: pnpm run deploy:commands
+
+      # ── 6. Prepare VPS — git pull + pnpm install + db:migrate ─────────────────
+      - name: Prepare VPS
+        uses: appleboy/ssh-action@v1.2.0
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USER }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          script: |
+            set -Eeuo pipefail
+            cd ${{ secrets.PROJECT_DIR }}
+            git fetch --all
+            git reset --hard origin/main
+            pnpm install --frozen-lockfile
+            pnpm run db:migrate
+
+      # ── 7. Upload compiled dist/ to VPS ───────────────────────────────────────
+      - name: Upload dist to VPS
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USER }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          source: dist/
+          target: ${{ secrets.PROJECT_DIR }}
+          rm: true
+
+      # ── 8. Restart service + verify ───────────────────────────────────────────
+      - name: Restart and verify
+        uses: appleboy/ssh-action@v1.2.0
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USER }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          script: |
+            set -Eeuo pipefail
+            sudo systemctl restart squishybot
+            sleep 5
+            if ! systemctl is-active --quiet squishybot; then
+              echo "ERROR: squishybot is not active after restart"
+              journalctl -u squishybot -n 20 --no-pager
+              exit 1
+            fi
+            echo "squishybot is running."
+
+      # ── 9. Notify Discord — success ───────────────────────────────────────────
+      - name: Notify success
+        if: success()
+        env:
+          WEBHOOK: ${{ secrets.DISCORD_DEPLOY_WEBHOOK }}
+        run: |
+          SHORT_SHA="${GITHUB_SHA::7}"
+          COMMIT_MSG=$(git log -1 --pretty=format:"%s")
+          curl -s -o /dev/null -w "%{http_code}" -X POST "$WEBHOOK" \
+            -H "Content-Type: application/json" \
+            -d "{
+              \"embeds\": [{
+                \"title\": \"✅ SquishyBot deployed\",
+                \"description\": \"[\`${SHORT_SHA}\`](${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/commit/${GITHUB_SHA}) ${COMMIT_MSG}\",
+                \"color\": 5763719,
+                \"footer\": { \"text\": \"Triggered by ${GITHUB_ACTOR}\" }
+              }]
+            }"
+
+      # ── 10. Notify Discord — failure ──────────────────────────────────────────
+      - name: Notify failure
+        if: failure()
+        env:
+          WEBHOOK: ${{ secrets.DISCORD_DEPLOY_WEBHOOK }}
+        run: |
+          SHORT_SHA="${GITHUB_SHA::7}"
+          COMMIT_MSG=$(git log -1 --pretty=format:"%s")
+          curl -s -o /dev/null -X POST "$WEBHOOK" \
+            -H "Content-Type: application/json" \
+            -d "{
+              \"embeds\": [{
+                \"title\": \"❌ SquishyBot deploy FAILED\",
+                \"description\": \"[\`${SHORT_SHA}\`](${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/commit/${GITHUB_SHA}) ${COMMIT_MSG}\",
+                \"color\": 15548997,
+                \"footer\": { \"text\": \"Triggered by ${GITHUB_ACTOR} — check Actions logs\" }
+              }]
+            }"

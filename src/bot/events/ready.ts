@@ -1,12 +1,35 @@
 import type { Client } from 'discord.js'
 import { startHealthPush } from '../healthPush'
 import { runReconciler } from '../../services/voice/reconciler'
-import { logger } from '../../services/logger'
+import { logger, attachClientToLogger } from '../../services/logger'
+import { env } from '../../config/env'
 
 export function registerReadyEvent(client: Client) {
   client.once('clientReady', async (c) => {
+    attachClientToLogger(c)
     logger.info(`Logged in as ${c.user.tag}`)
     startHealthPush()
-    await runReconciler(c).catch(err => logger.error('Reconciler failed on startup:', err))
+
+    const guild = c.guilds.cache.get(env.GUILD_ID)
+    const guildName = guild?.name ?? '(not a member)'
+    const otherGuilds = c.guilds.cache.filter(g => g.id !== env.GUILD_ID).map(g => `${g.name} (${g.id})`)
+
+    let result
+    try {
+      result = await runReconciler(c)
+    } catch (err) {
+      await logger.errorAndDm('Reconciler failed on startup', err, c)
+    }
+
+    const startupMsg =
+      `🟢 **SquishyBot started**\n` +
+      `Logged in as **${c.user.tag}**\n` +
+      `Primary guild (\`GUILD_ID\`): **${guildName}** (\`${env.GUILD_ID}\`)\n` +
+      (otherGuilds.length > 0 ? `Also in: ${otherGuilds.join(', ')}\n` : '') +
+      (result
+        ? `Reconciler: recovered=${result.recovered} cleaned=${result.cleaned} hubs=${result.hubs} panels=${result.panels}`
+        : '')
+
+    await logger.dmOwner(startupMsg, c)
   })
 }

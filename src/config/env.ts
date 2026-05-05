@@ -21,6 +21,9 @@ const envSchema = z.object({
   SUDO_ROLE_IDS: commaSeparated,
   SUDO_USER_IDS: commaSeparated,
 
+  // Bot owner — receives DMs on startup and unhandled errors
+  BOT_OWNER_ID: z.string().min(1).optional().or(z.literal('').transform(() => undefined)),
+
   // Voice channels
   AUTO_VOICE_CATEGORY_ID: z.string().min(1, 'AUTO_VOICE_CATEGORY_ID is required'),
   HUB_CHANNEL_IDS: commaSeparated.pipe(

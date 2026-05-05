@@ -1,18 +1,30 @@
 [Unit]
 Description=SquishyBot Discord Bot
-After=network-online.target
-Wants=network-online.target
+After=network.target
 
 [Service]
 Type=simple
 User=botuser
 WorkingDirectory=/home/botuser/projects/squishybot
-ExecStart=/home/botuser/projects/squishybot/node_modules/.bin/tsx src/index.ts
-Restart=on-failure
-RestartSec=10
+Environment=NODE_ENV=production
+ExecStart=/usr/bin/node dist/index.js
+Restart=always
+RestartSec=5
+MemoryMax=750M
+MemorySwapMax=1500M
 StandardOutput=journal
 StandardError=journal
 SyslogIdentifier=squishybot
 
 [Install]
 WantedBy=multi-user.target
+
+# NOTE: If /usr/bin/node is not correct for your system, run:
+#   which node
+# and update ExecStart accordingly.
+#
+# To install/update this service on the VPS:
+#   sudo cp deploy/systemd/squishybot.service /etc/systemd/system/
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable squishybot
+#   sudo systemctl restart squishybot
