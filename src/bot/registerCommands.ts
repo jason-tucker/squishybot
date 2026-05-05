@@ -1,22 +1,21 @@
 import { REST, Routes } from 'discord.js'
 import { env } from '../config/env'
-
-// Import command data here:
-// import { data as myCommandData } from '../commands/myCommand'
+import { data as squishyData } from '../commands/squishy'
+import { data as voiceData } from '../commands/voice'
 
 const commands = [
-  // myCommandData.toJSON(),
+  squishyData.toJSON(),
+  voiceData.toJSON(),
 ]
 
 const rest = new REST().setToken(env.DISCORD_BOT_TOKEN)
 
 async function deploy() {
-  // Guild deploy (instant) — replace with your guild ID or load from config
-  // await rest.put(Routes.applicationGuildCommands(env.DISCORD_CLIENT_ID, guildId), { body: commands })
-
-  // Global deploy (up to 1 hour propagation)
-  await rest.put(Routes.applicationCommands(env.DISCORD_CLIENT_ID), { body: commands })
-  console.log(`Deployed ${commands.length} command(s) globally.`)
+  await rest.put(
+    Routes.applicationGuildCommands(env.DISCORD_CLIENT_ID, env.GUILD_ID),
+    { body: commands }
+  )
+  console.log(`✅ Deployed ${commands.length} command(s) to guild ${env.GUILD_ID}.`)
 }
 
 deploy().catch((err) => {

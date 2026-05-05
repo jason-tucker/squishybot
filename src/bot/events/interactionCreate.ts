@@ -6,9 +6,13 @@ import {
   StringSelectMenuInteraction,
   ModalSubmitInteraction,
 } from 'discord.js'
+import { execute as squishyExecute } from '../../commands/squishy'
+import { execute as voiceExecute } from '../../commands/voice'
+import { isVcCustomId } from '../../utils/customId'
 
 const commandHandlers = new Map<string, (i: ChatInputCommandInteraction) => Promise<void>>([
-  // ['commandname', executeCommand],
+  ['squishy', squishyExecute],
+  ['voice', voiceExecute],
 ])
 
 export function registerInteractionCreate(client: Client) {
@@ -19,20 +23,26 @@ export function registerInteractionCreate(client: Client) {
         if (handler) await handler(interaction)
 
       } else if (interaction.isButton()) {
-        const id = interaction.customId
-        void id // add routing here: if (id.startsWith('prefix:')) ...
+        if (isVcCustomId(interaction.customId)) {
+          const { handleVoiceControlButton } = await import('../../interactions/buttons/voiceControl')
+          await handleVoiceControlButton(interaction as ButtonInteraction)
+        }
 
       } else if (interaction.isStringSelectMenu()) {
-        const id = interaction.customId
-        void id
+        if (isVcCustomId(interaction.customId)) {
+          const { handleVoiceControlSelect } = await import('../../interactions/selects/voiceControl')
+          await handleVoiceControlSelect(interaction as StringSelectMenuInteraction)
+        }
 
       } else if (interaction.isModalSubmit()) {
-        const id = interaction.customId
-        void id
+        if (isVcCustomId(interaction.customId)) {
+          const { handleVoiceRenameModal } = await import('../../interactions/modals/voiceRename')
+          await handleVoiceRenameModal(interaction as ModalSubmitInteraction)
+        }
       }
     } catch (err) {
       console.error('Interaction error:', err)
-      const reply = { content: 'An unexpected error occurred.', ephemeral: true }
+      const reply = { content: '❌ An unexpected error occurred.', ephemeral: true }
       if (interaction.isRepliable()) {
         if (interaction.deferred || interaction.replied) {
           await interaction.followUp(reply).catch(() => {})
