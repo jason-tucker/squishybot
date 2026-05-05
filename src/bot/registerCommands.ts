@@ -2,10 +2,16 @@ import { REST, Routes } from 'discord.js'
 import { env } from '../config/env'
 import { data as squishyData } from '../commands/squishy'
 import { data as voiceData } from '../commands/voice'
+import { data as helpData } from '../commands/help'
+import { data as sudoData } from '../commands/sudo'
+import { data as staffData } from '../commands/staff'
 
 const commands = [
+  helpData.toJSON(),
   squishyData.toJSON(),
   voiceData.toJSON(),
+  staffData.toJSON(),
+  sudoData.toJSON(),
 ]
 
 const rest = new REST().setToken(env.DISCORD_BOT_TOKEN)
