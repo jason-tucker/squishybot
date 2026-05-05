@@ -1,0 +1,45 @@
+services:
+  squishybot:
+    # CI sets BOT_IMAGE to ghcr.io/<owner>/squishybot:<sha>.
+    # Locally, omit BOT_IMAGE and use `docker compose up -d --build` to build from source.
+    image: ${BOT_IMAGE:-squishybot:latest}
+    build: .
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      # Overrides DATABASE_URL from .env so the bot always connects to the
+      # compose-managed postgres service, regardless of what's in .env.
+      DATABASE_URL: "postgresql://squishybot:${POSTGRES_PASSWORD:-squishybot_dev}@db:5432/squishybot"
+      NODE_ENV: production
+    depends_on:
+      db:
+        condition: service_healthy
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: squishybot
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-squishybot_dev}
+      POSTGRES_DB: squishybot
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U squishybot"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 15s
+    logging:
+      driver: json-file
+      options:
+        max-size: "5m"
+        max-file: "2"
+
+volumes:
+  postgres_data:

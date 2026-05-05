@@ -1,0 +1,29 @@
+# Never bake secrets into the image
+.env
+.env.*
+
+# Build artifacts (built inside Docker, not from host)
+dist
+*.tsbuildinfo
+
+# Dev dependencies not needed in image context
+node_modules
+
+# Runtime and local tooling
+logs
+*.log
+.DS_Store
+
+# VCS
+.git
+.github
+
+# Docs and scripts not needed in the image
+docs
+README.md
+CHANGELOG.md
+CLAUDE.md
+scripts/squishybot
+
+# drizzle studio config
+drizzle.config.ts
