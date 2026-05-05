@@ -157,4 +157,26 @@ export async function handleVoiceControlButton(interaction: ButtonInteraction): 
     await interaction.reply({ content: 'Choose a host to remove:', components: [row], ephemeral: true })
     return
   }
+
+  if (action === 'claim') {
+    const vc = await interaction.guild!.channels.fetch(record.voiceChannelId).catch(() => null)
+    if (!vc?.isVoiceBased()) {
+      await interaction.reply({ content: '❌ Voice channel not found.', ephemeral: true })
+      return
+    }
+    const ownerPresent = vc.members.has(record.ownerUserId)
+    if (ownerPresent && !isSudo(member)) {
+      await interaction.reply({ content: '❌ The owner is still in the channel. You can only claim when they\'ve left.', ephemeral: true })
+      return
+    }
+    if (!vc.members.has(member.id) && !isSudo(member)) {
+      await interaction.reply({ content: '❌ You need to be in the voice channel to claim it.', ephemeral: true })
+      return
+    }
+    await interaction.deferUpdate()
+    const newHosts = record.hostUserIds.filter(id => id !== member.id)
+    await db.update(autoChannels).set({ ownerUserId: member.id, hostUserIds: newHosts }).where(eq(autoChannels.voiceChannelId, voiceChannelId))
+    await postOrUpdateControlPanel(interaction.client, { ...record, ownerUserId: member.id, hostUserIds: newHosts })
+    return
+  }
 }

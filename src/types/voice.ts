@@ -12,3 +12,4 @@ export type VoiceAction =
   | 'unlock'
   | 'add_host'
   | 'remove_host'
+  | 'claim'

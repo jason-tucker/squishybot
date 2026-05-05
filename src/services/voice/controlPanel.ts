@@ -37,12 +37,13 @@ export async function postOrUpdateControlPanel(client: Client, record: AutoChann
   if (record.controlPanelMsgId) {
     const existing = await textChannel.messages.fetch(record.controlPanelMsgId).catch(() => null)
     if (existing) {
-      await existing.edit(payload as any).catch(err => logger.warn('Failed to edit control panel:', err))
+      // content: null clears any previous text content when editing
+      await existing.edit({ ...payload, content: null } as any).catch(err => logger.warn('Failed to edit control panel:', err))
       return
     }
   }
 
-  // Post a new panel message and persist the ID
+  // Post a new panel message — omit content entirely (null is invalid for channel.send)
   const msg = await textChannel.send(payload as any).catch(err => {
     logger.warn('Failed to post control panel:', err)
     return null

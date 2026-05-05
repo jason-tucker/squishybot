@@ -62,8 +62,13 @@ export function buildControlPanelPayload(record: AutoChannelRecord, ownerTag: st
 
   const row2 = new ActionRowBuilder<MessageActionRowComponentBuilder>().addComponents(
     new ButtonBuilder()
+      .setCustomId(encodeVcId(vcId, 'claim'))
+      .setLabel('Claim')
+      .setEmoji('👤')
+      .setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder()
       .setCustomId(encodeVcId(vcId, 'delete'))
-      .setLabel('Delete Channel')
+      .setLabel('Delete')
       .setEmoji('🗑️')
       .setStyle(ButtonStyle.Danger),
   )
@@ -71,6 +76,5 @@ export function buildControlPanelPayload(record: AutoChannelRecord, ownerTag: st
   return {
     flags: MessageFlags.IsComponentsV2 as number,
     components: [container, row1, row2],
-    content: null,
   }
 }

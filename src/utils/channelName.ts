@@ -1,8 +1,7 @@
-import type { GuildMember } from 'discord.js'
+import { ActivityType, type GuildMember } from 'discord.js'
 
 export function generateChannelName(member: GuildMember, existingNames: string[]): string {
-  const raw = `${member.displayName}'s Channel`
-  const base = sanitizeChannelName(raw)
+  const base = sanitizeChannelName(buildBaseName(member))
   if (!existingNames.includes(base)) return base
   for (let i = 2; i <= 99; i++) {
     const candidate = `${base} ${i}`
@@ -11,9 +10,25 @@ export function generateChannelName(member: GuildMember, existingNames: string[]
   return `${base} ${Date.now()}`
 }
 
+function buildBaseName(member: GuildMember): string {
+  const activities = member.presence?.activities ?? []
+
+  // Find a Playing activity (type 0) — skip Spotify/streaming/custom
+  const game = activities.find(a => a.type === ActivityType.Playing)
+
+  if (game) {
+    const partySize = game.party?.size
+    const gameName = game.name.slice(0, 50)
+    const party = partySize ? ` (${partySize[0]}/${partySize[1]})` : ''
+    return `${member.displayName}'s ${gameName}${party}`
+  }
+
+  return `${member.displayName}'s Channel`
+}
+
 export function sanitizeChannelName(name: string): string {
   return name
-    .replace(/[^\w\s'-]/g, '')
+    .replace(/[^\w\s'()/.-]/g, '')
     .replace(/\s+/g, ' ')
     .trim()
     .slice(0, 100) || 'Voice Channel'
