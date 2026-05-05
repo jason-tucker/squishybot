@@ -8,7 +8,7 @@ import {
   UserContextMenuCommandInteraction,
 } from 'discord.js'
 import { execute as voiceExecute } from '../../commands/voice'
-import { execute as staffExecute } from '../../commands/staff'
+import { execute as squishyExecute } from '../../commands/squishy'
 import { execute as sudoExecute } from '../../commands/sudo'
 import { execute as manageUserExecute } from '../../commands/manageUser'
 import { isVcCustomId } from '../../utils/customId'
@@ -16,7 +16,7 @@ import { recordActivity } from '../../services/presence'
 
 const commandHandlers = new Map<string, (i: ChatInputCommandInteraction) => Promise<void>>([
   ['voice', voiceExecute],
-  ['staff', staffExecute],
+  ['squishy', squishyExecute],
   ['sudo', sudoExecute],
 ])
 
@@ -39,6 +39,9 @@ export function registerInteractionCreate(client: Client) {
         if (isVcCustomId(id)) {
           const { handleVoiceControlButton } = await import('../../interactions/buttons/voiceControl')
           await handleVoiceControlButton(interaction as ButtonInteraction)
+        } else if (id === 'open_staff_request') {
+          const { showStaffRequestModal } = await import('../../commands/staff')
+          await showStaffRequestModal(interaction as ButtonInteraction)
         } else if (id.startsWith('staff:')) {
           const { handleStaffApprovalButton } = await import('../../interactions/buttons/staffApproval')
           await handleStaffApprovalButton(interaction as ButtonInteraction)

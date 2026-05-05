@@ -15,11 +15,8 @@ export const data = new SlashCommandBuilder()
     s.setName('request').setDescription('Request to join the server staff team')
   )
 
-export async function execute(interaction: ChatInputCommandInteraction): Promise<void> {
-  const sub = interaction.options.getSubcommand()
-
-  if (sub === 'request') {
-    const modal = new ModalBuilder()
+function buildStaffModal(): ModalBuilder {
+  return new ModalBuilder()
       .setCustomId('staff:request')
       .setTitle('Staff Request')
       .addComponents(
@@ -65,6 +62,12 @@ export async function execute(interaction: ChatInputCommandInteraction): Promise
             .setMaxLength(1000)
         )
       )
-    await interaction.showModal(modal)
-  }
+}
+
+export async function showStaffRequestModal(interaction: ChatInputCommandInteraction | import('discord.js').ButtonInteraction): Promise<void> {
+  await interaction.showModal(buildStaffModal())
+}
+
+export async function execute(interaction: ChatInputCommandInteraction): Promise<void> {
+  await showStaffRequestModal(interaction)
 }

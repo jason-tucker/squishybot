@@ -53,12 +53,12 @@ export async function execute(interaction: ChatInputCommandInteraction): Promise
       .setCustomId('sudo:action')
       .setPlaceholder('Choose an action...')
       .addOptions([
-        { label: 'List active voice channels', value: 'channels', emoji: '🔊' },
-        { label: 'List hub channels', value: 'hubs', emoji: '🪐' },
-        { label: 'Force cleanup empty/orphaned channels', value: 'cleanup', emoji: '🧹' },
-        { label: 'View pending approvals', value: 'approvals', emoji: '📥' },
+        { label: 'Active voice channels', value: 'channels', emoji: '🔊' },
+        { label: 'Hub channels', value: 'hubs', emoji: '🪐' },
+        { label: 'Force cleanup', value: 'cleanup', emoji: '🧹' },
+        { label: 'Pending approvals', value: 'approvals', emoji: '📥' },
         { label: 'Run reconciler', value: 'repair', emoji: '🔧' },
-        { label: 'Terminal restart instructions', value: 'restart', emoji: '🔁' },
+        { label: 'Restart instructions', value: 'restart', emoji: '🔁' },
       ])
   )
 

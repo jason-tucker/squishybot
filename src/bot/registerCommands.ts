@@ -1,15 +1,15 @@
 import { REST, Routes } from 'discord.js'
 import { env } from '../config/env'
 import { data as voiceData } from '../commands/voice'
-import { data as staffData } from '../commands/staff'
+import { data as squishyData } from '../commands/squishy'
 import { data as sudoData } from '../commands/sudo'
 import { data as manageUserData } from '../commands/manageUser'
 
 const commands = [
-  voiceData.toJSON(),
-  staffData.toJSON(),
-  sudoData.toJSON(),
-  manageUserData.toJSON(),
+  voiceData.toJSON(),    // /voice  — voice channel control panel
+  squishyData.toJSON(),  // /squishy — user menu (bot info + staff request)
+  sudoData.toJSON(),     // /sudo   — admin panel (sudo only)
+  manageUserData.toJSON(), // right-click → Manage User (context menu, sudo only)
 ]
 
 const rest = new REST().setToken(env.DISCORD_BOT_TOKEN)
