@@ -29,7 +29,7 @@ const envSchema = z.object({
   HUB_CHANNEL_IDS: commaSeparated.pipe(
     z.array(z.string()).min(1, 'At least one HUB_CHANNEL_IDS is required')
   ),
-  VOICE_CLEANUP_DELAY_MS: z.coerce.number().int().positive().default(30000),
+  VOICE_CLEANUP_DELAY_MS: z.coerce.number().int().min(0).default(0),
 
   // Optional channel IDs — empty string treated as unset
   LOG_CHANNEL_ID: z.string().min(1).optional().or(z.literal('').transform(() => undefined)),

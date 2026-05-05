@@ -11,6 +11,14 @@ export function scheduleCleanup(client: Client, voiceChannelId: string): void {
   if (pendingTimers.has(voiceChannelId)) return
 
   const delay = env.VOICE_CLEANUP_DELAY_MS
+
+  if (delay === 0) {
+    // Instant — run on next tick, still allows a reconnect within the same event loop cycle
+    db.update(autoChannels).set({ scheduledCleanupAt: new Date() }).where(eq(autoChannels.voiceChannelId, voiceChannelId)).catch(() => {})
+    setImmediate(() => runCleanup(client, voiceChannelId))
+    return
+  }
+
   const scheduledAt = new Date(Date.now() + delay)
 
   db.update(autoChannels)

@@ -8,6 +8,7 @@ import { scheduleCleanup, restoreScheduledCleanups } from './cleanupScheduler'
 import { postOrUpdateControlPanel } from './controlPanel'
 import { syncTextChannelPermissions } from './permissions'
 import { seedHubsFromEnv } from './hubManager'
+import { createAutoChannel } from './autoChannel'
 import { logger } from '../logger'
 
 export interface ReconcilerResult {
@@ -15,22 +16,27 @@ export interface ReconcilerResult {
   cleaned: number
   hubs: number
   panels: number
+  adopted: number
 }
 
 export async function runReconciler(client: Client): Promise<ReconcilerResult> {
+  // Fetch guild via API rather than cache — ensures it's available even on first boot
   const guild = client.guilds.cache.get(env.GUILD_ID)
+    ?? await client.guilds.fetch(env.GUILD_ID).catch(() => null)
+
   if (!guild) {
     logger.error('Reconciler: guild not found')
-    return { recovered: 0, cleaned: 0, hubs: 0, panels: 0 }
+    return { recovered: 0, cleaned: 0, hubs: 0, panels: 0, adopted: 0 }
   }
 
-  const result: ReconcilerResult = { recovered: 0, cleaned: 0, hubs: 0, panels: 0 }
+  const result: ReconcilerResult = { recovered: 0, cleaned: 0, hubs: 0, panels: 0, adopted: 0 }
 
   // Ensure hubs from env are registered
   await seedHubsFromEnv(guild)
 
-  // --- Reconcile auto channels ---
+  // --- Reconcile known auto channels from DB ---
   const records = await db.select().from(autoChannels).where(eq(autoChannels.guildId, guild.id))
+  const trackedVoiceIds = new Set(records.map(r => r.voiceChannelId))
 
   for (const record of records) {
     const vc = await guild.channels.fetch(record.voiceChannelId).catch(() => null)
@@ -46,12 +52,12 @@ export async function runReconciler(client: Client): Promise<ReconcilerResult> {
 
     result.recovered++
 
-    // Restore cleanup timers
+    // Schedule cleanup if empty
     if (vc.isVoiceBased() && vc.members.size === 0) {
       scheduleCleanup(client, record.voiceChannelId)
     }
 
-    // Sync text channel permissions
+    // Sync text channel permissions for current members
     const tc = await guild.channels.fetch(record.textChannelId).catch(() => null)
     if (tc?.isTextBased() && vc.isVoiceBased()) {
       await syncTextChannelPermissions(tc as any, vc as any, record, client.user!.id).catch(() => {})
@@ -71,16 +77,36 @@ export async function runReconciler(client: Client): Promise<ReconcilerResult> {
     }
   }
 
+  // --- Scan category for occupied channels not in the DB ---
+  // Handles the case where the bot was offline when a user joined a hub.
+  // The hub gets renamed but no DB record was created. On startup we adopt it.
+  const hubs = await db.select().from(hubChannels).where(eq(hubChannels.guildId, guild.id))
+  const hubIds = new Set(hubs.map(h => h.channelId))
+
+  const category = await guild.channels.fetch(env.AUTO_VOICE_CATEGORY_ID).catch(() => null)
+  if (category?.type === ChannelType.GuildCategory) {
+    for (const [, channel] of (category as any).children.cache) {
+      if (channel.type !== ChannelType.GuildVoice) continue
+      if (hubIds.has(channel.id)) continue          // skip hubs
+      if (trackedVoiceIds.has(channel.id)) continue // already tracked
+      if (channel.members.size === 0) continue      // empty — skip, cleanup will handle
+
+      // Untracked occupied voice channel — adopt it as an auto channel
+      const owner = channel.members.first()!
+      logger.info(`Reconciler: adopting untracked vc=${channel.id} (${channel.name}), owner=${owner.displayName}`)
+
+      const record = await createAutoChannel(client, guild, owner, channel, 'recovered', channel.name)
+      if (record) result.adopted++
+    }
+  }
+
   // Restore in-progress cleanup timers from DB
   await restoreScheduledCleanups(client)
 
   // --- Reconcile hubs ---
-  const hubs = await db.select().from(hubChannels).where(eq(hubChannels.guildId, guild.id))
-
   for (const hub of hubs) {
     const vc = await guild.channels.fetch(hub.channelId).catch(() => null)
     if (!vc) {
-      // Hub gone — recreate it
       try {
         const newHub = await guild.channels.create({
           name: hub.label,
@@ -99,6 +125,6 @@ export async function runReconciler(client: Client): Promise<ReconcilerResult> {
     }
   }
 
-  logger.info(`Reconciler complete: recovered=${result.recovered} cleaned=${result.cleaned} hubs=${result.hubs} panels=${result.panels}`)
+  logger.info(`Reconciler: recovered=${result.recovered} cleaned=${result.cleaned} hubs=${result.hubs} panels=${result.panels} adopted=${result.adopted}`)
   return result
 }
