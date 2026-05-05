@@ -67,7 +67,7 @@ jobs:
       # ── 6. Deploy slash commands (from built image on runner) ─────────────────
       - name: Deploy slash commands
         run: |
-          docker run --rm \
+          docker run --rm --entrypoint="" \
             -e DISCORD_BOT_TOKEN="${{ secrets.DISCORD_BOT_TOKEN }}" \
             -e DISCORD_CLIENT_ID="${{ secrets.DISCORD_CLIENT_ID }}" \
             -e GUILD_ID="${{ secrets.GUILD_ID }}" \
