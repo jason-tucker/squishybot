@@ -126,6 +126,21 @@ export async function runReconciler(client: Client): Promise<ReconcilerResult> {
   for (const hub of hubs) {
     const vc = await guild.channels.fetch(hub.channelId).catch(() => null)
     if (!vc) {
+      // Don't recreate if a channel with the same label already exists in the
+      // category — that means this hub row is stale/corrupt and recreating
+      // would just spawn a duplicate next to a user's existing channel.
+      const cat = await guild.channels.fetch(hub.categoryId).catch(() => null)
+      const existing = cat?.type === ChannelType.GuildCategory
+        ? (cat as any).children.cache.find((c: any) =>
+            c.type === ChannelType.GuildVoice && c.name === hub.label)
+        : null
+
+      if (existing) {
+        logger.warn(`Reconciler: hub ${hub.id} stale; channel "${hub.label}" already exists as ${existing.id} — removing hub row`)
+        await db.delete(hubChannels).where(eq(hubChannels.id, hub.id)).catch(() => {})
+        continue
+      }
+
       try {
         const newHub = await guild.channels.create({
           name: hub.label,

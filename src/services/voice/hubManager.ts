@@ -24,6 +24,16 @@ export async function seedHubsFromEnv(guild: Guild): Promise<void> {
       continue
     }
 
+    // If this channel is currently an auto channel (renamed from a hub), don't
+    // re-register it as a hub. This prevents corruption where the env still has
+    // the original hub ID but the actual hub has been replaced and the original
+    // channel is now a user's room.
+    const [auto] = await db.select().from(autoChannels).where(eq(autoChannels.voiceChannelId, channelId))
+    if (auto) {
+      logger.warn(`HUB_CHANNEL_IDS contains ${channelId} but it's an active auto channel — skipping. Update HUB_CHANNEL_IDS to the current hub.`)
+      continue
+    }
+
     await db.insert(hubChannels).values({
       guildId: guild.id,
       channelId: vc.id,
