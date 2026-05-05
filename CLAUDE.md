@@ -30,14 +30,40 @@ creation.
 
 | Command | Description | Permission |
 |---|---|---|
+| `/help` | List available commands; sudo section appears only for sudo | Everyone |
 | `/squishy status` | Bot status: uptime, active channels, hub count | Everyone |
-| `/squishy repair` | Manually run the reconciler | Sudo only |
-| `/voice panel` | Re-post or open control panel (works from any channel if in a voice channel) | Owner/Host/Sudo |
-| `/voice claim` | Claim ownership of an auto channel whose owner left | Anyone in the channel |
+| `/squishy repair` | Manually run the reconciler | Sudo |
+| `/voice panel` | Re-post or open control panel | Owner/Host/Sudo |
+| `/voice claim` | Claim ownership of an auto channel whose owner left | Voice members |
 | `/voice delete` | Delete your auto channel | Owner/Host/Sudo |
+| `/staff request` | Submit a staff role request | Everyone |
+| `/sudo channels` | List active auto channels | Sudo |
+| `/sudo hubs` | List managed hub channels | Sudo |
+| `/sudo cleanup` | Force cleanup of empty/orphaned channels | Sudo |
+| `/sudo approvals` | List pending staff approvals | Sudo |
+| `/sudo restart` | Show terminal restart instructions | Sudo |
 
 The control panel in the auto text channel is the primary interface — `/voice` commands are
 fallback escape hatches.
+
+## Terminal management
+
+`scripts/squishybot` is the management CLI. Install once with
+`sudo cp scripts/squishybot /usr/local/bin/squishybot && sudo chmod +x /usr/local/bin/squishybot`,
+then use:
+
+| Command | Action |
+|---|---|
+| `squishybot install` | First-time setup: systemd unit, migrations, deploy commands, start |
+| `squishybot start` / `stop` / `restart` | Service control (restart runs migrations first) |
+| `squishybot status` | systemctl status |
+| `squishybot logs` | Tail live logs |
+| `squishybot tail [N]` | Last N log lines (default 30) |
+| `squishybot deploy` | Redeploy slash commands |
+| `squishybot migrate` | Run DB migrations |
+| `squishybot update` | git pull + migrate + redeploy + restart |
+
+Weekly auto-restart at Tuesday 4 AM via `squishybot-restart.timer`.
 
 ---
 
@@ -57,9 +83,10 @@ fallback escape hatches.
 | `VOICE_CLEANUP_DELAY_MS` | No | ms before empty channel cleanup (default: 30000) |
 | `LOG_CHANNEL_ID` | No | Bot posts structured log messages here |
 | `ADMIN_CHANNEL_ID` | No | Sudo-only bot admin channel |
-| `STAFF_APPROVAL_CHANNEL_ID` | No | Future: staff approval queue channel |
+| `STAFF_APPROVAL_THREAD_ID` | No | Thread where `/staff request` posts go |
+| `STAFF_APPROVAL_PING_USER_ID` | No | User pinged on each staff request |
 | `BIRTHDAY_CHANNEL_ID` | No | Future: birthday ping channel |
-| `BLIPS_CHANNEL_ID` | No | Future: auto-thread channel |
+| `CLIPS_CHANNEL_ID` | No | Future: auto-thread on clips channel |
 | `FOOD_CHANNEL_ID` | No | Future: auto-thread channel |
 | `UPTIME_KUMA_PUSH_URL` | No | Push monitor URL |
 

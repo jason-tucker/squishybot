@@ -9,6 +9,28 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [0.4.0] — 2026-05-04
+
+### Added
+- `/help` command — Components V2 list of available commands; sudo section only shown to sudo users
+- `/sudo` command suite — `channels`, `hubs`, `cleanup`, `approvals`, `restart`
+- `/staff request` command — opens modal for category, department, tier, real name, reason
+- Staff approval workflow: posts to `STAFF_APPROVAL_THREAD_ID` thread, pings
+  `STAFF_APPROVAL_PING_USER_ID`, sudo Approve/Deny buttons edit message in place,
+  requester gets DM with result
+- Management CLI `scripts/squishybot` mirroring otterbot pattern (start/stop/restart/status/logs/tail/update/install/deploy/migrate)
+- systemd units in `deploy/systemd/`: main service + Tuesday 4 AM weekly restart timer
+- Weekly auto-restart timer
+
+### Changed
+- Renamed `BLIPS_CHANNEL_ID` → `CLIPS_CHANNEL_ID`
+- Replaced `STAFF_APPROVAL_CHANNEL_ID` with `STAFF_APPROVAL_THREAD_ID` + `STAFF_APPROVAL_PING_USER_ID`
+
+### Fixed
+- Zod v4 `.default('')` on transform output — moved default into `commaSeparated` helper
+
+---
+
 ## [0.3.0] — 2026-05-04
 
 ### Added
