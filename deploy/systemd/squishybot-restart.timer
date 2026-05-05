@@ -1,0 +1,9 @@
+[Unit]
+Description=Restart SquishyBot every Tuesday at 4AM
+
+[Timer]
+OnCalendar=Tue *-*-* 04:00:00
+Persistent=true
+
+[Install]
+WantedBy=timers.target

@@ -1,0 +1,18 @@
+[Unit]
+Description=SquishyBot Discord Bot
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=botuser
+WorkingDirectory=/home/botuser/projects/squishybot
+ExecStart=/home/botuser/projects/squishybot/node_modules/.bin/tsx src/index.ts
+Restart=on-failure
+RestartSec=10
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=squishybot
+
+[Install]
+WantedBy=multi-user.target

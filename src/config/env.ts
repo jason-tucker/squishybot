@@ -3,6 +3,7 @@ import 'dotenv/config'
 
 const commaSeparated = z
   .string()
+  .default('')
   .transform(s => s.split(',').map(x => x.trim()).filter(Boolean))
 
 const envSchema = z.object({
@@ -17,8 +18,8 @@ const envSchema = z.object({
   GUILD_ID: z.string().min(1, 'GUILD_ID is required'),
 
   // Sudo permissions
-  SUDO_ROLE_IDS: commaSeparated.default(''),
-  SUDO_USER_IDS: commaSeparated.default(''),
+  SUDO_ROLE_IDS: commaSeparated,
+  SUDO_USER_IDS: commaSeparated,
 
   // Voice channels
   AUTO_VOICE_CATEGORY_ID: z.string().min(1, 'AUTO_VOICE_CATEGORY_ID is required'),
@@ -31,10 +32,13 @@ const envSchema = z.object({
   LOG_CHANNEL_ID: z.string().min(1).optional().or(z.literal('').transform(() => undefined)),
   ADMIN_CHANNEL_ID: z.string().min(1).optional().or(z.literal('').transform(() => undefined)),
 
+  // Staff approvals — posts go in a thread inside the admin channel and ping a designated reviewer
+  STAFF_APPROVAL_THREAD_ID: z.string().min(1).optional().or(z.literal('').transform(() => undefined)),
+  STAFF_APPROVAL_PING_USER_ID: z.string().min(1).optional().or(z.literal('').transform(() => undefined)),
+
   // Future features — optional now, required when those phases are built
-  STAFF_APPROVAL_CHANNEL_ID: z.string().min(1).optional().or(z.literal('').transform(() => undefined)),
   BIRTHDAY_CHANNEL_ID: z.string().min(1).optional().or(z.literal('').transform(() => undefined)),
-  BLIPS_CHANNEL_ID: z.string().min(1).optional().or(z.literal('').transform(() => undefined)),
+  CLIPS_CHANNEL_ID: z.string().min(1).optional().or(z.literal('').transform(() => undefined)),
   FOOD_CHANNEL_ID: z.string().min(1).optional().or(z.literal('').transform(() => undefined)),
 })
 

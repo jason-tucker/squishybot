@@ -1,0 +1,6 @@
+[Unit]
+Description=Weekly SquishyBot restart
+
+[Service]
+Type=oneshot
+ExecStart=/bin/systemctl restart squishybot.service

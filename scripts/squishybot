@@ -1,0 +1,117 @@
+#!/bin/bash
+# squishybot — management CLI for the SquishyBot Discord bot
+# Install: sudo cp scripts/squishybot /usr/local/bin/squishybot && sudo chmod +x /usr/local/bin/squishybot
+
+BOTDIR="/home/botuser/projects/squishybot"
+SERVICE="squishybot"
+
+_installed() {
+  systemctl list-unit-files "${SERVICE}.service" &>/dev/null && \
+    systemctl list-unit-files "${SERVICE}.service" | grep -q "${SERVICE}"
+}
+
+_install_service() {
+  echo "Installing systemd service..."
+  sudo cp "${BOTDIR}/deploy/systemd/squishybot.service" /etc/systemd/system/
+  sudo cp "${BOTDIR}/deploy/systemd/squishybot-restart.service" /etc/systemd/system/
+  sudo cp "${BOTDIR}/deploy/systemd/squishybot-restart.timer" /etc/systemd/system/
+  sudo systemctl daemon-reload
+  sudo systemctl enable "${SERVICE}.service"
+  sudo systemctl enable squishybot-restart.timer
+  sudo systemctl start squishybot-restart.timer
+  echo "Service installed and weekly restart timer enabled."
+}
+
+cmd="${1:-status}"
+
+case "$cmd" in
+
+  start)
+    cd "$BOTDIR"
+    echo "→ Checking for database migrations..."
+    pnpm db:migrate --silent 2>/dev/null || pnpm db:migrate
+    if ! _installed; then
+      _install_service
+    fi
+    sudo systemctl start "$SERVICE"
+    echo "✓ SquishyBot started."
+    sudo systemctl status "$SERVICE" --no-pager -l | tail -5
+    ;;
+
+  stop)
+    sudo systemctl stop "$SERVICE"
+    echo "✓ SquishyBot stopped."
+    ;;
+
+  restart)
+    cd "$BOTDIR"
+    echo "→ Checking for database migrations..."
+    pnpm db:migrate --silent 2>/dev/null || pnpm db:migrate
+    sudo systemctl restart "$SERVICE"
+    echo "✓ SquishyBot restarted."
+    ;;
+
+  status)
+    sudo systemctl status "$SERVICE" --no-pager -l
+    ;;
+
+  logs)
+    sudo journalctl -u "$SERVICE" -f --no-pager
+    ;;
+
+  tail)
+    sudo journalctl -u "$SERVICE" -n "${2:-30}" --no-pager
+    ;;
+
+  update)
+    cd "$BOTDIR"
+    echo "→ Pulling latest code..."
+    git pull
+    echo "→ Installing dependencies..."
+    pnpm install
+    echo "→ Running migrations..."
+    pnpm db:migrate
+    echo "→ Redeploying commands..."
+    pnpm commands:deploy
+    sudo systemctl restart "$SERVICE"
+    echo "✓ SquishyBot updated and restarted."
+    ;;
+
+  install)
+    cd "$BOTDIR"
+    _install_service
+    echo "→ Running initial setup..."
+    pnpm install
+    pnpm db:migrate
+    pnpm commands:deploy
+    sudo systemctl start "$SERVICE"
+    echo "✓ SquishyBot installed and running."
+    ;;
+
+  deploy)
+    cd "$BOTDIR"
+    echo "→ Deploying slash commands to guild..."
+    pnpm commands:deploy
+    echo "✓ Commands deployed."
+    ;;
+
+  migrate)
+    cd "$BOTDIR"
+    pnpm db:migrate
+    ;;
+
+  *)
+    echo "Usage: squishybot [start|stop|restart|status|logs|tail|update|install|deploy|migrate]"
+    echo ""
+    echo "  start    — start the bot (auto-installs service if needed)"
+    echo "  stop     — stop the bot"
+    echo "  restart  — restart the bot (runs migrations first)"
+    echo "  status   — show service status"
+    echo "  logs     — tail live logs (Ctrl+C to exit)"
+    echo "  tail [N] — show last N lines (default 30)"
+    echo "  update   — pull code, migrate DB, redeploy commands, restart"
+    echo "  install  — first-time full setup"
+    echo "  deploy   — redeploy slash commands to guild"
+    echo "  migrate  — run database migrations"
+    ;;
+esac
