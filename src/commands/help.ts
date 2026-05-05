@@ -3,11 +3,10 @@ import {
   ChatInputCommandInteraction,
   ContainerBuilder,
   TextDisplayBuilder,
-  SeparatorBuilder,
-  SeparatorSpacingSize,
   MessageFlags,
 } from 'discord.js'
 import { isSudo } from '../services/voice/permissions'
+import { sep } from '../utils/cv2'
 
 export const data = new SlashCommandBuilder()
   .setName('help')
@@ -48,24 +47,18 @@ export async function execute(interaction: ChatInputCommandInteraction): Promise
     .addTextDisplayComponents(
       new TextDisplayBuilder().setContent('## 🤖 SquishyBot Commands')
     )
-    .addSeparatorComponents(
-      new SeparatorBuilder().setSpacing(SeparatorSpacingSize.Small).setDivider(true)
-    )
+    .addSeparatorComponents(sep())
     .addTextDisplayComponents(
       new TextDisplayBuilder().setContent(everyoneSection)
     )
-    .addSeparatorComponents(
-      new SeparatorBuilder().setSpacing(SeparatorSpacingSize.Small).setDivider(true)
-    )
+    .addSeparatorComponents(sep())
     .addTextDisplayComponents(
       new TextDisplayBuilder().setContent(voiceSection)
     )
 
   if (sudo) {
     container
-      .addSeparatorComponents(
-        new SeparatorBuilder().setSpacing(SeparatorSpacingSize.Small).setDivider(true)
-      )
+      .addSeparatorComponents(sep())
       .addTextDisplayComponents(
         new TextDisplayBuilder().setContent(sudoSection)
       )

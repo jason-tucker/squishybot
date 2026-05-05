@@ -3,8 +3,6 @@ import {
   ChatInputCommandInteraction,
   ContainerBuilder,
   TextDisplayBuilder,
-  SeparatorBuilder,
-  SeparatorSpacingSize,
   ActionRowBuilder,
   StringSelectMenuBuilder,
   MessageFlags,
@@ -14,6 +12,7 @@ import { autoChannels, hubChannels, staffApprovals } from '../db/schema'
 import { and, eq } from 'drizzle-orm'
 import { isSudo } from '../services/voice/permissions'
 import { env } from '../config/env'
+import { sep } from '../utils/cv2'
 
 export const data = new SlashCommandBuilder()
   .setName('sudo')
@@ -45,7 +44,7 @@ export async function execute(interaction: ChatInputCommandInteraction): Promise
   const container = new ContainerBuilder()
     .setAccentColor(0x5865f2)
     .addTextDisplayComponents(new TextDisplayBuilder().setContent('## 🛡️ Sudo Panel'))
-    .addSeparatorComponents(new SeparatorBuilder().setSpacing(SeparatorSpacingSize.Small).setDivider(true))
+    .addSeparatorComponents(sep())
     .addTextDisplayComponents(new TextDisplayBuilder().setContent(lines.join('\n')))
 
   const menu = new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(

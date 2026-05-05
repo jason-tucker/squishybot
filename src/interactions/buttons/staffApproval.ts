@@ -2,8 +2,6 @@ import {
   type ButtonInteraction,
   ContainerBuilder,
   TextDisplayBuilder,
-  SeparatorBuilder,
-  SeparatorSpacingSize,
   MessageFlags,
 } from 'discord.js'
 import { db } from '../../db/client'
@@ -11,6 +9,7 @@ import { staffApprovals } from '../../db/schema'
 import { eq } from 'drizzle-orm'
 import { isSudo } from '../../services/voice/permissions'
 import { logger } from '../../services/logger'
+import { sep } from '../../utils/cv2'
 
 export async function handleStaffApprovalButton(interaction: ButtonInteraction): Promise<void> {
   // customId format: staff:approve:{id} or staff:deny:{id}
@@ -57,9 +56,7 @@ export async function handleStaffApprovalButton(interaction: ButtonInteraction):
     .addTextDisplayComponents(
       new TextDisplayBuilder().setContent(`## ${heading}\nRequester: <@${row.userId}>\nReviewed by: <@${member.id}>`)
     )
-    .addSeparatorComponents(
-      new SeparatorBuilder().setSpacing(SeparatorSpacingSize.Small).setDivider(true)
-    )
+    .addSeparatorComponents(sep())
     .addTextDisplayComponents(
       new TextDisplayBuilder().setContent(fields || '_No details provided._')
     )

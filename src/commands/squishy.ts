@@ -4,8 +4,6 @@ import {
   StringSelectMenuInteraction,
   ContainerBuilder,
   TextDisplayBuilder,
-  SeparatorBuilder,
-  SeparatorSpacingSize,
   ActionRowBuilder,
   ButtonBuilder,
   ButtonStyle,
@@ -17,15 +15,12 @@ import { autoChannels, hubChannels } from '../db/schema'
 import { eq } from 'drizzle-orm'
 import { isSudo } from '../services/voice/permissions'
 import { env } from '../config/env'
+import { sep } from '../utils/cv2'
 
 export const data = new SlashCommandBuilder()
   .setName('squishy')
   .setDescription('SquishyBot help and user menu')
   .setDMPermission(false)
-
-function sep() {
-  return new SeparatorBuilder().setSpacing(SeparatorSpacingSize.Small).setDivider(true)
-}
 
 export async function execute(interaction: ChatInputCommandInteraction): Promise<void> {
   await interaction.deferReply({ ephemeral: true })

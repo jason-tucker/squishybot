@@ -2,8 +2,6 @@ import {
   type ButtonInteraction,
   ContainerBuilder,
   TextDisplayBuilder,
-  SeparatorBuilder,
-  SeparatorSpacingSize,
   MessageFlags,
 } from 'discord.js'
 import { db } from '../../db/client'
@@ -11,6 +9,7 @@ import { autoChannels, staffApprovals } from '../../db/schema'
 import { eq } from 'drizzle-orm'
 import { isSudo } from '../../services/voice/permissions'
 import { postOrUpdateControlPanel } from '../../services/voice/controlPanel'
+import { sep } from '../../utils/cv2'
 
 export async function handleSudoUserButton(interaction: ButtonInteraction): Promise<void> {
   const parts = interaction.customId.split(':')
@@ -70,7 +69,7 @@ export async function handleSudoUserButton(interaction: ButtonInteraction): Prom
     const container = new ContainerBuilder()
       .setAccentColor(0x5865f2)
       .addTextDisplayComponents(new TextDisplayBuilder().setContent(`## 📋 Staff Record — <@${targetId}>`))
-      .addSeparatorComponents(new SeparatorBuilder().setSpacing(SeparatorSpacingSize.Small).setDivider(true))
+      .addSeparatorComponents(sep())
       .addTextDisplayComponents(new TextDisplayBuilder().setContent(body))
 
     await interaction.editReply({

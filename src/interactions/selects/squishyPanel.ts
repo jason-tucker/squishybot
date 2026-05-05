@@ -2,18 +2,13 @@ import {
   type StringSelectMenuInteraction,
   ContainerBuilder,
   TextDisplayBuilder,
-  SeparatorBuilder,
-  SeparatorSpacingSize,
   ActionRowBuilder,
   ButtonBuilder,
   ButtonStyle,
   MessageFlags,
 } from 'discord.js'
 import { isSudo } from '../../services/voice/permissions'
-
-function sep() {
-  return new SeparatorBuilder().setSpacing(SeparatorSpacingSize.Small).setDivider(true)
-}
+import { sep } from '../../utils/cv2'
 
 export async function handleSquishyPanelSelect(interaction: StringSelectMenuInteraction): Promise<void> {
   const member = await interaction.guild!.members.fetch(interaction.user.id)

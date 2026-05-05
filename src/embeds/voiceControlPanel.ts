@@ -1,8 +1,6 @@
 import {
   ContainerBuilder,
   TextDisplayBuilder,
-  SeparatorBuilder,
-  SeparatorSpacingSize,
   ActionRowBuilder,
   ButtonBuilder,
   ButtonStyle,
@@ -11,6 +9,7 @@ import {
 } from 'discord.js'
 import type { AutoChannelRecord } from '../types/voice'
 import { encodeVcId } from '../utils/customId'
+import { sep } from '../utils/cv2'
 
 export function buildControlPanelPayload(record: AutoChannelRecord, ownerTag: string, hostTags: string[]) {
   const statusLine = record.isLocked ? '🔒 Locked' : '🔓 Unlocked'
@@ -25,9 +24,7 @@ export function buildControlPanelPayload(record: AutoChannelRecord, ownerTag: st
         `## 🔊 ${nameLine}\n**Owner:** <@${record.ownerUserId}>  •  ${statusLine}  •  ${templateLabel}\n${hostsLine}`
       )
     )
-    .addSeparatorComponents(
-      new SeparatorBuilder().setSpacing(SeparatorSpacingSize.Small).setDivider(true)
-    )
+    .addSeparatorComponents(sep())
     .addTextDisplayComponents(
       new TextDisplayBuilder().setContent(
         '_Use the buttons below to manage this voice channel.\nOnly the owner, hosts, and admins can make changes._'

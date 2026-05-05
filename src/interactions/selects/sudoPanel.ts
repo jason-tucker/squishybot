@@ -2,8 +2,6 @@ import {
   type StringSelectMenuInteraction,
   ContainerBuilder,
   TextDisplayBuilder,
-  SeparatorBuilder,
-  SeparatorSpacingSize,
   MessageFlags,
 } from 'discord.js'
 import { db } from '../../db/client'
@@ -11,6 +9,7 @@ import { autoChannels, hubChannels, staffApprovals } from '../../db/schema'
 import { and, eq } from 'drizzle-orm'
 import { isSudo } from '../../services/voice/permissions'
 import { env } from '../../config/env'
+import { sep } from '../../utils/cv2'
 
 export async function handleSudoPanelSelect(interaction: StringSelectMenuInteraction): Promise<void> {
   const member = await interaction.guild!.members.fetch(interaction.user.id)
@@ -103,7 +102,7 @@ async function sendPanel(
   const container = new ContainerBuilder()
     .setAccentColor(color)
     .addTextDisplayComponents(new TextDisplayBuilder().setContent(`## ${title}`))
-    .addSeparatorComponents(new SeparatorBuilder().setSpacing(SeparatorSpacingSize.Small).setDivider(true))
+    .addSeparatorComponents(sep())
     .addTextDisplayComponents(new TextDisplayBuilder().setContent(body.slice(0, 3500)))
 
   await interaction.editReply({

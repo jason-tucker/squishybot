@@ -2,8 +2,6 @@ import {
   type ModalSubmitInteraction,
   ContainerBuilder,
   TextDisplayBuilder,
-  SeparatorBuilder,
-  SeparatorSpacingSize,
   ActionRowBuilder,
   ButtonBuilder,
   ButtonStyle,
@@ -15,6 +13,7 @@ import { staffApprovals } from '../../db/schema'
 import { eq } from 'drizzle-orm'
 import { env } from '../../config/env'
 import { logger } from '../../services/logger'
+import { sep } from '../../utils/cv2'
 
 export async function handleStaffRequestModal(interaction: ModalSubmitInteraction): Promise<void> {
   if (interaction.customId !== 'staff:request') return
@@ -54,9 +53,7 @@ export async function handleStaffRequestModal(interaction: ModalSubmitInteractio
     .addTextDisplayComponents(
       new TextDisplayBuilder().setContent(`## 📥 Staff Request from <@${interaction.user.id}>`)
     )
-    .addSeparatorComponents(
-      new SeparatorBuilder().setSpacing(SeparatorSpacingSize.Small).setDivider(true)
-    )
+    .addSeparatorComponents(sep())
     .addTextDisplayComponents(
       new TextDisplayBuilder().setContent(fields || '_No details provided._')
     )

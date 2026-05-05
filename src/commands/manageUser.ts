@@ -4,8 +4,6 @@ import {
   UserContextMenuCommandInteraction,
   ContainerBuilder,
   TextDisplayBuilder,
-  SeparatorBuilder,
-  SeparatorSpacingSize,
   ActionRowBuilder,
   ButtonBuilder,
   ButtonStyle,
@@ -15,6 +13,7 @@ import { db } from '../db/client'
 import { autoChannels } from '../db/schema'
 import { eq } from 'drizzle-orm'
 import { isSudo } from '../services/voice/permissions'
+import { sep } from '../utils/cv2'
 
 export const data = new ContextMenuCommandBuilder()
   .setName('Manage User')
@@ -51,7 +50,7 @@ export async function execute(interaction: UserContextMenuCommandInteraction): P
   const container = new ContainerBuilder()
     .setAccentColor(0x5865f2)
     .addTextDisplayComponents(new TextDisplayBuilder().setContent(`## 👤 Manage User`))
-    .addSeparatorComponents(new SeparatorBuilder().setSpacing(SeparatorSpacingSize.Small).setDivider(true))
+    .addSeparatorComponents(sep())
     .addTextDisplayComponents(new TextDisplayBuilder().setContent(lines.join('\n')))
 
   const buttons = new ActionRowBuilder<ButtonBuilder>().addComponents(
