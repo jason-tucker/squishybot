@@ -40,10 +40,17 @@ export async function handleVoiceRenameModal(interaction: ModalSubmitInteraction
     await interaction.deferReply({ ephemeral: true })
   }
 
-  const vc = await interaction.guild!.channels.fetch(record.voiceChannelId).catch(() => null)
-  if (vc?.isVoiceBased()) {
-    await vc.setName(newName).catch(() => {})
-  }
+  const [vc, tc] = await Promise.all([
+    interaction.guild!.channels.fetch(record.voiceChannelId).catch(() => null),
+    interaction.guild!.channels.fetch(record.textChannelId).catch(() => null),
+  ])
+
+  const textName = newName.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'voice-chat'
+
+  await Promise.all([
+    vc?.isVoiceBased() ? vc.setName(newName).catch(() => {}) : Promise.resolve(),
+    tc?.isTextBased() ? (tc as any).setName(textName).catch(() => {}) : Promise.resolve(),
+  ])
 
   await db.update(autoChannels)
     .set({ manualName: newName, autoNameEnabled: false })

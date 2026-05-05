@@ -19,19 +19,20 @@ export async function createAutoChannel(
 ): Promise<AutoChannelRecord | null> {
   const botId = client.user!.id
 
-  // 1. Rename the existing hub voice channel in place (owner already in it)
-  await existingVoiceChannel.setName(channelName).catch(err =>
-    logger.warn('Failed to rename hub channel in place:', err)
+  // 1. Rename the existing hub voice channel and move it to position 0 (top of category)
+  await existingVoiceChannel.edit({ name: channelName, position: 0 }).catch(err =>
+    logger.warn('Failed to rename/reposition hub channel in place:', err)
   )
 
-  // 2. Create the attached text channel below the voice channel
+  // 2. Create the attached text channel at position 0 (top of category, same name as voice)
+  const textChannelName = channelName.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'voice-chat'
   let textChannel
   try {
     textChannel = await guild.channels.create({
-      name: channelName.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, ''),
+      name: textChannelName,
       type: ChannelType.GuildText,
       parent: env.AUTO_VOICE_CATEGORY_ID,
-      position: existingVoiceChannel.position + 1,
+      position: 0,
       permissionOverwrites: [
         { id: guild.roles.everyone, deny: [PermissionFlagsBits.ViewChannel], type: OverwriteType.Role },
         { id: botId, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ManageMessages, PermissionFlagsBits.ReadMessageHistory], type: OverwriteType.Member },
