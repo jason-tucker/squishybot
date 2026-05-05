@@ -43,6 +43,10 @@ const envSchema = z.object({
   BIRTHDAY_CHANNEL_ID: z.string().min(1).optional().or(z.literal('').transform(() => undefined)),
   CLIPS_CHANNEL_ID: z.string().min(1).optional().or(z.literal('').transform(() => undefined)),
   FOOD_CHANNEL_ID: z.string().min(1).optional().or(z.literal('').transform(() => undefined)),
+
+  // /report — files GitHub issues from inside Discord
+  GITHUB_TOKEN: z.string().min(1).optional().or(z.literal('').transform(() => undefined)),
+  GITHUB_REPO: z.string().min(1).optional().or(z.literal('').transform(() => undefined)),
 })
 
 const parsed = envSchema.safeParse(process.env)

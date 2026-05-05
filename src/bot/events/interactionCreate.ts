@@ -11,6 +11,7 @@ import { execute as voiceExecute } from '../../commands/voice'
 import { execute as squishyExecute } from '../../commands/squishy'
 import { execute as sudoExecute } from '../../commands/sudo'
 import { execute as manageUserExecute } from '../../commands/manageUser'
+import { execute as reportExecute } from '../../commands/report'
 import { isVcCustomId } from '../../utils/customId'
 import { recordActivity } from '../../services/presence'
 
@@ -18,6 +19,7 @@ const commandHandlers = new Map<string, (i: ChatInputCommandInteraction) => Prom
   ['voice', voiceExecute],
   ['squishy', squishyExecute],
   ['sudo', sudoExecute],
+  ['report', reportExecute],
 ])
 
 export function registerInteractionCreate(client: Client) {
@@ -79,6 +81,9 @@ export function registerInteractionCreate(client: Client) {
         } else if (id === 'staff:request') {
           const { handleStaffRequestModal } = await import('../../interactions/modals/staffRequest')
           await handleStaffRequestModal(interaction as ModalSubmitInteraction)
+        } else if (id === 'report:submit') {
+          const { handleReportSubmit } = await import('../../interactions/modals/reportSubmit')
+          await handleReportSubmit(interaction as ModalSubmitInteraction)
         }
       }
     } catch (err) {
