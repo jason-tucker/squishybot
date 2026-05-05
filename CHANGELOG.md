@@ -12,6 +12,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ### Changed
 - Internal: extracted shared Components V2 `sep()` helper to `src/utils/cv2.ts` and replaced inline `SeparatorBuilder` constructions across 10 files. No behavior change.
+- Internal: extracted `requireControl()` helper in `src/interactions/buttons/voiceControl.ts` to deduplicate the 7-action permission-check + ephemeral-error pattern. No behavior change.
 
 ---
 

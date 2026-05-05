@@ -1,5 +1,6 @@
 import {
   type ButtonInteraction,
+  type GuildMember,
   ActionRowBuilder,
   ButtonBuilder,
   ButtonStyle,
@@ -9,8 +10,6 @@ import {
   StringSelectMenuBuilder,
   ContainerBuilder,
   TextDisplayBuilder,
-  SeparatorBuilder,
-  SeparatorSpacingSize,
   MessageFlags,
 } from 'discord.js'
 import { decodeVcId } from '../../utils/customId'
@@ -20,6 +19,25 @@ import { eq } from 'drizzle-orm'
 import { canControlChannel, isSudo } from '../../services/voice/permissions'
 import { postOrUpdateControlPanel, buildPanelPayloadForRecord } from '../../services/voice/controlPanel'
 import { deleteAutoChannel } from '../../services/voice/autoChannel'
+import { sep } from '../../utils/cv2'
+
+type AutoChannelRecord = typeof autoChannels.$inferSelect
+
+/**
+ * Verifies that `member` may control `record`. If not, replies with an
+ * ephemeral error and returns false. The caller should `return` immediately
+ * when this returns false.
+ */
+async function requireControl(
+  interaction: ButtonInteraction,
+  member: GuildMember,
+  record: AutoChannelRecord,
+  message = '❌ You do not have permission.',
+): Promise<boolean> {
+  if (canControlChannel(member, record) || isSudo(member)) return true
+  await interaction.reply({ content: message, ephemeral: true })
+  return false
+}
 
 export async function handleVoiceControlButton(interaction: ButtonInteraction): Promise<void> {
   const decoded = decodeVcId(interaction.customId)
@@ -45,10 +63,7 @@ export async function handleVoiceControlButton(interaction: ButtonInteraction): 
   }
 
   if (action === 'delete') {
-    if (!canControlChannel(member, record) && !isSudo(member)) {
-      await interaction.reply({ content: '❌ You do not have permission to delete this channel.', ephemeral: true })
-      return
-    }
+    if (!await requireControl(interaction, member, record, '❌ You do not have permission to delete this channel.')) return
     const row = new ActionRowBuilder<ButtonBuilder>().addComponents(
       new ButtonBuilder()
         .setCustomId(`vc:${voiceChannelId}:delete_confirm`)
@@ -64,10 +79,7 @@ export async function handleVoiceControlButton(interaction: ButtonInteraction): 
   }
 
   if (action === 'delete_confirm') {
-    if (!canControlChannel(member, record) && !isSudo(member)) {
-      await interaction.reply({ content: '❌ You do not have permission.', ephemeral: true })
-      return
-    }
+    if (!await requireControl(interaction, member, record)) return
     await interaction.deferReply({ ephemeral: true })
     await deleteAutoChannel(interaction.client, record)
     await interaction.editReply({ content: '✅ Channel deleted.' })
@@ -75,10 +87,7 @@ export async function handleVoiceControlButton(interaction: ButtonInteraction): 
   }
 
   if (action === 'rename') {
-    if (!canControlChannel(member, record) && !isSudo(member)) {
-      await interaction.reply({ content: '❌ You do not have permission to rename this channel.', ephemeral: true })
-      return
-    }
+    if (!await requireControl(interaction, member, record, '❌ You do not have permission to rename this channel.')) return
     const modal = new ModalBuilder()
       .setCustomId(`vc:${voiceChannelId}:rename`)
       .setTitle('Rename Channel')
@@ -98,10 +107,7 @@ export async function handleVoiceControlButton(interaction: ButtonInteraction): 
   }
 
   if (action === 'lock' || action === 'unlock') {
-    if (!canControlChannel(member, record) && !isSudo(member)) {
-      await interaction.reply({ content: '❌ You do not have permission.', ephemeral: true })
-      return
-    }
+    if (!await requireControl(interaction, member, record)) return
 
     const isLocked = action === 'lock'
     const vc = await interaction.guild!.channels.fetch(record.voiceChannelId).catch(() => null)
@@ -129,10 +135,7 @@ export async function handleVoiceControlButton(interaction: ButtonInteraction): 
   }
 
   if (action === 'add_host') {
-    if (!canControlChannel(member, record) && !isSudo(member)) {
-      await interaction.reply({ content: '❌ You do not have permission.', ephemeral: true })
-      return
-    }
+    if (!await requireControl(interaction, member, record)) return
     const vc = await interaction.guild!.channels.fetch(record.voiceChannelId).catch(() => null)
     if (!vc?.isVoiceBased() || vc.members.size === 0) {
       await interaction.reply({ content: '❌ No members are in the channel to add as host.', ephemeral: true })
@@ -155,10 +158,7 @@ export async function handleVoiceControlButton(interaction: ButtonInteraction): 
   }
 
   if (action === 'remove_host') {
-    if (!canControlChannel(member, record) && !isSudo(member)) {
-      await interaction.reply({ content: '❌ You do not have permission.', ephemeral: true })
-      return
-    }
+    if (!await requireControl(interaction, member, record)) return
     if (record.hostUserIds.length === 0) {
       await interaction.reply({ content: 'ℹ️ There are no hosts to remove.', ephemeral: true })
       return
@@ -181,10 +181,7 @@ export async function handleVoiceControlButton(interaction: ButtonInteraction): 
   }
 
   if (action === 'templates') {
-    if (!canControlChannel(member, record) && !isSudo(member)) {
-      await interaction.reply({ content: '❌ You do not have permission.', ephemeral: true })
-      return
-    }
+    if (!await requireControl(interaction, member, record)) return
     const vc = await interaction.guild!.channels.fetch(record.voiceChannelId).catch(() => null)
     const memberCount = vc?.isVoiceBased() ? vc.members.size : 1
 
@@ -194,9 +191,7 @@ export async function handleVoiceControlButton(interaction: ButtonInteraction): 
           '### 📋 Templates\n_Auto detects what you\'re playing from your rich presence._'
         )
       )
-      .addSeparatorComponents(
-        new SeparatorBuilder().setSpacing(SeparatorSpacingSize.Small).setDivider(true)
-      )
+      .addSeparatorComponents(sep())
 
     const row = new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(
       new StringSelectMenuBuilder()
