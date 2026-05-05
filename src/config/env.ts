@@ -1,12 +1,41 @@
 import { z } from 'zod'
 import 'dotenv/config'
 
+const commaSeparated = z
+  .string()
+  .transform(s => s.split(',').map(x => x.trim()).filter(Boolean))
+
 const envSchema = z.object({
+  // Core
   DISCORD_BOT_TOKEN: z.string().min(1, 'DISCORD_BOT_TOKEN is required'),
   DISCORD_CLIENT_ID: z.string().min(1, 'DISCORD_CLIENT_ID is required'),
   DATABASE_URL: z.string().min(1, 'DATABASE_URL is required'),
   NODE_ENV: z.enum(['development', 'production', 'test']).default('development'),
   UPTIME_KUMA_PUSH_URL: z.string().url().optional(),
+
+  // Guild
+  GUILD_ID: z.string().min(1, 'GUILD_ID is required'),
+
+  // Sudo permissions
+  SUDO_ROLE_IDS: commaSeparated.default(''),
+  SUDO_USER_IDS: commaSeparated.default(''),
+
+  // Voice channels
+  AUTO_VOICE_CATEGORY_ID: z.string().min(1, 'AUTO_VOICE_CATEGORY_ID is required'),
+  HUB_CHANNEL_IDS: commaSeparated.pipe(
+    z.array(z.string()).min(1, 'At least one HUB_CHANNEL_IDS is required')
+  ),
+  VOICE_CLEANUP_DELAY_MS: z.coerce.number().int().positive().default(30000),
+
+  // Optional channel IDs
+  LOG_CHANNEL_ID: z.string().optional(),
+  ADMIN_CHANNEL_ID: z.string().optional(),
+
+  // Future features — optional now, required when those phases are built
+  STAFF_APPROVAL_CHANNEL_ID: z.string().optional(),
+  BIRTHDAY_CHANNEL_ID: z.string().optional(),
+  BLIPS_CHANNEL_ID: z.string().optional(),
+  FOOD_CHANNEL_ID: z.string().optional(),
 })
 
 const parsed = envSchema.safeParse(process.env)

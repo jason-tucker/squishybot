@@ -1,2 +1,6 @@
-// Export all table schemas here:
-// export * from './myTable'
+export * from './autoChannels'
+export * from './hubChannels'
+export * from './userProfiles'
+export * from './staffApprovals'
+export * from './games'
+export * from './userGamePrefs'
