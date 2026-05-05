@@ -7,7 +7,6 @@
     "dev": "tsx watch src/index.ts",
     "build": "node --max-old-space-size=4096 node_modules/typescript/bin/tsc",
     "start": "node dist/index.js",
-    "migrate": "node dist/db/migrate.js",
     "deploy:commands": "node dist/bot/registerCommands.js",
     "db:migrate": "tsx src/db/migrate.ts",
     "db:studio": "drizzle-kit studio",

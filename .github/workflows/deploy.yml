@@ -10,49 +10,75 @@ concurrency:
   group: deploy-squishybot
   cancel-in-progress: false
 
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
+
 jobs:
   deploy:
-    name: Build & Deploy
+    name: Build, Push & Deploy
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 20
+
+    permissions:
+      contents: read
+      packages: write   # required to push to GHCR
 
     steps:
       # ── 1. Checkout ──────────────────────────────────────────────────────────
       - name: Checkout
         uses: actions/checkout@v4
 
-      # ── 2. Node + pnpm ───────────────────────────────────────────────────────
-      - name: Setup pnpm
-        uses: pnpm/action-setup@v4
+      # ── 2. Docker Buildx (enables layer caching) ──────────────────────────────
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      # ── 3. Log in to GHCR (uses automatic GITHUB_TOKEN — no extra secret) ─────
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
         with:
-          version: 10
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
+      # ── 4. Compute image tags ─────────────────────────────────────────────────
+      - name: Docker metadata
+        id: meta
+        uses: docker/metadata-action@v5
         with:
-          node-version: 24
-          cache: pnpm
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          tags: |
+            type=sha,prefix=sha-
+            type=raw,value=latest,enable={{is_default_branch}}
 
-      # ── 3. Install dependencies ───────────────────────────────────────────────
-      - name: Install dependencies
-        run: pnpm install --frozen-lockfile
+      # ── 5. Build Docker image and push to GHCR ────────────────────────────────
+      # TypeScript compiles inside Docker (on this runner with 7 GB RAM).
+      # The VPS never runs tsc — it just pulls the pre-built image.
+      - name: Build and push image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
 
-      # ── 4. Build (TypeScript → dist/) ─────────────────────────────────────────
-      # tsc runs here on the runner (7 GB RAM), never on the VPS (OOMs at ~900 MB).
-      - name: Build
-        run: pnpm run build
-
-      # ── 5. Deploy slash commands (from built dist/) ────────────────────────────
+      # ── 6. Deploy slash commands (from built image on runner) ─────────────────
       - name: Deploy slash commands
-        env:
-          DISCORD_BOT_TOKEN: ${{ secrets.DISCORD_BOT_TOKEN }}
-          DISCORD_CLIENT_ID: ${{ secrets.DISCORD_CLIENT_ID }}
-          GUILD_ID: ${{ secrets.GUILD_ID }}
-          DATABASE_URL: placeholder  # not used by registerCommands, but env.ts requires it
-        run: pnpm run deploy:commands
+        run: |
+          docker run --rm \
+            -e DISCORD_BOT_TOKEN="${{ secrets.DISCORD_BOT_TOKEN }}" \
+            -e DISCORD_CLIENT_ID="${{ secrets.DISCORD_CLIENT_ID }}" \
+            -e GUILD_ID="${{ secrets.GUILD_ID }}" \
+            -e DATABASE_URL="postgresql://placeholder/placeholder" \
+            -e AUTO_VOICE_CATEGORY_ID="placeholder" \
+            -e HUB_CHANNEL_IDS="placeholder" \
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest \
+            node dist/bot/registerCommands.js
 
-      # ── 6. Prepare VPS — git pull + pnpm install + db:migrate ─────────────────
-      - name: Prepare VPS
+      # ── 7. Deploy to VPS ──────────────────────────────────────────────────────
+      - name: Deploy to VPS
         uses: appleboy/ssh-action@v1.2.0
         with:
           host: ${{ secrets.VPS_HOST }}
@@ -61,41 +87,30 @@ jobs:
           script: |
             set -Eeuo pipefail
             cd ${{ secrets.PROJECT_DIR }}
+
+            # Pull latest source (for docker-compose.yml and .env updates)
             git fetch --all
             git reset --hard origin/main
-            pnpm install --frozen-lockfile
-            pnpm run db:migrate
 
-      # ── 7. Upload compiled dist/ to VPS ───────────────────────────────────────
-      - name: Upload dist to VPS
-        uses: appleboy/scp-action@v0.1.7
-        with:
-          host: ${{ secrets.VPS_HOST }}
-          username: ${{ secrets.VPS_USER }}
-          key: ${{ secrets.VPS_SSH_KEY }}
-          source: dist/
-          target: ${{ secrets.PROJECT_DIR }}
-          rm: true
+            # Pull the new image and restart
+            BOT_IMAGE="${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest" \
+              docker compose pull squishybot
 
-      # ── 8. Restart service + verify ───────────────────────────────────────────
-      - name: Restart and verify
-        uses: appleboy/ssh-action@v1.2.0
-        with:
-          host: ${{ secrets.VPS_HOST }}
-          username: ${{ secrets.VPS_USER }}
-          key: ${{ secrets.VPS_SSH_KEY }}
-          script: |
-            set -Eeuo pipefail
-            sudo systemctl restart squishybot
-            sleep 5
-            if ! systemctl is-active --quiet squishybot; then
-              echo "ERROR: squishybot is not active after restart"
-              journalctl -u squishybot -n 20 --no-pager
+            BOT_IMAGE="${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest" \
+              docker compose up -d --remove-orphans
+
+            # Wait for container to be healthy
+            sleep 10
+            if ! docker compose ps squishybot | grep -q "running\|Up"; then
+              echo "ERROR: squishybot container is not running"
+              docker compose logs squishybot --tail=30
               exit 1
             fi
-            echo "squishybot is running."
 
-      # ── 9. Notify Discord — success ───────────────────────────────────────────
+            echo "✓ squishybot is running."
+            docker compose ps squishybot
+
+      # ── 8. Notify Discord — success ───────────────────────────────────────────
       - name: Notify success
         if: success()
         env:
@@ -103,7 +118,7 @@ jobs:
         run: |
           SHORT_SHA="${GITHUB_SHA::7}"
           COMMIT_MSG=$(git log -1 --pretty=format:"%s")
-          curl -s -o /dev/null -w "%{http_code}" -X POST "$WEBHOOK" \
+          curl -s -o /dev/null -X POST "$WEBHOOK" \
             -H "Content-Type: application/json" \
             -d "{
               \"embeds\": [{
@@ -114,7 +129,7 @@ jobs:
               }]
             }"
 
-      # ── 10. Notify Discord — failure ──────────────────────────────────────────
+      # ── 9. Notify Discord — failure ───────────────────────────────────────────
       - name: Notify failure
         if: failure()
         env:

@@ -2,12 +2,15 @@
 .env
 .env.*
 
-# Build artifacts (built inside Docker, not from host)
+# Build artifacts (compiled inside Docker from source)
 dist
 *.tsbuildinfo
 
 # Dev dependencies not needed in image context
 node_modules
+
+# Migration SQL files — schema is applied via drizzle-kit push at startup
+src/db/migrations
 
 # Runtime and local tooling
 logs
@@ -24,6 +27,7 @@ README.md
 CHANGELOG.md
 CLAUDE.md
 scripts/squishybot
+scripts/clearCommands.ts
 
-# drizzle studio config
+# drizzle local-dev config (Docker uses drizzle.docker.config.cjs)
 drizzle.config.ts

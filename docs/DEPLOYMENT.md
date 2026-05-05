@@ -2,12 +2,39 @@
 
 ## Overview
 
-- **Local development**: VSCode on your PC, run `pnpm dev`
-- **Deployments**: push to `main` → GitHub Actions builds and deploys to VPS automatically
-- **VPS role**: runs the compiled bot via systemd; no development happens there
+| Environment | How to run |
+|---|---|
+| **Local dev** | `pnpm dev` (tsx, hot reload, local Postgres) |
+| **Any server** | `docker compose up -d` (one command, pulls from GHCR) |
+| **CI/CD** | Push to `main` → GitHub Actions builds image → pushes to GHCR → VPS pulls |
 
-> **VPS constraint**: The VPS has ~900 MB free RAM. TypeScript compilation (`tsc`) OOMs it.
-> The build always runs on the GitHub Actions runner, never on the VPS.
+> **Why Docker?** The VPS has ~900 MB free RAM and cannot compile TypeScript.
+> The GitHub Actions runner has 7 GB RAM and builds the image there.
+> The VPS only pulls and runs a pre-built image — zero compilation on the server.
+
+---
+
+## One-Command Deployment (any server with Docker)
+
+```bash
+# 1. Clone the repo
+git clone https://github.com/YOUR_USERNAME/squishybot.git
+cd squishybot
+
+# 2. Configure environment
+cp .env.example .env
+nano .env    # fill in all required values (see .env.example for guidance)
+
+# 3. Start everything (pulls image from GHCR, starts Postgres, runs schema push, starts bot)
+BOT_IMAGE=ghcr.io/YOUR_GITHUB_USERNAME/squishybot:latest docker compose up -d
+```
+
+Or if you want to build locally (requires enough RAM for TypeScript compilation):
+```bash
+docker compose up -d --build
+```
+
+**Works on:** Ubuntu, Debian, any Linux with Docker, Unraid (via Docker Compose Manager plugin)
 
 ---
 
@@ -17,190 +44,175 @@
 # Install dependencies
 pnpm install
 
-# Copy and fill in env
+# Copy and fill in env (for local dev, use localhost DATABASE_URL)
 cp .env.example .env
+# Set DATABASE_URL=postgresql://squishybot:squishybot_dev@localhost:5432/squishybot
 
-# Run in dev mode (tsx, hot reload)
+# Start local Postgres (optional — uses existing if running)
+docker compose up -d db
+
+# Run bot in dev mode (hot reload)
 pnpm dev
 ```
 
 ---
 
-## Deployment Flow (automatic)
+## GitHub Secrets (required once per repo)
 
-1. Commit and push to `main`
-2. GitHub Actions runs `.github/workflows/deploy.yml`:
-   - Installs deps on the runner
-   - Compiles TypeScript → `dist/`
-   - Registers slash commands from `dist/`
-   - SSHs into VPS: `git pull`, `pnpm install`, `db:migrate`
-   - Uploads `dist/` to VPS via SCP
-   - SSHs into VPS: `systemctl restart squishybot`, verifies active
-   - Sends Discord webhook notification (success or failure)
+Go to **GitHub repo → Settings → Secrets and variables → Actions → New repository secret**
+
+| Secret | Value |
+|---|---|
+| `VPS_HOST` | VPS IP or hostname |
+| `VPS_USER` | `botuser` |
+| `VPS_SSH_KEY` | Private SSH key contents (see below) |
+| `PROJECT_DIR` | `/home/botuser/projects/squishybot` |
+| `DISCORD_DEPLOY_WEBHOOK` | Discord webhook URL for deploy notifications |
+| `DISCORD_BOT_TOKEN` | Bot token (used to register slash commands) |
+| `DISCORD_CLIENT_ID` | Application/client ID |
+| `GUILD_ID` | Target Discord guild ID |
+
+> **GHCR authentication**: the workflow uses the automatic `GITHUB_TOKEN` — no extra secret needed.
+
+### Generating a deploy SSH key
+
+```bash
+# On your local machine
+ssh-keygen -t ed25519 -C "squishybot-deploy" -f ~/.ssh/squishybot_deploy
+# Leave passphrase empty
+
+# Add public key to VPS
+ssh-copy-id -i ~/.ssh/squishybot_deploy.pub botuser@YOUR_VPS_IP
+
+# Paste contents of ~/.ssh/squishybot_deploy into the VPS_SSH_KEY secret
+cat ~/.ssh/squishybot_deploy
+```
 
 ---
 
 ## One-Time VPS Setup
 
-### 1. Install the systemd service
+### 1. Install Docker (if needed)
 
 ```bash
-sudo cp /home/botuser/projects/squishybot/deploy/systemd/squishybot.service /etc/systemd/system/
-sudo systemctl daemon-reload
-sudo systemctl enable squishybot
-sudo systemctl start squishybot
+curl -fsSL https://get.docker.com | sh
+sudo usermod -aG docker botuser
+# Log out and back in for group to take effect
 ```
 
-Verify the `ExecStart` path matches your node binary:
+### 2. Clone the repo on VPS
+
 ```bash
-which node
-# Should be /usr/bin/node — if not, edit squishybot.service before copying
+cd /home/botuser/projects
+git clone https://github.com/YOUR_USERNAME/squishybot.git
 ```
 
-### 2. Configure passwordless sudo for botuser
-
-The deploy workflow needs to restart the service without a password prompt.
-
-First, find your `systemctl` path:
-```bash
-which systemctl
-# /usr/bin/systemctl  (use this path below)
-```
-
-Then add the sudoers rule:
-```bash
-sudo visudo
-```
-
-Add this line (replace `/usr/bin/systemctl` with the actual path if different):
-```
-botuser ALL=NOPASSWD: /usr/bin/systemctl stop squishybot, /usr/bin/systemctl start squishybot, /usr/bin/systemctl restart squishybot, /usr/bin/systemctl status squishybot, /usr/bin/systemctl is-active squishybot
-```
-
-### 3. Add bot's .env on VPS
+### 3. Create `.env` on VPS
 
 ```bash
 cp /home/botuser/projects/squishybot/.env.example /home/botuser/projects/squishybot/.env
 nano /home/botuser/projects/squishybot/.env
-# Fill in all real values
+# Set POSTGRES_PASSWORD, DISCORD_BOT_TOKEN, GUILD_ID, and all other required values
+# Set BOT_IMAGE=ghcr.io/YOUR_GITHUB_USERNAME/squishybot:latest
 ```
 
-### 4. Run initial database migration on VPS
+### 4. Start for the first time
 
 ```bash
 cd /home/botuser/projects/squishybot
-pnpm install --frozen-lockfile
-pnpm run db:migrate
+docker compose up -d
+```
+
+Postgres starts first (health-checked), then squishybot starts and applies the schema automatically via `drizzle-kit push`.
+
+### 5. Verify
+
+```bash
+docker compose ps
+docker compose logs squishybot --tail=20
 ```
 
 ---
 
-## GitHub Secrets Setup
+## Schema Management (no migration files)
 
-Go to your GitHub repo → **Settings → Secrets and variables → Actions → New repository secret**
+SquishyBot uses `drizzle-kit push` instead of SQL migration files. This means:
 
-| Secret name | Value |
-|---|---|
-| `VPS_HOST` | Your VPS IP address or hostname |
-| `VPS_USER` | `botuser` |
-| `VPS_SSH_KEY` | Contents of your **private** SSH key (see below) |
-| `PROJECT_DIR` | `/home/botuser/projects/squishybot` |
-| `DISCORD_DEPLOY_WEBHOOK` | Discord webhook URL for deploy notifications |
-| `DISCORD_BOT_TOKEN` | Bot token (used to register slash commands on the runner) |
-| `DISCORD_CLIENT_ID` | Application/client ID |
-| `GUILD_ID` | Target Discord guild ID |
-
-### Generating a deploy SSH key (if needed)
-
-On your local machine:
-```bash
-ssh-keygen -t ed25519 -C "squishybot-deploy" -f ~/.ssh/squishybot_deploy
-# No passphrase — Actions can't type one
-```
-
-Add the **public** key to the VPS:
-```bash
-ssh-copy-id -i ~/.ssh/squishybot_deploy.pub botuser@YOUR_VPS_IP
-```
-
-Paste the contents of `~/.ssh/squishybot_deploy` (private key) into the `VPS_SSH_KEY` secret.
+- **No SQL files are committed to git** — the schema lives only in `src/db/schema/*.ts`
+- On every container start, `drizzle-kit push` compares the TypeScript schema to the live database and applies any differences
+- Adding a new column: add it to the schema → push to main → redeploy → done
+- Dropping a column: use `--force` (already in entrypoint) — be careful, data is lost
 
 ---
 
-## Manual Deployment
+## Deploying a New Version
 
-To trigger a deploy without pushing code:
-
-GitHub repo → **Actions → Deploy SquishyBot → Run workflow → Run workflow**
+Just push to `main`. The workflow handles everything automatically:
+1. Builds Docker image (TypeScript compiles on GitHub's servers)
+2. Pushes image to GHCR
+3. Registers slash commands in Discord
+4. SSHs to VPS: pulls new image, restarts container
+5. Sends Discord notification
 
 ---
 
-## Checking Service Status (VPS)
+## Checking Container Status
 
 ```bash
-# Service status
-squishybot status
-# or
-sudo systemctl status squishybot
-
-# Live logs
-squishybot logs
-# or
-journalctl -u squishybot -f
-
-# Last 50 lines
-squishybot tail 50
+# On VPS
+docker compose ps
+docker compose logs squishybot -f          # live logs
+docker compose logs squishybot --tail=50   # last 50 lines
 ```
 
 ---
 
 ## Rollback
 
-To roll back to a previous commit:
-
 ```bash
-# On VPS
-cd /home/botuser/projects/squishybot
-git log --oneline -10          # find the commit SHA you want
-git reset --hard <SHA>
-pnpm run db:migrate            # safe to re-run
-sudo systemctl restart squishybot
-systemctl is-active squishybot
+# On VPS — run a specific previous image
+BOT_IMAGE=ghcr.io/YOUR_USERNAME/squishybot:sha-<previous_sha> docker compose up -d
+
+# Find previous SHAs in GitHub: Actions → the deploy run → Docker metadata step
 ```
 
-You'll also need to re-upload the dist for that commit. Either:
-- Revert the commit on GitHub and let Actions redeploy, or
-- Build locally and rsync manually:
-  ```bash
-  pnpm run build
-  rsync -avz --delete dist/ botuser@YOUR_VPS_IP:/home/botuser/projects/squishybot/dist/
-  ```
+---
+
+## Updating docker-compose.yml or .env on VPS
+
+The `git reset --hard origin/main` in the workflow updates `docker-compose.yml` automatically. For `.env` changes, edit the file on the VPS manually:
+
+```bash
+nano /home/botuser/projects/squishybot/.env
+docker compose up -d   # picks up new env vars
+```
+
+---
+
+## Unraid Deployment
+
+1. Install the **Docker Compose Manager** plugin from Community Applications
+2. Add a new compose stack pointing to `/home/botuser/projects/squishybot/docker-compose.yml`
+3. Create `.env` in the same directory
+4. Start the stack
+
+Or use Unraid's terminal and run `docker compose up -d` manually.
 
 ---
 
 ## Rotating the Discord Deploy Webhook
 
-1. Go to the Discord channel → Edit Channel → Integrations → Webhooks
-2. Delete the old webhook or click **Copy URL** on the new one
-3. Update the `DISCORD_DEPLOY_WEBHOOK` secret in GitHub
-4. No code changes required
+1. Discord channel → Edit → Integrations → Webhooks → delete old or create new
+2. Update `DISCORD_DEPLOY_WEBHOOK` secret in GitHub repo settings
+3. No code changes required
 
 ---
 
-## Rotating the Bot Token
+## Making the GHCR Image Public (for easier new-server deploys)
 
-1. Discord Developer Portal → your app → Bot → Reset Token
-2. Update `DISCORD_BOT_TOKEN` in:
-   - GitHub secret `DISCORD_BOT_TOKEN`
-   - VPS `.env` file: `nano /home/botuser/projects/squishybot/.env`
-3. Restart: `squishybot restart`
+GitHub repo → **Packages → squishybot → Package settings → Change visibility → Public**
 
----
-
-## Verifying a Deployment
-
-After a push to `main`:
-1. GitHub repo → **Actions** → confirm the latest run is green
-2. Check Discord deploy channel for the success webhook notification
-3. On VPS: `squishybot status` should show `active (running)`
-4. In Discord: run `/squishy status` — should respond with current uptime
+This lets any server pull the image without authenticating:
+```bash
+docker pull ghcr.io/YOUR_USERNAME/squishybot:latest
+```
