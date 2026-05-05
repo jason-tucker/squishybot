@@ -16,6 +16,8 @@ The installer verifies Docker, clones the repo, generates a strong Postgres pass
 
 See [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) for the full setup guide and CI/CD configuration.
 
+Roadmap, completed work, and open action items are tracked in the [Bot Development project board](https://github.com/users/jason-tucker/projects/3). Items use these statuses: **Todo**, **In Progress**, **Done**, **Tucker Action** (waiting on me), **Blocked** (with a Blocker note explaining why).
+
 ## Features
 
 ### Auto Voice Channels
