@@ -18,7 +18,7 @@ import { db } from '../../db/client'
 import { autoChannels } from '../../db/schema'
 import { eq } from 'drizzle-orm'
 import { canControlChannel, isSudo } from '../../services/voice/permissions'
-import { postOrUpdateControlPanel } from '../../services/voice/controlPanel'
+import { postOrUpdateControlPanel, buildPanelPayloadForRecord } from '../../services/voice/controlPanel'
 import { deleteAutoChannel } from '../../services/voice/autoChannel'
 
 export async function handleVoiceControlButton(interaction: ButtonInteraction): Promise<void> {
@@ -93,7 +93,6 @@ export async function handleVoiceControlButton(interaction: ButtonInteraction): 
       await interaction.reply({ content: '❌ You do not have permission.', ephemeral: true })
       return
     }
-    await interaction.deferUpdate()
 
     const isLocked = action === 'lock'
     const vc = await interaction.guild!.channels.fetch(record.voiceChannelId).catch(() => null)
@@ -107,7 +106,16 @@ export async function handleVoiceControlButton(interaction: ButtonInteraction): 
 
     await db.update(autoChannels).set({ isLocked }).where(eq(autoChannels.voiceChannelId, voiceChannelId))
     const updated = { ...record, isLocked }
-    await postOrUpdateControlPanel(interaction.client, updated)
+
+    // Update the clicked panel directly via interaction.update so the button
+    // changes immediately even if the user is clicking on a duplicate/stale panel
+    const payload = await buildPanelPayloadForRecord(interaction.client, updated)
+    await interaction.update({ ...payload, content: null } as any).catch(() => {})
+
+    // Also sync the tracked panel if it's a different message (duplicate panels case)
+    if (interaction.message.id !== record.controlPanelMsgId) {
+      await postOrUpdateControlPanel(interaction.client, updated)
+    }
     return
   }
 
@@ -238,10 +246,16 @@ export async function handleVoiceControlButton(interaction: ButtonInteraction): 
       await interaction.reply({ content: '❌ You need to be in the voice channel to claim it.', ephemeral: true })
       return
     }
-    await interaction.deferUpdate()
     const newHosts = record.hostUserIds.filter(id => id !== member.id)
     await db.update(autoChannels).set({ ownerUserId: member.id, hostUserIds: newHosts }).where(eq(autoChannels.voiceChannelId, voiceChannelId))
-    await postOrUpdateControlPanel(interaction.client, { ...record, ownerUserId: member.id, hostUserIds: newHosts })
+    const updated = { ...record, ownerUserId: member.id, hostUserIds: newHosts }
+
+    const payload = await buildPanelPayloadForRecord(interaction.client, updated)
+    await interaction.update({ ...payload, content: null } as any).catch(() => {})
+
+    if (interaction.message.id !== record.controlPanelMsgId) {
+      await postOrUpdateControlPanel(interaction.client, updated)
+    }
     return
   }
 }

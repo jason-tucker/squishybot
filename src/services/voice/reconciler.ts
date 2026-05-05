@@ -63,16 +63,29 @@ export async function runReconciler(client: Client): Promise<ReconcilerResult> {
       await syncTextChannelPermissions(tc as any, vc as any, record, client.user!.id).catch(() => {})
     }
 
-    // Re-post control panel if missing
-    if (!record.controlPanelMsgId && tc?.isTextBased()) {
-      await postOrUpdateControlPanel(client, record)
-      result.panels++
-    } else if (record.controlPanelMsgId && tc?.isTextBased()) {
-      const existing = await (tc as any).messages.fetch(record.controlPanelMsgId).catch(() => null)
-      if (!existing) {
-        await db.update(autoChannels).set({ controlPanelMsgId: null }).where(eq(autoChannels.voiceChannelId, record.voiceChannelId))
-        await postOrUpdateControlPanel(client, { ...record, controlPanelMsgId: null })
+    // Re-post control panel if missing — but first sweep any leftover bot messages
+    // so we don't accumulate duplicate panels across restarts
+    if (tc?.isTextBased()) {
+      const recent = await (tc as any).messages.fetch({ limit: 20 }).catch(() => null)
+      if (recent) {
+        const stale = recent.filter((m: any) =>
+          m.author?.id === client.user!.id && m.id !== record.controlPanelMsgId
+        )
+        for (const [, m] of stale) {
+          await m.delete().catch(() => {})
+        }
+      }
+
+      if (!record.controlPanelMsgId) {
+        await postOrUpdateControlPanel(client, record)
         result.panels++
+      } else {
+        const existing = await (tc as any).messages.fetch(record.controlPanelMsgId).catch(() => null)
+        if (!existing) {
+          await db.update(autoChannels).set({ controlPanelMsgId: null }).where(eq(autoChannels.voiceChannelId, record.voiceChannelId))
+          await postOrUpdateControlPanel(client, { ...record, controlPanelMsgId: null })
+          result.panels++
+        }
       }
     }
   }

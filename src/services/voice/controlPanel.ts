@@ -6,6 +6,11 @@ import { buildControlPanelPayload } from '../../embeds/voiceControlPanel'
 import type { AutoChannelRecord } from '../../types/voice'
 import { logger } from '../logger'
 
+export async function buildPanelPayloadForRecord(client: Client, record: AutoChannelRecord) {
+  const { ownerTag, hostTags } = await resolveDisplayTags(client, record)
+  return buildControlPanelPayload(record, ownerTag, hostTags)
+}
+
 async function resolveDisplayTags(client: Client, record: AutoChannelRecord): Promise<{ ownerTag: string; hostTags: string[] }> {
   const guild = client.guilds.cache.first()
   if (!guild) return { ownerTag: `<@${record.ownerUserId}>`, hostTags: record.hostUserIds.map(id => `<@${id}>`) }
