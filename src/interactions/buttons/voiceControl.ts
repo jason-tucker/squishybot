@@ -219,7 +219,7 @@ export async function handleVoiceControlButton(interaction: ButtonInteraction): 
 
     const gameRow = new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(
       new StringSelectMenuBuilder()
-        .setCustomId(`vc:${voiceChannelId}:template_apply`)
+        .setCustomId(`vc:${voiceChannelId}:game_apply`)
         .setPlaceholder('Overwatch or Rocket League...')
         .addOptions([
           { label: '⚔️ OW Ranked 5-Stack', value: 'ow_ranked', description: 'Overwatch Ranked [x/5]' },

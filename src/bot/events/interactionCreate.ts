@@ -62,7 +62,7 @@ export function registerInteractionCreate(client: Client) {
 
       } else if (interaction.isStringSelectMenu()) {
         const id = interaction.customId
-        if (isVcCustomId(id) && id.includes(':template_apply')) {
+        if (isVcCustomId(id) && (id.endsWith(':template_apply') || id.endsWith(':game_apply'))) {
           const { handleVoiceTemplateSelect } = await import('../../interactions/selects/voiceTemplate')
           await handleVoiceTemplateSelect(interaction as StringSelectMenuInteraction)
         } else if (isVcCustomId(id)) {
