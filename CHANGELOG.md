@@ -9,6 +9,36 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [0.6.0] — 2026-05-05
+
+### Added
+- Rich presence channel naming: detects Playing activity → "Tucker's Valorant (2/4)"; falls back to "Tucker's Channel"
+- `GatewayIntentBits.GuildPresences` intent (enable in Dev Portal → Bot → Presence Intent)
+- Discord presence service (`src/services/presence.ts`): Online on start, Idle after 15 min, DND on errors
+- `/squishy` command — user-facing menu with bot info + staff request button
+- `/sudo` — admin select-menu panel (sudo only)
+- `/voice` — single command (no subcommands), opens ephemeral control panel
+- Right-click context menu "Manage User" (sudo only): roles, voice status, disconnect, staff history
+- `Claim` button on voice control panel (claim when owner has left)
+- `src/services/logger.ts` — `attachClientToLogger()`, `dmOwner()`, `errorAndDm()`
+- Startup DM to `BOT_OWNER_ID` on every bot start
+- Docker Compose setup with multi-stage Dockerfile
+- `drizzle-kit push` for schema management — no SQL migration files committed to git
+- GitHub Actions CI/CD: build on runner, push to GHCR, SSH deploy
+- `scripts/squishybot` management CLI (Docker-based): start/stop/restart/logs/tail/update/rebuild/deploy/env/db:shell
+- `scripts/install.sh` — one-shot VPS installer
+- `docs/DEPLOYMENT.md` — full deployment guide
+
+### Changed
+- Slash commands consolidated to 3: `/voice`, `/squishy`, `/sudo` + right-click context menu
+- Removed `/help`, `/staff` (staff request moved to `/squishy` button), old `/squishy` subcommands
+- Voice control panel: fixed `content: null` bug that prevented initial panel post in text channel
+- All bot responses are ephemeral by default
+- Schema management: switched from Drizzle SQL migrations to `drizzle-kit push`
+- Production runtime: `node dist/index.js` (compiled) instead of `tsx src/index.ts`
+
+---
+
 ## [0.4.0] — 2026-05-04
 
 ### Added
