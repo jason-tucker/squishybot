@@ -562,7 +562,13 @@ export async function handleSettingsModalSubmit(interaction: ModalSubmitInteract
       return
     }
     await setSetting(key, String(n), interaction.user.id)
-    await interaction.update(renderVoice() as any)
+    // Modal was triggered from a panel button → refresh the source message in place.
+    // Otherwise fall back to an ephemeral confirmation.
+    if (interaction.isFromMessage()) {
+      await interaction.update(renderVoice() as any)
+    } else {
+      await interaction.reply({ content: `✅ Saved \`${key}\` = \`${n}\``, ephemeral: true })
+    }
     return
   }
   // Generic string fallback
