@@ -5,6 +5,24 @@ Discord.js patterns, Components V2, and database conventions that apply to all b
 
 ---
 
+## Convention: every per-user setting must be sudo-editable on behalf of users
+
+The user community for this bot is mostly non-technical. **Most members will not edit their own bot settings**, so any per-user setting added here must be reachable from two surfaces:
+
+1. A self-service entry point (`/profile`, `/games`, etc.) — `mode='self'`, target is the caller, restricted field set.
+2. A sudo entry point — `/sudo → Settings → <feature>` AND a button on right-click → **Manage User**. Same shared editor module, `mode='sudo'`, target is whichever member sudo picked, full field set.
+
+The shared-editor pattern is established in:
+
+- `src/interactions/profileEditor.ts` — `renderProfileEditor(guildId, targetUserId, displayName, mode)` + customId family `profile:*` keying mode + target.
+- `src/interactions/gamesEditor.ts` — `renderPrefsEditor(guild, targetUserId, mode)` + customId family `games:prefs:*`.
+
+When you add a new per-user feature, follow the pattern. Don't ship a self-service command without the sudo path, and don't ship a sudo path without the self-service entry point.
+
+The Manage User context menu (`src/commands/manageUser.ts`) is the canonical landing pad for sudo-acts-on-behalf flows — add a new button there for every new per-user surface.
+
+---
+
 ## What this bot does
 
 SquishyBot is a multipurpose Discord bot for a single server. Its core feature is **dynamic
@@ -37,7 +55,9 @@ Slash commands are consolidated to four top-level commands plus one context menu
 | `/sudo` | Admin select-menu panel (channels, hubs, auto threads, cleanup, approvals, restart) | Sudo |
 | `/report` | Open a modal to file a GitHub issue (Title / Type / Description / Steps); owner approves via DM before it lands on GitHub | Everyone |
 | `/profile` | Self-service profile editor — display name, birthday, birthday-ping opt-out | Everyone |
-| Right-click user → **Manage User** | Edit Profile, roles, voice status, disconnect, staff history | Sudo |
+| `/games` | Pick which games you want View / LFG-ping roles for | Everyone |
+| `/play <game>` | Post an LFG ping in the game's channel; per-(user,game) cooldown 30 min | Everyone |
+| Right-click user → **Manage User** | Edit Profile, Game Prefs, voice status, disconnect, staff history | Sudo |
 
 The persistent control panel (in each auto-channel text channel) is the primary
 interaction surface. A silent sticky message at the bottom of every auto-channel

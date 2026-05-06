@@ -25,6 +25,11 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   - All edits go through `services/userProfile.ts` with sudo-vs-self field gating; every mutation logs a `profile-edit` line with editor + target + mode + fields touched.
 - **`user_profiles` schema** — new boolean columns `birthday_pings_enabled` (default `true`) and `birthday_year_visible` (default `false`).
 - **Birthday pings** — daily scheduler that fires once per day at the configured target hour (`birthday.target_hour`, default 9) and posts a celebratory message in `channel.birthday` for every member whose birthday is today and who hasn't opted out. Same-day restarts are idempotent via `bot_settings` key `birthday.last_run_date`. Feb 29 birthdays get celebrated on Feb 28 in non-leap years.
+- **Game roles + game prefs + `/play` LFG**:
+  - **`/sudo → Settings → Games`** — full catalog editor. Add a game (modal: name + aliases + sort order), then on the detail panel set the View role + Ping role via RoleSelectMenu, edit name/aliases/sort via modal, toggle visibility/archive, or delete. In-memory catalog cache loaded by `loadGames()` on startup.
+  - **`/games`** — self-service. Members see every visible+non-archived game with View / Pings toggles. Toggling immediately adds or removes the corresponding Discord role on the member.
+  - **Right-click → Manage User → Game Prefs** — sudo opens the same prefs editor in `mode='sudo'` and edits roles on behalf of the targeted member. Same module, same UI, just keyed to a different target.
+  - **`/play <game>`** — LFG ping. Autocompletes on game name + aliases. Resolves channel + ping role from the catalog, enforces a 30-minute per-(user, game) cooldown (in-memory; sudo can `force:true` to bypass). Strips raw role/user/channel mentions from user input and sets `allowedMentions` so `@everyone`/`@here` are never resolved regardless of arguments.
 
 ### Removed
 - The static `feature.clips_auto_thread` / `feature.food_auto_thread` toggles and their `channel.clips` / `channel.food` channel-pickers. Auto-thread channels are now data, not code — managed via the new `Auto Threads` sub-panel. The corresponding env vars (`CLIPS_CHANNEL_ID`, `FOOD_CHANNEL_ID`) are unused; safe to drop from `.env`.
