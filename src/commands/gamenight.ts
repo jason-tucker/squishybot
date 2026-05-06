@@ -26,7 +26,6 @@ import {
 } from 'discord.js'
 import { sep } from '../utils/cv2'
 import { findGameByNameOrAlias, getGame, type Game } from '../services/games'
-import { getSetting } from '../services/settings'
 import { isSudo } from '../services/voice/permissions'
 import { logger } from '../services/logger'
 
@@ -93,17 +92,10 @@ export async function handleSetupSubmit(interaction: ModalSubmitInteraction): Pr
     return
   }
 
-  const channelId = getSetting('channel.gamenight')
-  if (!channelId) {
-    await interaction.reply({
-      content: '❌ Game Night channel not set. Sudo must set **channel.gamenight** under /sudo → Settings → Channels first.',
-      ephemeral: true,
-    })
-    return
-  }
-  const channel = await interaction.guild.channels.fetch(channelId).catch(() => null)
+  // Post in whichever channel sudo ran /sudo from.
+  const channel = interaction.channel
   if (!channel || channel.type !== ChannelType.GuildText) {
-    await interaction.reply({ content: `❌ \`channel.gamenight\` (<#${channelId}>) is unreachable or not a text channel.`, ephemeral: true })
+    await interaction.reply({ content: '❌ Run `/sudo` from a regular text channel — Game Night is posted there.', ephemeral: true })
     return
   }
 

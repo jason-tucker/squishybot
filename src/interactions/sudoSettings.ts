@@ -69,7 +69,6 @@ const CHANNEL_SETTINGS: ChannelSettingDef[] = [
   { key: 'channel.log', label: 'Log channel', description: 'Bot writes structured log lines here', envFallback: env.LOG_CHANNEL_ID, channelTypes: [ChannelType.GuildText] },
   { key: 'channel.admin', label: 'Admin channel', description: 'Sudo-only bot admin channel', envFallback: env.ADMIN_CHANNEL_ID, channelTypes: [ChannelType.GuildText] },
   { key: 'channel.birthday', label: 'Birthday channel', description: 'Where birthday pings post', envFallback: env.BIRTHDAY_CHANNEL_ID, channelTypes: [ChannelType.GuildText] },
-  { key: 'channel.gamenight', label: 'Game Night channel', description: 'Where /sudo Game Night announcements post', channelTypes: [ChannelType.GuildText] },
   { key: 'channel.staff_approval_thread', label: 'Staff approval thread', description: 'Where staff requests post for approval', envFallback: env.STAFF_APPROVAL_THREAD_ID, channelTypes: [ChannelType.PublicThread, ChannelType.PrivateThread] },
 ]
 

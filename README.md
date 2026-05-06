@@ -58,8 +58,8 @@ Roadmap, completed work, and open action items are tracked in the [Bot Developme
 
 ### Game Night
 
-- Sudo runs `/sudo → Game Night` and fills a modal: game (must be in the catalog), date/time, optional notes.
-- Bot posts a CV2 announcement in the channel set by **/sudo → Settings → Channels → Game Night** (`channel.gamenight`).
+- Sudo runs `/sudo → Game Night` from the channel they want the announcement in, then fills a modal: game (must be in the catalog), date/time, optional notes.
+- Bot posts a CV2 announcement **in that channel** (no separate channel setting — wherever you ran `/sudo`, that's where it posts).
 - Members RSVP with one click: ✅ Joining · 🤔 Might join · ❌ Not joining (toggle — clicking your current state clears it).
 - Members also indicate whether they own the game: 👍 I own it · 🛒 I don't own it. The "🛒 Need a copy" list helps the host know who to gift the game to (we buy the game for non-owners on game nights).
 - ✖️ Cancel button visible to host and sudo. State held in-memory + parse-from-message recovery so announcements survive restarts.
