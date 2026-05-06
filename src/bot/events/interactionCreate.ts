@@ -72,6 +72,15 @@ export function registerInteractionCreate(client: Client) {
         } else if (id.startsWith('profile:back:')) {
           const { handleProfileBack } = await import('../../interactions/profileEditor')
           await handleProfileBack(interaction as ButtonInteraction)
+        } else if (id.startsWith('games:cat:')) {
+          const { handleCatalogButton } = await import('../../interactions/gamesEditor')
+          await handleCatalogButton(interaction as ButtonInteraction)
+        } else if (id.startsWith('games:prefs:toggle:')) {
+          const { handlePrefsToggle } = await import('../../interactions/gamesEditor')
+          await handlePrefsToggle(interaction as ButtonInteraction)
+        } else if (id.startsWith('games:prefs:back:')) {
+          const { handlePrefsBack } = await import('../../interactions/gamesEditor')
+          await handlePrefsBack(interaction as ButtonInteraction)
         }
 
       } else if (interaction.isChannelSelectMenu()) {
@@ -91,6 +100,13 @@ export function registerInteractionCreate(client: Client) {
           await handleProfileUserSelect(interaction)
         }
 
+      } else if (interaction.isRoleSelectMenu()) {
+        const id = interaction.customId
+        if (id.startsWith('games:cat:role:')) {
+          const { handleCatalogRoleSelect } = await import('../../interactions/gamesEditor')
+          await handleCatalogRoleSelect(interaction)
+        }
+
       } else if (interaction.isStringSelectMenu()) {
         const id = interaction.customId
         if (isVcCustomId(id) && id.endsWith(':template_apply')) {
@@ -108,6 +124,9 @@ export function registerInteractionCreate(client: Client) {
         } else if (id === 'sudo:set:removeuser' || id === 'sudo:set:reset_channel' || id === 'sudo:set:autothread:remove' || id === 'sudo:set:hub:remove') {
           const { handleSettingsStringSelect } = await import('../../interactions/sudoSettings')
           await handleSettingsStringSelect(interaction as StringSelectMenuInteraction)
+        } else if (id === 'games:cat:select') {
+          const { handleCatalogStringSelect } = await import('../../interactions/gamesEditor')
+          await handleCatalogStringSelect(interaction as StringSelectMenuInteraction)
         }
 
       } else if (interaction.isModalSubmit()) {
@@ -127,6 +146,9 @@ export function registerInteractionCreate(client: Client) {
         } else if (id.startsWith('profile:save:')) {
           const { handleProfileModal } = await import('../../interactions/profileEditor')
           await handleProfileModal(interaction as ModalSubmitInteraction)
+        } else if (id === 'games:cat:add_submit' || id.startsWith('games:cat:save:')) {
+          const { handleCatalogModal } = await import('../../interactions/gamesEditor')
+          await handleCatalogModal(interaction as ModalSubmitInteraction)
         }
       }
     } catch (err) {

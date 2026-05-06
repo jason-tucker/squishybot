@@ -34,9 +34,6 @@ import {
   UserSelectMenuBuilder,
   type MessageActionRowComponentBuilder,
 } from 'discord.js'
-import { count } from 'drizzle-orm'
-import { db } from '../db/client'
-import { games } from '../db/schema'
 import { env } from '../config/env'
 import { sep } from '../utils/cv2'
 import { isSudo } from '../services/voice/permissions'
@@ -445,25 +442,9 @@ function renderAutoThreads() {
   return { flags: MessageFlags.IsComponentsV2 as number, components }
 }
 
-async function renderGames() {
-  const [{ value: gameCount }] = await db.select({ value: count() }).from(games).catch(() => [{ value: 0 }])
-  const container = new ContainerBuilder()
-    .setAccentColor(0x9b59b6)
-    .addTextDisplayComponents(new TextDisplayBuilder().setContent(
-      '### 🎮 Games\n' +
-      `_${gameCount} game(s) tracked in the database._\n\n` +
-      '**Coming soon:** add/remove games, link Discord roles + channels, opt-in pings.\n' +
-      'Schema is already in place (\`games\`, \`user_game_prefs\`); the management UI lives here when it ships.'
-    ))
-  return {
-    flags: MessageFlags.IsComponentsV2 as number,
-    components: [
-      container,
-      new ActionRowBuilder<MessageActionRowComponentBuilder>().addComponents(
-        new ButtonBuilder().setCustomId('sudo:set:home').setLabel('Back').setStyle(ButtonStyle.Secondary)
-      ),
-    ],
-  }
+async function renderGames(guildId: string) {
+  const { renderCatalogList } = await import('./gamesEditor')
+  return renderCatalogList(guildId)
 }
 
 async function renderProfiles(guildId: string) {
@@ -515,7 +496,7 @@ export async function handleSettingsButton(interaction: ButtonInteraction): Prom
     } else if (category === 'auto_threads') {
       await interaction.update(renderAutoThreads() as any)
     } else if (category === 'games') {
-      await interaction.update((await renderGames()) as any)
+      await interaction.update((await renderGames(interaction.guildId!)) as any)
     } else if (category === 'profiles') {
       await interaction.update((await renderProfiles(interaction.guildId!)) as any)
     } else {
