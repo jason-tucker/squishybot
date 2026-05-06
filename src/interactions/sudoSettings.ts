@@ -8,7 +8,8 @@
  *   sudo:set:channel:{key}            channel-select — set a channel-id setting
  *   sudo:set:adduser                  user-select — add a sudo user
  *   sudo:set:removeuser               string-select — remove an additional sudo user
- *   sudo:set:toggle:{key}             button — flip a boolean feature flag
+ *   sudo:set:autothread:add           channel-select — add an auto-thread channel
+ *   sudo:set:autothread:remove        string-select — remove an auto-thread channel
  *   sudo:set:edit_modal:{key}         button — show modal for free-form value (numbers / etc.)
  *   sudo:set:save:{key}               modal submit — persist the modal value
  */
@@ -40,10 +41,13 @@ import { env } from '../config/env'
 import { sep } from '../utils/cv2'
 import { isSudo } from '../services/voice/permissions'
 import {
+  addAutoThreadChannel,
   addSudoUser,
   clearSetting,
   getSetting,
   listAdditionalSudoUsers,
+  listAutoThreadChannels,
+  removeAutoThreadChannel,
   removeSudoUser,
   setSetting,
 } from '../services/settings'
@@ -64,22 +68,8 @@ interface ChannelSettingDef {
 const CHANNEL_SETTINGS: ChannelSettingDef[] = [
   { key: 'channel.log', label: 'Log channel', description: 'Bot writes structured log lines here', envFallback: env.LOG_CHANNEL_ID, channelTypes: [ChannelType.GuildText] },
   { key: 'channel.admin', label: 'Admin channel', description: 'Sudo-only bot admin channel', envFallback: env.ADMIN_CHANNEL_ID, channelTypes: [ChannelType.GuildText] },
-  { key: 'channel.birthday', label: 'Birthday channel', description: 'Where birthday pings post (future feature)', envFallback: env.BIRTHDAY_CHANNEL_ID, channelTypes: [ChannelType.GuildText] },
-  { key: 'channel.clips', label: 'Clips channel', description: 'Auto-thread on each new post (future feature)', envFallback: env.CLIPS_CHANNEL_ID, channelTypes: [ChannelType.GuildText] },
-  { key: 'channel.food', label: 'Food channel', description: 'Auto-thread on each new post (future feature)', envFallback: env.FOOD_CHANNEL_ID, channelTypes: [ChannelType.GuildText] },
+  { key: 'channel.birthday', label: 'Birthday channel', description: 'Where birthday pings post (planned feature)', envFallback: env.BIRTHDAY_CHANNEL_ID, channelTypes: [ChannelType.GuildText] },
   { key: 'channel.staff_approval_thread', label: 'Staff approval thread', description: 'Where staff requests post for approval', envFallback: env.STAFF_APPROVAL_THREAD_ID, channelTypes: [ChannelType.PublicThread, ChannelType.PrivateThread] },
-]
-
-interface BooleanSettingDef {
-  key: string
-  label: string
-  description: string
-  defaultEnabled: boolean
-}
-
-const BOOLEAN_SETTINGS: BooleanSettingDef[] = [
-  { key: 'feature.clips_auto_thread', label: 'Auto-thread on clips', description: 'Bot auto-creates a thread on every post in the clips channel', defaultEnabled: false },
-  { key: 'feature.food_auto_thread', label: 'Auto-thread on food', description: 'Bot auto-creates a thread on every post in the food channel', defaultEnabled: false },
 ]
 
 interface NumericSettingDef {
@@ -131,13 +121,6 @@ function effectiveNumericValue(def: NumericSettingDef): { value: number; source:
   return { value: def.envFallback, source: 'env' }
 }
 
-function effectiveBoolValue(def: BooleanSettingDef): boolean {
-  const v = getSetting(def.key)
-  if (v === '1') return true
-  if (v === '0') return false
-  return def.defaultEnabled
-}
-
 // ---------------------------------------------------------------------------
 // Renderers
 // ---------------------------------------------------------------------------
@@ -157,9 +140,9 @@ function renderHome() {
     new ButtonBuilder().setCustomId('sudo:set:nav:sudo_users').setLabel('Sudo Users').setEmoji('🛡️').setStyle(ButtonStyle.Primary),
     new ButtonBuilder().setCustomId('sudo:set:nav:channels').setLabel('Channels').setEmoji('📺').setStyle(ButtonStyle.Primary),
     new ButtonBuilder().setCustomId('sudo:set:nav:voice').setLabel('Voice').setEmoji('🔊').setStyle(ButtonStyle.Primary),
+    new ButtonBuilder().setCustomId('sudo:set:nav:auto_threads').setLabel('Auto Threads').setEmoji('🧵').setStyle(ButtonStyle.Primary),
   )
   const row2 = new ActionRowBuilder<MessageActionRowComponentBuilder>().addComponents(
-    new ButtonBuilder().setCustomId('sudo:set:nav:features').setLabel('Features').setEmoji('🧪').setStyle(ButtonStyle.Primary),
     new ButtonBuilder().setCustomId('sudo:set:nav:games').setLabel('Games').setEmoji('🎮').setStyle(ButtonStyle.Secondary),
     new ButtonBuilder().setCustomId('sudo:set:nav:profiles').setLabel('User Profiles').setEmoji('👤').setStyle(ButtonStyle.Secondary),
   )
@@ -319,11 +302,20 @@ function renderVoice() {
   return { flags: MessageFlags.IsComponentsV2 as number, components }
 }
 
-function renderFeatures() {
-  const lines: string[] = ['### 🧪 Features', '_Toggle planned auto-features on/off. Off = bot ignores._\n']
-  for (const def of BOOLEAN_SETTINGS) {
-    const enabled = effectiveBoolValue(def)
-    lines.push(`${enabled ? '🟢' : '🔴'} **${def.label}** · ${enabled ? '`enabled`' : '`disabled`'}\n_${def.description}_\n`)
+function renderAutoThreads() {
+  const channels = listAutoThreadChannels()
+
+  const lines: string[] = [
+    '### 🧵 Auto Threads',
+    '_Channels in this list get an auto-created public thread on every non-bot message._',
+    '_Default thread name: `{author} — {first line of message}`._\n',
+  ]
+  if (channels.length === 0) {
+    lines.push('_No channels configured. Pick one below to start auto-threading._')
+  } else {
+    for (const c of channels) {
+      lines.push(`• <#${c.channelId}>`)
+    }
   }
 
   const container = new ContainerBuilder()
@@ -331,18 +323,34 @@ function renderFeatures() {
     .addTextDisplayComponents(new TextDisplayBuilder().setContent(lines.join('\n')))
 
   const components: any[] = [container]
-  for (const def of BOOLEAN_SETTINGS) {
-    const enabled = effectiveBoolValue(def)
+
+  components.push(
+    new ActionRowBuilder<MessageActionRowComponentBuilder>().addComponents(
+      new ChannelSelectMenuBuilder()
+        .setCustomId('sudo:set:autothread:add')
+        .setPlaceholder('Add a text channel to auto-thread…')
+        .setChannelTypes([ChannelType.GuildText])
+        .setMinValues(0).setMaxValues(1)
+    )
+  )
+
+  if (channels.length > 0) {
+    const removeOptions = channels.slice(0, 25).map(c => ({
+      label: `#${c.channelId}`.slice(0, 100),
+      value: c.channelId,
+      emoji: '❌',
+      description: c.nameTemplate ?? undefined,
+    }))
     components.push(
       new ActionRowBuilder<MessageActionRowComponentBuilder>().addComponents(
-        new ButtonBuilder()
-          .setCustomId(`sudo:set:toggle:${def.key}`)
-          .setLabel(`${enabled ? 'Disable' : 'Enable'} — ${def.label}`)
-          .setEmoji(enabled ? '🔴' : '🟢')
-          .setStyle(enabled ? ButtonStyle.Danger : ButtonStyle.Success)
+        new StringSelectMenuBuilder()
+          .setCustomId('sudo:set:autothread:remove')
+          .setPlaceholder('Remove an auto-thread channel…')
+          .addOptions(removeOptions)
       )
     )
   }
+
   components.push(
     new ActionRowBuilder<MessageActionRowComponentBuilder>().addComponents(
       new ButtonBuilder().setCustomId('sudo:set:home').setLabel('Back').setStyle(ButtonStyle.Secondary)
@@ -432,8 +440,8 @@ export async function handleSettingsButton(interaction: ButtonInteraction): Prom
       await interaction.update(renderChannelsReset() as any)
     } else if (category === 'voice') {
       await interaction.update(renderVoice() as any)
-    } else if (category === 'features') {
-      await interaction.update(renderFeatures() as any)
+    } else if (category === 'auto_threads') {
+      await interaction.update(renderAutoThreads() as any)
     } else if (category === 'games') {
       await interaction.update((await renderGames()) as any)
     } else if (category === 'profiles') {
@@ -454,20 +462,6 @@ export async function handleSettingsButton(interaction: ButtonInteraction): Prom
     } else {
       await interaction.update(renderHome() as any)
     }
-    return
-  }
-
-  // sudo:set:toggle:{key}
-  if (id.startsWith('sudo:set:toggle:')) {
-    const key = id.slice('sudo:set:toggle:'.length)
-    const def = BOOLEAN_SETTINGS.find(d => d.key === key)
-    if (!def) {
-      await interaction.reply({ content: `Unknown feature: ${key}`, ephemeral: true })
-      return
-    }
-    const newValue = !effectiveBoolValue(def)
-    await setSetting(def.key, newValue ? '1' : '0', interaction.user.id)
-    await interaction.update(renderFeatures() as any)
     return
   }
 
@@ -501,7 +495,18 @@ export async function handleSettingsButton(interaction: ButtonInteraction): Prom
 
 export async function handleSettingsChannelSelect(interaction: ChannelSelectMenuInteraction): Promise<void> {
   if (!await ensureSudo(interaction)) return
-  const key = interaction.customId.slice('sudo:set:channel:'.length)
+  const id = interaction.customId
+
+  if (id === 'sudo:set:autothread:add') {
+    const channelId = interaction.values[0]
+    if (channelId && interaction.guildId) {
+      await addAutoThreadChannel(channelId, interaction.guildId, interaction.user.id)
+    }
+    await interaction.update(renderAutoThreads() as any)
+    return
+  }
+
+  const key = id.slice('sudo:set:channel:'.length)
   const def = CHANNEL_SETTINGS.find(d => d.key === key)
   if (!def) {
     await interaction.reply({ content: `Unknown channel setting: ${key}`, ephemeral: true })
@@ -538,6 +543,12 @@ export async function handleSettingsStringSelect(interaction: StringSelectMenuIn
     const key = interaction.values[0]
     if (key) await clearSetting(key)
     await interaction.update(renderChannelsReset() as any)
+    return
+  }
+  if (id === 'sudo:set:autothread:remove') {
+    const channelId = interaction.values[0]
+    if (channelId) await removeAutoThreadChannel(channelId)
+    await interaction.update(renderAutoThreads() as any)
     return
   }
 }

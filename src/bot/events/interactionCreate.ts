@@ -65,7 +65,7 @@ export function registerInteractionCreate(client: Client) {
 
       } else if (interaction.isChannelSelectMenu()) {
         const id = interaction.customId
-        if (id.startsWith('sudo:set:channel:')) {
+        if (id.startsWith('sudo:set:channel:') || id === 'sudo:set:autothread:add') {
           const { handleSettingsChannelSelect } = await import('../../interactions/sudoSettings')
           await handleSettingsChannelSelect(interaction)
         }
@@ -91,7 +91,7 @@ export function registerInteractionCreate(client: Client) {
         } else if (id === 'squishy:section') {
           const { handleSquishyPanelSelect } = await import('../../interactions/selects/squishyPanel')
           await handleSquishyPanelSelect(interaction as StringSelectMenuInteraction)
-        } else if (id === 'sudo:set:removeuser' || id === 'sudo:set:reset_channel') {
+        } else if (id === 'sudo:set:removeuser' || id === 'sudo:set:reset_channel' || id === 'sudo:set:autothread:remove') {
           const { handleSettingsStringSelect } = await import('../../interactions/sudoSettings')
           await handleSettingsStringSelect(interaction as StringSelectMenuInteraction)
         }
