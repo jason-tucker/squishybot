@@ -18,6 +18,13 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - **`/sudo → Settings → Hub Channels`** — runtime-managed list of voice channels that act as auto-channel hubs. ChannelSelectMenu (voice only) adds; StringSelectMenu unregisters. Newly added hubs inherit the channel's current parent (or the auto-voice category override) and label. `HUB_CHANNEL_IDS` env is now optional — kept as a legacy seed list that runs once on boot when set, but the DB is authoritative going forward.
 - **`channel.auto_voice_category` setting** — override the env-defined `AUTO_VOICE_CATEGORY_ID` from the Voice sub-panel without restarting. Wired through `autoChannel.ts`, `hubManager.ts`, and the reconciler so changes take effect on the next channel create.
 - **In-memory hubs cache** — `loadSettings()` now also seeds a `hubsCache`, and `isHubChannel()` is a sync cache lookup instead of a per-event DB query. Hot path on every voice state update.
+- **User profile editor** — accessible from three entry points, all backed by the same shared `profileEditor.ts` module:
+  - `/sudo → Settings → User Profiles` — UserSelectMenu picker → editor with full sudo field set (display name, real name, birthday, staff fields, opt-outs).
+  - **Right-click → Manage User → Edit Profile** — opens the editor for the targeted member directly. Sudo only.
+  - `/profile` — self-service. Members can edit their own display name, birthday, and the two birthday flags (`birthday_pings_enabled`, `birthday_year_visible`). Staff fields stay sudo-only.
+  - All edits go through `services/userProfile.ts` with sudo-vs-self field gating; every mutation logs a `profile-edit` line with editor + target + mode + fields touched.
+- **`user_profiles` schema** — new boolean columns `birthday_pings_enabled` (default `true`) and `birthday_year_visible` (default `false`).
+- **Birthday pings** — daily scheduler that fires once per day at the configured target hour (`birthday.target_hour`, default 9) and posts a celebratory message in `channel.birthday` for every member whose birthday is today and who hasn't opted out. Same-day restarts are idempotent via `bot_settings` key `birthday.last_run_date`. Feb 29 birthdays get celebrated on Feb 28 in non-leap years.
 
 ### Removed
 - The static `feature.clips_auto_thread` / `feature.food_auto_thread` toggles and their `channel.clips` / `channel.food` channel-pickers. Auto-thread channels are now data, not code — managed via the new `Auto Threads` sub-panel. The corresponding env vars (`CLIPS_CHANNEL_ID`, `FOOD_CHANNEL_ID`) are unused; safe to drop from `.env`.

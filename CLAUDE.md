@@ -34,9 +34,10 @@ Slash commands are consolidated to four top-level commands plus one context menu
 |---|---|---|
 | `/voice` | Open an ephemeral copy of the control panel for the channel you're currently in | Owner/Host/Sudo |
 | `/squishy` | User-facing menu: bot status, feature explainers, staff request button | Everyone |
-| `/sudo` | Admin select-menu panel (channels, hubs, cleanup, approvals, restart) | Sudo |
+| `/sudo` | Admin select-menu panel (channels, hubs, auto threads, cleanup, approvals, restart) | Sudo |
 | `/report` | Open a modal to file a GitHub issue (Title / Type / Description / Steps); owner approves via DM before it lands on GitHub | Everyone |
-| Right-click user → **Manage User** | Roles, voice status, disconnect, staff history | Sudo |
+| `/profile` | Self-service profile editor — display name, birthday, birthday-ping opt-out | Everyone |
+| Right-click user → **Manage User** | Edit Profile, roles, voice status, disconnect, staff history | Sudo |
 
 The persistent control panel (in each auto-channel text channel) is the primary
 interaction surface. A silent sticky message at the bottom of every auto-channel
@@ -112,7 +113,7 @@ Weekly auto-restart at Tuesday 4 AM via `squishybot-restart.timer`.
 | `bot_settings` | Runtime key/value config overrides edited via `/sudo → Settings` |
 | `sudo_users` | Members granted sudo at runtime (beyond the immutable `SUDO_USER_IDS` env list) |
 | `auto_thread_channels` | Channels where every non-bot message gets an auto-thread (managed via `/sudo → Settings → Auto Threads`) |
-| `user_profiles` | User display names, birthdays, staff fields (future) |
+| `user_profiles` | User display names, birthdays (with opt-out flags), staff fields (sudo-edits any field; `/profile` self-edits a subset) |
 | `staff_approvals` | Pending staff role approval queue (future) |
 | `games` | Game definitions for role/channel management (future) |
 | `user_game_prefs` | Per-user game view/ping preferences (future) |

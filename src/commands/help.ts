@@ -23,6 +23,7 @@ export async function execute(interaction: ChatInputCommandInteraction): Promise
     '### 👥 Everyone\n' +
     '`/help` — show this list\n' +
     '`/squishy` — bot status + feature menu (voice / panel / staff requests / reports)\n' +
+    '`/profile` — edit your display name, birthday, and birthday-ping opt-out\n' +
     '`/staff request` — request to join the server staff team\n' +
     '`/report` — file a bug or feature request (owner reviews via DM, then files a GitHub issue)'
 
@@ -38,9 +39,10 @@ export async function execute(interaction: ChatInputCommandInteraction): Promise
     '`/sudo` — opens the admin select menu:\n' +
     '• **Settings** — runtime config (sudo users, channels, voice + auto-voice category, hub channels, auto-thread channels) backed by `bot_settings` / `sudo_users` / `hub_channels` / `auto_thread_channels`\n' +
     '• Active voice channels · Hub channels · Force cleanup · Pending approvals · Run reconciler · Restart instructions\n\n' +
-    'Right-click a member → **Manage User** — roles, voice status, disconnect, staff history\n\n' +
+    'Right-click a member → **Manage User** — Edit Profile, voice status, disconnect, staff history\n\n' +
     '### 🧵 Automatic\n' +
-    'Channels added under **/sudo → Settings → Auto Threads** get a public thread on every non-bot message. Default thread name: `{author} — {first line}`.'
+    'Channels added under **/sudo → Settings → Auto Threads** get a public thread on every non-bot message. Default thread name: `{author} — {first line}`.\n\n' +
+    'Birthdays: members who set a birthday via `/profile` get a ping in `channel.birthday` once a day at the configured target hour (default 9am). Opt-out via `/profile → Disable Birthday pings`.'
 
   const container = new ContainerBuilder()
     .setAccentColor(0x5865f2)

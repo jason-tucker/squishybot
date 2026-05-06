@@ -56,11 +56,21 @@ Roadmap, completed work, and open action items are tracked in the [Bot Developme
 - Every non-bot, non-system message in a configured channel gets a public thread. Default thread name: `{author} — {first line}` (truncated to 100 chars). Per-channel `name_template` and `archive_duration` columns are reserved on the schema for future per-channel tuning.
 - Requires the `MessageContent` privileged intent (Dev Portal → Bot).
 
+### Birthday Pings
+
+- Daily scheduler that fires at a configurable target hour (default 9 AM server time) and posts a celebratory message in the channel set under **/sudo → Settings → Channels → Birthday channel**.
+- Members set their birthday via **/profile** (modal: month + day). They can opt out without deleting the date by toggling **Birthday pings**.
+- Same-day restarts don't double-fire (idempotency via `bot_settings.birthday.last_run_date`).
+- Leap-year birthdays (Feb 29) get celebrated on Feb 28 in non-leap years with a small note.
+
+### User Profile Editor
+
+- **Sudo edits anyone's profile** — `/sudo → Settings → User Profiles` lets a sudo member browse profiles by Discord member picker, or right-click any member → **Manage User → Edit Profile** for a faster path. Sudo can edit: display name, real name, birthday, staff category / department / tier / leadership title, and the birthday opt-out flags.
+- **Self-service** — `/profile` opens the same editor in self mode for the caller. Limited to display name, birthday, and the two birthday flags. All edits are logged.
+
 ### Planned Features
 
 - Game role and channel management with opt-in ping system
-- Birthday pings (channel ID is already configurable in **/sudo → Settings → Channels**; scheduler + opt-in UI are the missing pieces)
-- User profile editor (display names, birthdays, staff fields)
 
 ---
 
@@ -180,7 +190,8 @@ Four top-level slash commands plus one right-click context menu. All responses a
 |---|---|---|
 | `/voice` | Owner / Host / Sudo | Open an ephemeral copy of the control panel for the auto channel you're in |
 | `/squishy` | Everyone | User-facing menu: bot status, feature explainers (Voice / Panel / Reports / Staff), staff-request button |
-| `/sudo` | Sudo | Admin select-menu panel: Settings (sudo users, channels, voice, features, games, profiles), active channels, hubs, force cleanup, pending approvals, run reconciler, restart instructions |
+| `/sudo` | Sudo | Admin select-menu panel: Settings (sudo users, channels, voice, hubs, auto threads, games, user profiles), active channels, hubs, force cleanup, pending approvals, run reconciler, restart instructions |
+| `/profile` | Everyone | Self-service profile editor — display name, birthday, birthday-ping opt-out |
 | `/report` | Everyone | Modal (Title / Type / Description / Steps) → DMs the owner with **Approve+Notify** / **Approve Silent** / **Reject+Notify** / **Reject Silent** buttons → on approve, files a GitHub issue against `GITHUB_REPO` |
 | Right-click user → **Manage User** | Sudo | Roles, voice status, disconnect, staff history |
 
