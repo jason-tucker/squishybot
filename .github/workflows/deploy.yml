@@ -65,7 +65,11 @@ jobs:
           cache-to: type=gha,mode=max
 
       # ── 6. Deploy slash commands (from built image on runner) ─────────────────
+      # Non-blocking — slash command schemas rarely change. If Discord secrets
+      # aren't set, this step will fail (Zod env validation) but the VPS deploy
+      # below still runs because of continue-on-error.
       - name: Deploy slash commands
+        continue-on-error: true
         run: |
           docker run --rm --entrypoint="" \
             -e DISCORD_BOT_TOKEN="${{ secrets.DISCORD_BOT_TOKEN }}" \
