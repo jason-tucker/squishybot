@@ -8,7 +8,7 @@
  * and refreshed on every catalog mutation.
  */
 import type { GuildMember } from 'discord.js'
-import { and, asc, eq, sql } from 'drizzle-orm'
+import { and, eq, sql } from 'drizzle-orm'
 import { db } from '../db/client'
 import { games, userGamePrefs } from '../db/schema'
 import { logger } from './logger'
@@ -125,30 +125,12 @@ export async function resolvePrefs(guildId: string, userId: string): Promise<Res
   })
 }
 
-async function upsertPref(guildId: string, userId: string, gameId: string, patch: Partial<Pick<GamePref, 'wantsView' | 'wantsPing'>>): Promise<GamePref> {
-  const existing = await db.select().from(userGamePrefs).where(and(
-    eq(userGamePrefs.guildId, guildId),
-    eq(userGamePrefs.userId, userId),
-    eq(userGamePrefs.gameId, gameId),
-  ))
-  if (existing.length === 0) {
-    const [row] = await db.insert(userGamePrefs).values({
-      guildId, userId, gameId,
-      wantsView: patch.wantsView ?? false,
-      wantsPing: patch.wantsPing ?? false,
-    }).returning()
-    return row
-  }
-  const [row] = await db.update(userGamePrefs)
-    .set(patch)
-    .where(eq(userGamePrefs.id, existing[0].id))
-    .returning()
-  return row
-}
-
 /**
  * Toggle a single pref + sync the corresponding Discord role on the target.
  * Returns the new state. Caller is responsible for permission checks.
+ *
+ * Uses INSERT ... ON CONFLICT DO UPDATE to flip the boolean atomically and
+ * read back the resulting row in a single query.
  */
 export async function togglePref(
   member: GuildMember,
@@ -159,29 +141,33 @@ export async function togglePref(
   const game = getGame(gameId)
   if (!game) return null
 
-  const existing = (await listPrefs(member.guild.id, member.id)).find(p => p.gameId === gameId)
-  const cur = { wantsView: existing?.wantsView ?? false, wantsPing: existing?.wantsPing ?? false }
-  const next = { ...cur }
-  if (which === 'view') next.wantsView = !cur.wantsView
-  if (which === 'ping') next.wantsPing = !cur.wantsPing
+  const col = which === 'view' ? userGamePrefs.wantsView : userGamePrefs.wantsPing
+  const [row] = await db.insert(userGamePrefs).values({
+    guildId: member.guild.id,
+    userId: member.id,
+    gameId,
+    wantsView: which === 'view',
+    wantsPing: which === 'ping',
+  }).onConflictDoUpdate({
+    target: [userGamePrefs.guildId, userGamePrefs.userId, userGamePrefs.gameId],
+    set: { [which === 'view' ? 'wantsView' : 'wantsPing']: sql`NOT ${col}` },
+  }).returning()
 
-  await upsertPref(member.guild.id, member.id, gameId, next)
+  const next = { wantsView: row.wantsView, wantsPing: row.wantsPing }
+  const enabled = which === 'view' ? next.wantsView : next.wantsPing
 
-  // Sync Discord role assignment.
   const roleId = which === 'view' ? game.roleId : game.pingRoleId
   if (roleId) {
     try {
-      if ((which === 'view' ? next.wantsView : next.wantsPing)) {
-        await member.roles.add(roleId, `game-pref toggle by=${editor.editorDiscordId} mode=${editor.mode}`)
-      } else {
-        await member.roles.remove(roleId, `game-pref toggle by=${editor.editorDiscordId} mode=${editor.mode}`)
-      }
+      const reason = `game-pref toggle by=${editor.editorDiscordId} mode=${editor.mode}`
+      if (enabled) await member.roles.add(roleId, reason)
+      else await member.roles.remove(roleId, reason)
     } catch (err) {
       logger.warn(`Failed to sync role ${roleId} for ${member.id} on game ${game.name}:`, err)
     }
   }
 
-  logger.info(`game-pref-toggle by=${editor.editorDiscordId} target=${member.id} mode=${editor.mode} game=${game.name} which=${which} now=${which === 'view' ? next.wantsView : next.wantsPing}`)
+  logger.info(`game-pref-toggle by=${editor.editorDiscordId} target=${member.id} mode=${editor.mode} game=${game.name} which=${which} now=${enabled}`)
 
   return next
 }

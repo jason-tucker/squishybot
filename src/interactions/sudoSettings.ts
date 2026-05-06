@@ -36,7 +36,7 @@ import {
 } from 'discord.js'
 import { env } from '../config/env'
 import { sep } from '../utils/cv2'
-import { isSudo } from '../services/voice/permissions'
+import { requireSudo } from '../services/voice/permissions'
 import {
   addAutoThreadChannel,
   addSudoUser,
@@ -98,17 +98,6 @@ const NUMERIC_SETTINGS: NumericSettingDef[] = [
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
-
-async function ensureSudo(interaction: ButtonInteraction | StringSelectMenuInteraction | ChannelSelectMenuInteraction | UserSelectMenuInteraction | ModalSubmitInteraction): Promise<boolean> {
-  const member = await interaction.guild!.members.fetch(interaction.user.id)
-  if (!isSudo(member)) {
-    if (interaction.isRepliable() && !interaction.replied && !interaction.deferred) {
-      await interaction.reply({ content: '❌ Sudo access required.', ephemeral: true })
-    }
-    return false
-  }
-  return true
-}
 
 function channelMentionOrNone(id: string | null | undefined): string {
   if (!id) return '`unset`'
@@ -457,7 +446,7 @@ async function renderProfiles(guildId: string) {
 // ---------------------------------------------------------------------------
 
 export async function showSettingsPanel(interaction: StringSelectMenuInteraction | ButtonInteraction): Promise<void> {
-  if (!await ensureSudo(interaction)) return
+  if (!await requireSudo(interaction)) return
   const payload = renderHome()
   if (interaction.deferred || interaction.replied) {
     await interaction.editReply(payload as any)
@@ -471,7 +460,7 @@ export async function showSettingsPanel(interaction: StringSelectMenuInteraction
 // ---------------------------------------------------------------------------
 
 export async function handleSettingsButton(interaction: ButtonInteraction): Promise<void> {
-  if (!await ensureSudo(interaction)) return
+  if (!await requireSudo(interaction)) return
   const id = interaction.customId
 
   // sudo:set:home
@@ -547,7 +536,7 @@ export async function handleSettingsButton(interaction: ButtonInteraction): Prom
 }
 
 export async function handleSettingsChannelSelect(interaction: ChannelSelectMenuInteraction): Promise<void> {
-  if (!await ensureSudo(interaction)) return
+  if (!await requireSudo(interaction)) return
   const id = interaction.customId
 
   if (id === 'sudo:set:autothread:add') {
@@ -597,7 +586,7 @@ export async function handleSettingsChannelSelect(interaction: ChannelSelectMenu
 }
 
 export async function handleSettingsUserSelect(interaction: UserSelectMenuInteraction): Promise<void> {
-  if (!await ensureSudo(interaction)) return
+  if (!await requireSudo(interaction)) return
   const userId = interaction.values[0]
   if (!userId) {
     await interaction.update((await renderSudoUsers()) as any)
@@ -608,7 +597,7 @@ export async function handleSettingsUserSelect(interaction: UserSelectMenuIntera
 }
 
 export async function handleSettingsStringSelect(interaction: StringSelectMenuInteraction): Promise<void> {
-  if (!await ensureSudo(interaction)) return
+  if (!await requireSudo(interaction)) return
   const id = interaction.customId
   if (id === 'sudo:set:removeuser') {
     const userId = interaction.values[0]
@@ -637,7 +626,7 @@ export async function handleSettingsStringSelect(interaction: StringSelectMenuIn
 }
 
 export async function handleSettingsModalSubmit(interaction: ModalSubmitInteraction): Promise<void> {
-  if (!await ensureSudo(interaction)) return
+  if (!await requireSudo(interaction)) return
   const key = interaction.customId.slice('sudo:set:save:'.length)
   const raw = interaction.fields.getTextInputValue('value').trim()
   const numDef = NUMERIC_SETTINGS.find(d => d.key === key)

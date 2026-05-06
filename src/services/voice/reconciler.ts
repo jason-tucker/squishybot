@@ -11,7 +11,7 @@ import { syncTextChannelPermissions } from './permissions'
 import { seedHubsFromEnv } from './hubManager'
 import { createAutoChannel } from './autoChannel'
 import { logger } from '../logger'
-import { getSetting, unregisterHubChannel, updateHubChannelId } from '../settings'
+import { getSetting, unregisterHubChannel, untrackAutoChannelText, updateHubChannelId } from '../settings'
 
 export interface ReconcilerResult {
   recovered: number
@@ -47,6 +47,7 @@ export async function runReconciler(client: Client): Promise<ReconcilerResult> {
       // Voice channel gone — clean up text channel and DB row
       await guild.channels.delete(record.textChannelId).catch(() => {})
       await db.delete(autoChannels).where(eq(autoChannels.voiceChannelId, record.voiceChannelId)).catch(() => {})
+      untrackAutoChannelText(record.textChannelId)
       result.cleaned++
       logger.info(`Reconciler: cleaned orphan vc=${record.voiceChannelId}`)
       continue
@@ -150,8 +151,9 @@ export async function runReconciler(client: Client): Promise<ReconcilerResult> {
           parent: hub.categoryId,
           position: hub.position,
         })
-        await db.update(hubChannels).set({ channelId: newHub.id }).where(eq(hubChannels.id, hub.id))
+        // Cache before DB so a join on the new hub is recognized immediately.
         updateHubChannelId(hub.channelId, newHub.id)
+        await db.update(hubChannels).set({ channelId: newHub.id }).where(eq(hubChannels.id, hub.id))
         result.hubs++
         logger.info(`Reconciler: recreated hub ${hub.label} (${newHub.id})`)
       } catch (err) {

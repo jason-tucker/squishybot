@@ -8,7 +8,7 @@
  */
 import { eq } from 'drizzle-orm'
 import { db } from '../db/client'
-import { botSettings, sudoUsers, autoThreadChannels, hubChannels } from '../db/schema'
+import { autoChannels, autoThreadChannels, botSettings, hubChannels, sudoUsers } from '../db/schema'
 
 // ---------------------------------------------------------------------------
 // In-memory caches
@@ -35,16 +35,22 @@ export interface HubInfo {
 }
 const hubsCache = new Map<string, HubInfo>()  // keyed by channelId
 
+// Set of text-channel IDs belonging to live auto channels.
+// Read on the messageCreate hot path to avoid a DB query per message.
+const autoChannelTextIdsCache = new Set<string>()
+
 export async function loadSettings(): Promise<void> {
   settingsCache.clear()
   sudoUsersCache.clear()
   autoThreadCache.clear()
   hubsCache.clear()
-  const [rows, sudo, threads, hubs] = await Promise.all([
+  autoChannelTextIdsCache.clear()
+  const [rows, sudo, threads, hubs, autos] = await Promise.all([
     db.select().from(botSettings).catch(() => []),
     db.select().from(sudoUsers).catch(() => []),
     db.select().from(autoThreadChannels).catch(() => []),
     db.select().from(hubChannels).catch(() => []),
+    db.select({ textChannelId: autoChannels.textChannelId }).from(autoChannels).catch(() => []),
   ])
   for (const r of rows) settingsCache.set(r.key, r.value)
   for (const s of sudo) sudoUsersCache.add(s.userId)
@@ -66,6 +72,7 @@ export async function loadSettings(): Promise<void> {
       label: h.label,
     })
   }
+  for (const a of autos) autoChannelTextIdsCache.add(a.textChannelId)
 }
 
 // ---------------------------------------------------------------------------
@@ -189,7 +196,7 @@ export async function removeAutoThreadChannel(channelId: string): Promise<void> 
 }
 
 // ---------------------------------------------------------------------------
-// Hub channels — managed at runtime, replaces the env HUB_CHANNEL_IDS list
+// Hub channels
 // ---------------------------------------------------------------------------
 
 export function isHubChannelCached(channelId: string): boolean {
@@ -246,4 +253,20 @@ export function updateHubChannelId(oldChannelId: string, newChannelId: string): 
   if (!hub) return
   hubsCache.delete(oldChannelId)
   hubsCache.set(newChannelId, { ...hub, channelId: newChannelId })
+}
+
+// ---------------------------------------------------------------------------
+// Auto-channel text-channel IDs — hot-path lookup for messageCreate
+// ---------------------------------------------------------------------------
+
+export function isAutoChannelText(textChannelId: string): boolean {
+  return autoChannelTextIdsCache.has(textChannelId)
+}
+
+export function trackAutoChannelText(textChannelId: string): void {
+  autoChannelTextIdsCache.add(textChannelId)
+}
+
+export function untrackAutoChannelText(textChannelId: string): void {
+  autoChannelTextIdsCache.delete(textChannelId)
 }

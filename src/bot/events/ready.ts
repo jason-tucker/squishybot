@@ -14,9 +14,11 @@ export function registerReadyEvent(client: Client) {
     initPresence(c)
     logger.info(`Logged in as ${c.user.tag}`)
     startHealthPush()
-    // Load runtime settings + sudo-user overrides from DB into in-memory caches.
-    await loadSettings().catch(err => logger.error('Failed to load settings on startup', err))
-    await loadGames().catch(err => logger.error('Failed to load games on startup', err))
+    // Load runtime settings + sudo-user overrides + game catalog into caches.
+    await Promise.all([
+      loadSettings().catch(err => logger.error('Failed to load settings on startup', err)),
+      loadGames().catch(err => logger.error('Failed to load games on startup', err)),
+    ])
     startBirthdayScheduler(c)
 
     const guild = c.guilds.cache.get(env.GUILD_ID)

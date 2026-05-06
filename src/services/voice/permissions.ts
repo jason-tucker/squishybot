@@ -1,4 +1,8 @@
-import type { GuildMember, VoiceChannel, TextChannel, OverwriteResolvable } from 'discord.js'
+import type {
+  ButtonInteraction, ChannelSelectMenuInteraction, GuildMember, ModalSubmitInteraction,
+  OverwriteResolvable, RoleSelectMenuInteraction, StringSelectMenuInteraction,
+  TextChannel, UserContextMenuCommandInteraction, UserSelectMenuInteraction, VoiceChannel,
+} from 'discord.js'
 import { PermissionFlagsBits, OverwriteType } from 'discord.js'
 import { env } from '../../config/env'
 import type { AutoChannelRecord } from '../../types/voice'
@@ -9,6 +13,34 @@ export function isSudo(member: GuildMember): boolean {
   if (env.SUDO_ROLE_IDS.some(roleId => member.roles.cache.has(roleId))) return true
   // Runtime additions via /sudo → Settings → Sudo Users (cached in memory).
   return isAdditionalSudo(member.id)
+}
+
+type GuardableInteraction =
+  | ButtonInteraction
+  | StringSelectMenuInteraction
+  | ChannelSelectMenuInteraction
+  | UserSelectMenuInteraction
+  | RoleSelectMenuInteraction
+  | ModalSubmitInteraction
+  | UserContextMenuCommandInteraction
+
+/**
+ * Guard a sudo-only interaction handler. Returns true if the caller may
+ * proceed. On rejection, sends "❌ Sudo access required." ephemerally —
+ * via reply() if the interaction hasn't been deferred yet, followUp()
+ * otherwise — and returns false.
+ */
+export async function requireSudo(interaction: GuardableInteraction): Promise<boolean> {
+  if (!interaction.guild) return false
+  const member = await interaction.guild.members.fetch(interaction.user.id)
+  if (isSudo(member)) return true
+  const payload = { content: '❌ Sudo access required.', ephemeral: true } as const
+  if (interaction.replied || interaction.deferred) {
+    await interaction.followUp(payload).catch(() => {})
+  } else if (interaction.isRepliable()) {
+    await interaction.reply(payload).catch(() => {})
+  }
+  return false
 }
 
 export function isOwner(member: GuildMember, record: AutoChannelRecord): boolean {

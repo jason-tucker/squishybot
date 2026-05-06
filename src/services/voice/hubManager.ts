@@ -93,10 +93,12 @@ async function createReplacementHub(guild: Guild, originalHub: typeof hubChannel
       position: originalHub.position,
     })
 
+    // Update the cache *before* the DB write so a voiceStateUpdate for someone
+    // joining the new hub immediately is recognized as a hub join.
+    updateHubChannelId(originalHub.channelId, newHub.id)
     await db.update(hubChannels)
       .set({ channelId: newHub.id })
       .where(eq(hubChannels.id, originalHub.id))
-    updateHubChannelId(originalHub.channelId, newHub.id)
 
     logger.info(`Replacement hub created: ${newHub.name} (${newHub.id})`)
   } catch (err) {

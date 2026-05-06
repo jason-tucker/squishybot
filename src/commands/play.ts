@@ -58,8 +58,8 @@ export const data = new SlashCommandBuilder()
   )
 
 function stripMentions(s: string): string {
-  // Strip @everyone, @here, role/user/channel raw mentions. Keep readable text.
   return s
+    // Insert U+200B (zero-width space) to keep "@everyone" / "@here" visible-as-text but unparsed.
     .replace(/@(everyone|here)/gi, '@​$1')
     .replace(/<@&\d+>/g, '[role]')
     .replace(/<@!?\d+>/g, '[user]')

@@ -25,16 +25,15 @@
  *   games:prefs:back:{mode}:{uid}                   button
  */
 import {
-  ActionRowBuilder, ButtonBuilder, ButtonStyle, ChannelSelectMenuBuilder,
-  ChannelType, ContainerBuilder, MessageFlags, ModalBuilder, RoleSelectMenuBuilder,
-  StringSelectMenuBuilder, TextDisplayBuilder, TextInputBuilder, TextInputStyle,
-  type ButtonInteraction, type ChannelSelectMenuInteraction,
+  ActionRowBuilder, ButtonBuilder, ButtonStyle, ContainerBuilder, MessageFlags,
+  ModalBuilder, RoleSelectMenuBuilder, StringSelectMenuBuilder,
+  TextDisplayBuilder, TextInputBuilder, TextInputStyle,
+  type ButtonInteraction, type Guild,
   type MessageActionRowComponentBuilder, type ModalSubmitInteraction,
   type RoleSelectMenuInteraction, type StringSelectMenuInteraction,
-  type GuildMember, type Guild,
 } from 'discord.js'
 import { sep } from '../utils/cv2'
-import { isSudo } from '../services/voice/permissions'
+import { requireSudo } from '../services/voice/permissions'
 import {
   createGame, deleteGame, gameCount, getGame, listGames, resolvePrefs,
   togglePref, updateGame, type Game,
@@ -121,23 +120,19 @@ function renderGameDetail(g: Game) {
     )
   )
 
-  // Role selects (each is its own row)
-  components.push(
-    new ActionRowBuilder<MessageActionRowComponentBuilder>().addComponents(
-      new RoleSelectMenuBuilder()
-        .setCustomId(`games:cat:role:${g.id}:view`)
-        .setPlaceholder('View role (assigned when wantsView=true)')
-        .setMinValues(0).setMaxValues(1)
-    )
-  )
-  components.push(
-    new ActionRowBuilder<MessageActionRowComponentBuilder>().addComponents(
-      new RoleSelectMenuBuilder()
-        .setCustomId(`games:cat:role:${g.id}:ping`)
-        .setPlaceholder('Ping role (assigned when wantsPing=true)')
-        .setMinValues(0).setMaxValues(1)
-    )
-  )
+  const viewSelect = new RoleSelectMenuBuilder()
+    .setCustomId(`games:cat:role:${g.id}:view`)
+    .setPlaceholder('View role (assigned when wantsView=true)')
+    .setMinValues(0).setMaxValues(1)
+  if (g.roleId) viewSelect.addDefaultRoles(g.roleId)
+  components.push(new ActionRowBuilder<MessageActionRowComponentBuilder>().addComponents(viewSelect))
+
+  const pingSelect = new RoleSelectMenuBuilder()
+    .setCustomId(`games:cat:role:${g.id}:ping`)
+    .setPlaceholder('Ping role (assigned when wantsPing=true)')
+    .setMinValues(0).setMaxValues(1)
+  if (g.pingRoleId) pingSelect.addDefaultRoles(g.pingRoleId)
+  components.push(new ActionRowBuilder<MessageActionRowComponentBuilder>().addComponents(pingSelect))
 
   // Toggles + delete + back row
   components.push(
@@ -192,8 +187,8 @@ export async function renderPrefsEditor(guild: Guild, targetUserId: string, mode
 
   const components: any[] = [container]
 
-  // One row per game — up to 4 games visible since each row = (label as button) + view + ping = 3 buttons.
-  // For more games, use a select-pick-then-toggle flow. With <= 4 games we render direct rows.
+  // 4-row cap: each game row holds (label, view-toggle, ping-toggle) = 3 buttons,
+  // and Discord allows 5 action rows per V2 message minus the Container and the Done row.
   const visiblePrefs = prefs.slice(0, 4)
   for (const p of visiblePrefs) {
     components.push(
@@ -237,20 +232,8 @@ export async function renderPrefsEditor(guild: Guild, targetUserId: string, mode
 // Authorization helpers
 // ===========================================================================
 
-async function ensureSudo(interaction: ButtonInteraction | StringSelectMenuInteraction | RoleSelectMenuInteraction | ChannelSelectMenuInteraction | ModalSubmitInteraction): Promise<boolean> {
-  if (!interaction.guild) return false
-  const member = await interaction.guild.members.fetch(interaction.user.id)
-  if (!isSudo(member)) {
-    if (interaction.isRepliable() && !interaction.replied && !interaction.deferred) {
-      await interaction.reply({ content: '❌ Sudo access required.', ephemeral: true })
-    }
-    return false
-  }
-  return true
-}
-
 async function authorizePrefs(interaction: ButtonInteraction | ModalSubmitInteraction, mode: PrefsMode, targetUserId: string): Promise<boolean> {
-  if (mode === 'sudo') return ensureSudo(interaction)
+  if (mode === 'sudo') return requireSudo(interaction)
   if (interaction.user.id !== targetUserId) {
     if (interaction.isRepliable() && !interaction.replied && !interaction.deferred) {
       await interaction.reply({ content: '❌ You can only edit your own game prefs.', ephemeral: true })
@@ -265,7 +248,7 @@ async function authorizePrefs(interaction: ButtonInteraction | ModalSubmitIntera
 // ===========================================================================
 
 export async function handleCatalogButton(interaction: ButtonInteraction): Promise<void> {
-  if (!await ensureSudo(interaction)) return
+  if (!await requireSudo(interaction)) return
   const id = interaction.customId
 
   if (id === 'games:cat:list') {
@@ -350,7 +333,7 @@ export async function handleCatalogButton(interaction: ButtonInteraction): Promi
 }
 
 export async function handleCatalogStringSelect(interaction: StringSelectMenuInteraction): Promise<void> {
-  if (!await ensureSudo(interaction)) return
+  if (!await requireSudo(interaction)) return
   if (interaction.customId !== 'games:cat:select') return
   const gid = interaction.values[0]
   const g = getGame(gid)
@@ -362,7 +345,7 @@ export async function handleCatalogStringSelect(interaction: StringSelectMenuInt
 }
 
 export async function handleCatalogRoleSelect(interaction: RoleSelectMenuInteraction): Promise<void> {
-  if (!await ensureSudo(interaction)) return
+  if (!await requireSudo(interaction)) return
   const [, , , gid, kind] = interaction.customId.split(':')  // games:cat:role:{gid}:{kind}
   const roleId = interaction.values[0] ?? null
   const patch: Partial<Game> = kind === 'view' ? { roleId } : { pingRoleId: roleId }
@@ -371,7 +354,7 @@ export async function handleCatalogRoleSelect(interaction: RoleSelectMenuInterac
 }
 
 export async function handleCatalogModal(interaction: ModalSubmitInteraction): Promise<void> {
-  if (!await ensureSudo(interaction)) return
+  if (!await requireSudo(interaction)) return
 
   if (interaction.customId === 'games:cat:add_submit') {
     const name = interaction.fields.getTextInputValue('name').trim()
@@ -450,7 +433,7 @@ export async function handlePrefsToggle(interaction: ButtonInteraction): Promise
 export async function handlePrefsBack(interaction: ButtonInteraction): Promise<void> {
   const [, , , mode] = interaction.customId.split(':')
   if (mode === 'sudo') {
-    if (!await ensureSudo(interaction)) return
+    if (!await requireSudo(interaction)) return
     await interaction.update(await renderCatalogList(interaction.guildId!) as any)
   } else {
     await interaction.update({ flags: MessageFlags.IsComponentsV2, components: [

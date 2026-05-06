@@ -43,7 +43,6 @@ export function stopBirthdayScheduler(): void {
 }
 
 function isoDate(d: Date): string {
-  // YYYY-MM-DD in local server time.
   const y = d.getFullYear()
   const m = String(d.getMonth() + 1).padStart(2, '0')
   const day = String(d.getDate()).padStart(2, '0')
@@ -104,11 +103,15 @@ export async function runForDate(client: Client, date: Date): Promise<{ posted: 
     return { posted: 0, skipped: allUsers.length }
   }
 
+  // Bulk-fetch all candidate members in one REST call so the loop only has to
+  // consult the cache for membership.
+  const userIds = allUsers.map(u => u.userId)
+  const fetched = await guild.members.fetch({ user: userIds }).catch(() => null)
+
   let posted = 0
   let skipped = 0
   for (const u of allUsers) {
-    const member = await guild.members.fetch(u.userId).catch(() => null)
-    if (!member) {
+    if (!fetched?.has(u.userId)) {
       skipped++
       continue
     }

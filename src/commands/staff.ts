@@ -1,19 +1,11 @@
 import {
-  SlashCommandBuilder,
+  ActionRowBuilder,
+  ButtonInteraction,
   ChatInputCommandInteraction,
   ModalBuilder,
   TextInputBuilder,
   TextInputStyle,
-  ActionRowBuilder,
 } from 'discord.js'
-
-export const data = new SlashCommandBuilder()
-  .setName('staff')
-  .setDescription('Staff role and profile commands')
-  .setDMPermission(false)
-  .addSubcommand(s =>
-    s.setName('request').setDescription('Request to join the server staff team')
-  )
 
 function buildStaffModal(): ModalBuilder {
   return new ModalBuilder()
@@ -64,10 +56,6 @@ function buildStaffModal(): ModalBuilder {
       )
 }
 
-export async function showStaffRequestModal(interaction: ChatInputCommandInteraction | import('discord.js').ButtonInteraction): Promise<void> {
+export async function showStaffRequestModal(interaction: ChatInputCommandInteraction | ButtonInteraction): Promise<void> {
   await interaction.showModal(buildStaffModal())
-}
-
-export async function execute(interaction: ChatInputCommandInteraction): Promise<void> {
-  await showStaffRequestModal(interaction)
 }

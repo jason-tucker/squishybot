@@ -7,7 +7,7 @@ import {
 import { db } from '../../db/client'
 import { autoChannels, staffApprovals } from '../../db/schema'
 import { eq } from 'drizzle-orm'
-import { isSudo } from '../../services/voice/permissions'
+import { requireSudo } from '../../services/voice/permissions'
 import { postOrUpdateControlPanel } from '../../services/voice/controlPanel'
 import { sep } from '../../utils/cv2'
 
@@ -15,11 +15,8 @@ export async function handleSudoUserButton(interaction: ButtonInteraction): Prom
   const parts = interaction.customId.split(':')
   if (parts[0] !== 'sudo_user') return
 
+  if (!await requireSudo(interaction)) return
   const caller = await interaction.guild!.members.fetch(interaction.user.id)
-  if (!isSudo(caller)) {
-    await interaction.reply({ content: '❌ Sudo access required.', ephemeral: true })
-    return
-  }
 
   const action = parts[1]
   const targetId = parts[2]

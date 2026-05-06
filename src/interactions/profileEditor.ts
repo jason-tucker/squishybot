@@ -24,7 +24,7 @@ import {
   type UserContextMenuCommandInteraction, type UserSelectMenuInteraction,
 } from 'discord.js'
 import { sep } from '../utils/cv2'
-import { isSudo } from '../services/voice/permissions'
+import { requireSudo } from '../services/voice/permissions'
 import {
   countProfiles, ensureProfile, formatBirthday, getProfile, isSelfEditable,
   updateProfile, type SudoEditableField, type UserProfile,
@@ -249,18 +249,7 @@ async function authorize(
   mode: ProfileMode,
   targetUserId: string,
 ): Promise<boolean> {
-  if (!interaction.guild) return false
-  const member = await interaction.guild.members.fetch(interaction.user.id)
-  if (mode === 'sudo') {
-    if (!isSudo(member)) {
-      if (interaction.isRepliable() && !interaction.replied && !interaction.deferred) {
-        await interaction.reply({ content: '❌ Sudo access required.', ephemeral: true })
-      }
-      return false
-    }
-    return true
-  }
-  // mode === 'self'
+  if (mode === 'sudo') return requireSudo(interaction)
   if (targetUserId !== interaction.user.id) {
     if (interaction.isRepliable() && !interaction.replied && !interaction.deferred) {
       await interaction.reply({ content: '❌ You can only edit your own profile.', ephemeral: true })

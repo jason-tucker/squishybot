@@ -12,7 +12,7 @@ import {
 import { db } from '../db/client'
 import { autoChannels } from '../db/schema'
 import { eq } from 'drizzle-orm'
-import { isSudo } from '../services/voice/permissions'
+import { requireSudo } from '../services/voice/permissions'
 import { sep } from '../utils/cv2'
 
 export const data = new ContextMenuCommandBuilder()
@@ -22,12 +22,7 @@ export const data = new ContextMenuCommandBuilder()
 
 export async function execute(interaction: UserContextMenuCommandInteraction): Promise<void> {
   await interaction.deferReply({ ephemeral: true })
-
-  const caller = await interaction.guild!.members.fetch(interaction.user.id)
-  if (!isSudo(caller)) {
-    await interaction.editReply({ content: '❌ Sudo access required.' })
-    return
-  }
+  if (!await requireSudo(interaction)) return
 
   const target = await interaction.guild!.members.fetch(interaction.targetId)
 

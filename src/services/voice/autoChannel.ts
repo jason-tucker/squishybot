@@ -4,7 +4,7 @@ import { db } from '../../db/client'
 import { autoChannels } from '../../db/schema'
 import { eq } from 'drizzle-orm'
 import { env } from '../../config/env'
-import { getSetting } from '../settings'
+import { getSetting, trackAutoChannelText, untrackAutoChannelText } from '../settings'
 import type { AutoChannelRecord } from '../../types/voice'
 import { postOrUpdateControlPanel } from './controlPanel'
 import { postOrUpdateSticky } from './sticky'
@@ -59,6 +59,7 @@ export async function createAutoChannel(
     ownerUserId: owner.id,
     sourceHubId,
   }).returning()
+  trackAutoChannelText(record.textChannelId)
 
   // 4. Post control panel + sticky
   await postOrUpdateControlPanel(client, record)
@@ -80,6 +81,7 @@ export async function deleteAutoChannel(client: Client, record: AutoChannelRecor
   ])
 
   await db.delete(autoChannels).where(eq(autoChannels.voiceChannelId, record.voiceChannelId)).catch(() => {})
+  untrackAutoChannelText(record.textChannelId)
 
   logger.info(`Auto channel deleted: vc=${record.voiceChannelId}`)
 }
