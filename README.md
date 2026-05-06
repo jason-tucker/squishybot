@@ -56,6 +56,14 @@ Roadmap, completed work, and open action items are tracked in the [Bot Developme
 - Every non-bot, non-system message in a configured channel gets a public thread. Default thread name: `{author} — {first line}` (truncated to 100 chars). Per-channel `name_template` and `archive_duration` columns are reserved on the schema for future per-channel tuning.
 - Requires the `MessageContent` privileged intent (Dev Portal → Bot).
 
+### Game Night
+
+- Sudo runs `/sudo → Game Night` and fills a modal: game (must be in the catalog), date/time, optional notes.
+- Bot posts a CV2 announcement in the channel set by **/sudo → Settings → Channels → Game Night** (`channel.gamenight`).
+- Members RSVP with one click: ✅ Joining · 🤔 Might join · ❌ Not joining (toggle — clicking your current state clears it).
+- Members also indicate whether they own the game: 👍 I own it · 🛒 I don't own it. The "🛒 Need a copy" list helps the host know who to gift the game to (we buy the game for non-owners on game nights).
+- ✖️ Cancel button visible to host and sudo. State held in-memory + parse-from-message recovery so announcements survive restarts.
+
 ### Birthday Pings
 
 - Daily scheduler that fires at a configurable target hour (default 9 AM server time) and posts a celebratory message in the channel set under **/sudo → Settings → Channels → Birthday channel**.

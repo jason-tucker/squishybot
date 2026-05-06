@@ -94,6 +94,15 @@ export function registerInteractionCreate(client: Client) {
         } else if (id.startsWith('play:cancel:')) {
           const { handleCancelButton } = await import('../../commands/play')
           await handleCancelButton(interaction as ButtonInteraction)
+        } else if (id.startsWith('gn:rsvp:')) {
+          const { handleRsvpButton } = await import('../../commands/gamenight')
+          await handleRsvpButton(interaction as ButtonInteraction)
+        } else if (id.startsWith('gn:own:')) {
+          const { handleOwnershipButton } = await import('../../commands/gamenight')
+          await handleOwnershipButton(interaction as ButtonInteraction)
+        } else if (id.startsWith('gn:cancel:')) {
+          const { handleCancelButton: handleGnCancel } = await import('../../commands/gamenight')
+          await handleGnCancel(interaction as ButtonInteraction)
         } else if (id.startsWith('games:cat:')) {
           const { handleCatalogButton } = await import('../../interactions/gamesEditor')
           await handleCatalogButton(interaction as ButtonInteraction)
@@ -177,6 +186,9 @@ export function registerInteractionCreate(client: Client) {
         } else if (id === 'games:cat:add_submit' || id.startsWith('games:cat:save:')) {
           const { handleCatalogModal } = await import('../../interactions/gamesEditor')
           await handleCatalogModal(interaction as ModalSubmitInteraction)
+        } else if (id === 'gn:setup_submit') {
+          const { handleSetupSubmit } = await import('../../commands/gamenight')
+          await handleSetupSubmit(interaction as ModalSubmitInteraction)
         }
       }
     } catch (err) {

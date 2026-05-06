@@ -48,6 +48,7 @@ export async function renderSudoHome(): Promise<{ flags: number; components: any
       .addOptions([
         { label: 'Settings', value: 'settings', emoji: '⚙️', description: 'Edit runtime config: sudo users, channels, voice, features' },
         { label: 'Manage user', value: 'manage_user', emoji: '👤', description: 'Pick a member to manage their bot settings' },
+        { label: 'Game Night', value: 'gamenight', emoji: '🎲', description: 'Schedule a Game Night announcement with RSVP buttons' },
         { label: 'Active voice channels', value: 'channels', emoji: '🔊' },
         { label: 'Hub channels', value: 'hubs', emoji: '🪐' },
         { label: 'Force cleanup', value: 'cleanup', emoji: '🧹' },

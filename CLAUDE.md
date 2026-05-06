@@ -54,7 +54,7 @@ Slash commands are consolidated to four top-level commands plus one context menu
 |---|---|---|
 | `/voice` | Open an ephemeral copy of the control panel for the channel you're currently in | Owner/Host/Sudo |
 | `/squishy` | User-facing menu: bot status, feature explainers, **Edit My Profile** button (opens profileEditor in self mode), Request Staff Role button | Everyone |
-| `/sudo` | Admin select-menu panel (channels, hubs, auto threads, cleanup, approvals, restart) | Sudo |
+| `/sudo` | Admin select-menu panel: Settings, Manage user (pick), Game Night (schedule), Active VCs, Hubs, Force cleanup, Pending approvals, Run reconciler, Restart instructions. Sub-panels have 🏠 Back to /sudo. | Sudo |
 | `/report` | Open a modal to file a GitHub issue (Title / Type / Description / Steps); owner approves via DM before it lands on GitHub | Everyone |
 | `/games` | Pick which games you want View / LFG-ping roles for | Everyone |
 | `/play <game>` | Post a CV2 LFG message in the game's channel with a "🎮 I want to play!" toggle button. 30-min per-(user,game) cooldown. State in-memory + parse-from-message fallback. | Everyone |

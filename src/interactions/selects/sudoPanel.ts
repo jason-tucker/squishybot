@@ -23,9 +23,16 @@ export async function handleSudoPanelSelect(interaction: StringSelectMenuInterac
     return
   }
 
-  await interaction.deferUpdate()
-
   const value = interaction.values[0]
+
+  // Game Night: must show a modal as the first response, so handle BEFORE deferring.
+  if (value === 'gamenight') {
+    const { showSetupModal } = await import('../../commands/gamenight')
+    await showSetupModal(interaction)
+    return
+  }
+
+  await interaction.deferUpdate()
   const guildId = env.GUILD_ID
 
   if (value === 'channels') {
