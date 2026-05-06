@@ -49,7 +49,7 @@ chat scrolls; clicking it gives you an ephemeral copy of the panel.
 |---|---|
 | ✏️ **Rename** | Modal to set a custom name |
 | 🔒 **Lock** / 🔓 **Unlock** | Toggle Connect permission on `@everyone` |
-| 👑 **Hosts** | One panel: select a current host to remove (❌) or a VC member to add (👑) |
+| 👑 **Hosts** | One panel listing each member with their current rank emoji (👑 host · 🛡️ sudo · 👤 member). Clicking toggles host status. |
 | 📋 **Templates** | Auto / Counter / Comp 5-stack / Tryhard / Chill — sets name + user limit in one click |
 | 👤 **Claim** | Take ownership when the owner has left |
 | 🗑️ **Delete** | Delete the voice + text channels right away |

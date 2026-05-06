@@ -75,7 +75,7 @@ export async function handleSquishyPanelSelect(interaction: StringSelectMenuInte
         '**Panel buttons:**\n' +
         '✏️ **Rename** — set a custom channel name via a popup form\n' +
         '🔒 **Lock / Unlock** — prevent new people from joining\n' +
-        '👑 **Hosts** — one panel to add or remove hosts (members already in the VC)\n' +
+        '👑 **Hosts** — one panel to add or remove hosts. Each option shows their current rank: 👑 host · 🛡️ sudo · 👤 member.\n' +
         '📋 **Templates** — Auto (follows your game) / Counter ([x/y]) / Comp 5-stack / Tryhard / Chill\n' +
         '👤 **Claim** — become the owner if the previous owner left\n' +
         '🗑️ **Delete** — immediately delete the channel and text channel\n\n' +

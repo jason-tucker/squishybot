@@ -139,25 +139,34 @@ export async function handleVoiceControlButton(interaction: ButtonInteraction): 
     const guild = interaction.guild!
     const vc = await guild.channels.fetch(record.voiceChannelId).catch(() => null)
 
-    // Build one combined select: current hosts (❌ remove) + VC members not owner/host (👑 add)
-    const options: { label: string; value: string; description?: string }[] = []
+    // One combined select. The emoji reflects each user's current rank in
+    // this channel; clicking toggles host status (action shown in description).
+    //   👑 = current host    (click to remove)
+    //   🛡️ = sudo            (click to make a host)
+    //   👤 = regular member  (click to make a host)
+    const options: { label: string; value: string; description?: string; emoji?: string }[] = []
 
+    // Current hosts first — clicking removes them
     for (const hostId of record.hostUserIds.slice(0, 24)) {
-      const m = await guild.members.fetch(hostId).catch(() => null)
+      const hostMember = await guild.members.fetch(hostId).catch(() => null)
       options.push({
-        label: `❌ Remove — ${m?.displayName ?? hostId}`,
+        label: hostMember?.displayName ?? hostId,
         value: `remove:${hostId}`,
-        description: 'Click to remove host status',
+        description: 'Currently a host — click to remove',
+        emoji: '👑',
       })
     }
 
+    // Then VC members who aren't the owner and aren't hosts — clicking adds them
     if (vc?.isVoiceBased()) {
       const eligible = vc.members.filter(m => m.id !== record.ownerUserId && !record.hostUserIds.includes(m.id))
       for (const m of eligible.first(24 - options.length)) {
+        const sudo = isSudo(m)
         options.push({
-          label: `👑 Add — ${m.displayName}`,
+          label: m.displayName,
           value: `add:${m.id}`,
-          description: 'Click to make this member a host',
+          description: sudo ? 'Sudo — click to make a host' : 'Member — click to make a host',
+          emoji: sudo ? '🛡️' : '👤',
         })
       }
     }
@@ -177,7 +186,7 @@ export async function handleVoiceControlButton(interaction: ButtonInteraction): 
         .addOptions(options)
     )
     await interaction.reply({
-      content: '**Hosts**\nPick a member to toggle their host status:',
+      content: '**Hosts** — 👑 host · 🛡️ sudo · 👤 member. Pick someone to toggle their host status.',
       components: [row],
       ephemeral: true,
     })
