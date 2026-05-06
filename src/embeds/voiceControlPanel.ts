@@ -45,14 +45,9 @@ export function buildControlPanelPayload(record: AutoChannelRecord, ownerTag: st
       .setEmoji(record.isLocked ? '🔓' : '🔒')
       .setStyle(record.isLocked ? ButtonStyle.Success : ButtonStyle.Primary),
     new ButtonBuilder()
-      .setCustomId(encodeVcId(vcId, 'add_host'))
-      .setLabel('Add Host')
+      .setCustomId(encodeVcId(vcId, 'hosts'))
+      .setLabel('Hosts')
       .setEmoji('👑')
-      .setStyle(ButtonStyle.Secondary),
-    new ButtonBuilder()
-      .setCustomId(encodeVcId(vcId, 'remove_host'))
-      .setLabel('Remove Host')
-      .setEmoji('➖')
       .setStyle(ButtonStyle.Secondary),
   )
 

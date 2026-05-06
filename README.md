@@ -179,8 +179,7 @@ Four top-level slash commands plus one right-click context menu. All responses a
 |---|---|
 | ✏️ **Rename** | Modal to set a custom name |
 | 🔒 **Lock** / 🔓 **Unlock** | Toggle Connect on `@everyone` |
-| 👑 **Add Host** | Pick a current member as a host |
-| ➖ **Remove Host** | Remove a host |
+| 👑 **Hosts** | One panel that lists current hosts (❌ Remove) and eligible VC members (👑 Add) — click to toggle |
 | 📋 **Templates** | Auto / Counter / Comp 5-stack / Tryhard / Chill — sets name + user limit in one click |
 | 👤 **Claim** | Take ownership when the original owner has left |
 | 🗑️ **Delete** | Delete both voice + text channels right away |

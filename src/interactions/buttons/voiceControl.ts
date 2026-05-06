@@ -134,49 +134,53 @@ export async function handleVoiceControlButton(interaction: ButtonInteraction): 
     return
   }
 
-  if (action === 'add_host') {
+  if (action === 'hosts') {
     if (!await requireControl(interaction, member, record)) return
-    const vc = await interaction.guild!.channels.fetch(record.voiceChannelId).catch(() => null)
-    if (!vc?.isVoiceBased() || vc.members.size === 0) {
-      await interaction.reply({ content: '❌ No members are in the channel to add as host.', ephemeral: true })
-      return
-    }
-    const eligibleMembers = vc.members.filter(m => m.id !== record.ownerUserId && !record.hostUserIds.includes(m.id))
-    if (eligibleMembers.size === 0) {
-      await interaction.reply({ content: 'ℹ️ All current members are already hosts.', ephemeral: true })
-      return
-    }
-    const options = eligibleMembers.first(25).map(m => ({ label: m.displayName, value: m.id }))
-    const row = new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(
-      new StringSelectMenuBuilder()
-        .setCustomId(`vc:${voiceChannelId}:add_host`)
-        .setPlaceholder('Select a member to add as host')
-        .addOptions(options)
-    )
-    await interaction.reply({ content: 'Choose a member to add as host:', components: [row], ephemeral: true })
-    return
-  }
-
-  if (action === 'remove_host') {
-    if (!await requireControl(interaction, member, record)) return
-    if (record.hostUserIds.length === 0) {
-      await interaction.reply({ content: 'ℹ️ There are no hosts to remove.', ephemeral: true })
-      return
-    }
     const guild = interaction.guild!
-    const options = await Promise.all(
-      record.hostUserIds.slice(0, 25).map(async id => {
-        const m = await guild.members.fetch(id).catch(() => null)
-        return { label: m?.displayName ?? id, value: id }
+    const vc = await guild.channels.fetch(record.voiceChannelId).catch(() => null)
+
+    // Build one combined select: current hosts (❌ remove) + VC members not owner/host (👑 add)
+    const options: { label: string; value: string; description?: string }[] = []
+
+    for (const hostId of record.hostUserIds.slice(0, 24)) {
+      const m = await guild.members.fetch(hostId).catch(() => null)
+      options.push({
+        label: `❌ Remove — ${m?.displayName ?? hostId}`,
+        value: `remove:${hostId}`,
+        description: 'Click to remove host status',
       })
-    )
+    }
+
+    if (vc?.isVoiceBased()) {
+      const eligible = vc.members.filter(m => m.id !== record.ownerUserId && !record.hostUserIds.includes(m.id))
+      for (const m of eligible.first(24 - options.length)) {
+        options.push({
+          label: `👑 Add — ${m.displayName}`,
+          value: `add:${m.id}`,
+          description: 'Click to make this member a host',
+        })
+      }
+    }
+
+    if (options.length === 0) {
+      await interaction.reply({
+        content: 'ℹ️ No hosts to remove and no eligible members to add. (Only members currently in the voice channel can be added as hosts.)',
+        ephemeral: true,
+      })
+      return
+    }
+
     const row = new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(
       new StringSelectMenuBuilder()
-        .setCustomId(`vc:${voiceChannelId}:remove_host`)
-        .setPlaceholder('Select a host to remove')
+        .setCustomId(`vc:${voiceChannelId}:hosts`)
+        .setPlaceholder('Add or remove a host…')
         .addOptions(options)
     )
-    await interaction.reply({ content: 'Choose a host to remove:', components: [row], ephemeral: true })
+    await interaction.reply({
+      content: '**Hosts**\nPick a member to toggle their host status:',
+      components: [row],
+      ephemeral: true,
+    })
     return
   }
 

@@ -49,8 +49,7 @@ chat scrolls; clicking it gives you an ephemeral copy of the panel.
 |---|---|
 | ✏️ **Rename** | Modal to set a custom name |
 | 🔒 **Lock** / 🔓 **Unlock** | Toggle Connect permission on `@everyone` |
-| 👑 **Add Host** | Pick a current member as a host |
-| ➖ **Remove Host** | Remove a host |
+| 👑 **Hosts** | One panel: select a current host to remove (❌) or a VC member to add (👑) |
 | 📋 **Templates** | Auto / Counter / Comp 5-stack / Tryhard / Chill — sets name + user limit in one click |
 | 👤 **Claim** | Take ownership when the owner has left |
 | 🗑️ **Delete** | Delete the voice + text channels right away |
@@ -121,7 +120,7 @@ Weekly auto-restart at Tuesday 4 AM via `squishybot-restart.timer`.
 
 All voice control interactions use: `vc:{voiceChannelId}:{action}`
 
-Actions: `delete`, `delete_confirm`, `rename`, `rename_submit`, `lock`, `unlock`, `add_host`, `remove_host`, `claim`, `templates`, `template_apply` (select), `open_panel` (sticky button)
+Actions: `delete`, `delete_confirm`, `rename`, `rename_submit`, `lock`, `unlock`, `hosts` (button + select), `claim`, `templates`, `template_apply` (select), `open_panel` (sticky button)
 
 `/report` uses three customIds (no vc prefix):
 - `report:submit` — modal submission
