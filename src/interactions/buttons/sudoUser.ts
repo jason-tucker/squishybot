@@ -54,6 +54,16 @@ export async function handleSudoUserButton(interaction: ButtonInteraction): Prom
     return
   }
 
+  if (action === 'edit_profile') {
+    await interaction.deferUpdate()
+    const target = await interaction.guild!.members.fetch(targetId).catch(() => null)
+    const name = target?.displayName ?? `<@${targetId}>`
+    const { renderProfileEditor } = await import('../profileEditor')
+    const payload = await renderProfileEditor(interaction.guildId!, targetId, name, 'sudo')
+    await interaction.editReply(payload as any)
+    return
+  }
+
   if (action === 'view_staff') {
     await interaction.deferUpdate()
     const records = await db.select().from(staffApprovals).where(eq(staffApprovals.userId, targetId))

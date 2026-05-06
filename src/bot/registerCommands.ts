@@ -5,12 +5,14 @@ import { data as squishyData } from '../commands/squishy'
 import { data as sudoData } from '../commands/sudo'
 import { data as manageUserData } from '../commands/manageUser'
 import { data as reportData } from '../commands/report'
+import { data as profileData } from '../commands/profile'
 
 const commands = [
   voiceData.toJSON(),    // /voice  — voice channel control panel
   squishyData.toJSON(),  // /squishy — user menu (bot info + staff request)
   sudoData.toJSON(),     // /sudo   — admin panel (sudo only)
   reportData.toJSON(),   // /report — file a GitHub issue
+  profileData.toJSON(),  // /profile — self-service profile editor
   manageUserData.toJSON(), // right-click → Manage User (context menu, sudo only)
 ]
 

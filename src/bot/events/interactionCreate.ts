@@ -12,6 +12,7 @@ import { execute as squishyExecute } from '../../commands/squishy'
 import { execute as sudoExecute } from '../../commands/sudo'
 import { execute as manageUserExecute } from '../../commands/manageUser'
 import { execute as reportExecute } from '../../commands/report'
+import { execute as profileExecute } from '../../commands/profile'
 import { isVcCustomId } from '../../utils/customId'
 import { recordActivity } from '../../services/presence'
 
@@ -20,6 +21,7 @@ const commandHandlers = new Map<string, (i: ChatInputCommandInteraction) => Prom
   ['squishy', squishyExecute],
   ['sudo', sudoExecute],
   ['report', reportExecute],
+  ['profile', profileExecute],
 ])
 
 export function registerInteractionCreate(client: Client) {

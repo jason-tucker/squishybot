@@ -54,6 +54,11 @@ export async function execute(interaction: UserContextMenuCommandInteraction): P
     .addTextDisplayComponents(new TextDisplayBuilder().setContent(lines.join('\n')))
 
   const buttons = new ActionRowBuilder<ButtonBuilder>().addComponents(
+    new ButtonBuilder()
+      .setCustomId(`sudo_user:edit_profile:${target.id}`)
+      .setLabel('Edit Profile')
+      .setEmoji('👤')
+      .setStyle(ButtonStyle.Primary),
     ...(currentChannel ? [
       new ButtonBuilder()
         .setCustomId(`sudo_user:force_panel:${target.id}`)
