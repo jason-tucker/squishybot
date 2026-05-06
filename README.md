@@ -47,14 +47,20 @@ Roadmap, completed work, and open action items are tracked in the [Bot Developme
 ### Sudo Panel
 
 - `/sudo` opens an admin select menu: **Settings**, active channels, hubs, force cleanup, pending approvals, run reconciler, restart instructions
-- **Settings** is a runtime config editor — overrides the values that would normally come from `.env` for: extra sudo users, channel IDs (log / admin / birthday / clips / food / staff approval thread), voice cleanup delay, and feature flags. Reset on any field falls back to the env value.
-- Settings persist in the `bot_settings` table; runtime-added sudo users persist in `sudo_users`.
+- **Settings** is a runtime config editor — overrides the values that would normally come from `.env` for: extra sudo users, channel IDs (log / admin / birthday / staff approval thread), voice cleanup delay, and the list of auto-thread channels. Reset on any field falls back to the env value.
+- Settings persist in `bot_settings` (key/value), `sudo_users` (members granted sudo at runtime), and `auto_thread_channels` (the dynamic auto-thread list).
+
+### Auto Threads
+
+- Configure under **/sudo → Settings → Auto Threads** — a `ChannelSelectMenu` to add, a `StringSelectMenu` to remove. No code changes required to onboard a new channel.
+- Every non-bot, non-system message in a configured channel gets a public thread. Default thread name: `{author} — {first line}` (truncated to 100 chars). Per-channel `name_template` and `archive_duration` columns are reserved on the schema for future per-channel tuning.
+- Requires the `MessageContent` privileged intent (Dev Portal → Bot).
 
 ### Planned Features
 
 - Game role and channel management with opt-in ping system
-- Birthday pings
-- Automatic threads in clips/food channels (toggle is already wired in **/sudo → Settings → Features**)
+- Birthday pings (channel ID is already configurable in **/sudo → Settings → Channels**; scheduler + opt-in UI are the missing pieces)
+- User profile editor (display names, birthdays, staff fields)
 
 ---
 
@@ -88,9 +94,9 @@ cp .env.example .env
 | `STAFF_APPROVAL_THREAD_ID` | No | Thread where `/staff request` submissions are posted |
 | `STAFF_APPROVAL_PING_USER_ID` | No | User pinged on each staff request |
 | `VOICE_CLEANUP_DELAY_MS` | No | ms before empty channel cleanup (default: 30000) |
-| `BIRTHDAY_CHANNEL_ID` | No | Future: birthday pings |
-| `CLIPS_CHANNEL_ID` | No | Future: auto-thread on clips |
-| `FOOD_CHANNEL_ID` | No | Future: auto-thread on food |
+| `BIRTHDAY_CHANNEL_ID` | No | Future: birthday pings (also editable at `/sudo → Settings → Channels`) |
+| `CLIPS_CHANNEL_ID` | — | **Deprecated.** Auto-threading is now configured at `/sudo → Settings → Auto Threads` (DB-backed). Safe to remove from `.env`. |
+| `FOOD_CHANNEL_ID` | — | **Deprecated.** Same as above. |
 | `UPTIME_KUMA_PUSH_URL` | No | Push monitor URL |
 | `BOT_OWNER_ID` | Yes for `/report` | Receives DM on every `/report` for review approval, plus startup pings (silent) |
 | `GITHUB_TOKEN` | Yes for `/report` | Fine-grained PAT with **Issues: Read & Write** on `GITHUB_REPO` |
@@ -162,7 +168,7 @@ sleep 5 && journalctl -u squishybot -n 10 --no-pager
 - Manage Roles (for permission overwrites)
 - View Channels / Send Messages / Read Message History
 - Use External Emojis (for Components V2)
-- Privileged intents in Developer Portal: **Server Members** and **Voice Activity** (Voice State)
+- Privileged intents in Developer Portal: **Server Members**, **Presence Intent**, **Message Content** (the last is required for auto-thread name templating)
 
 ---
 

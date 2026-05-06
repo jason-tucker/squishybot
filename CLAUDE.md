@@ -94,8 +94,8 @@ Weekly auto-restart at Tuesday 4 AM via `squishybot-restart.timer`.
 | `STAFF_APPROVAL_THREAD_ID` | No | Thread where `/staff request` posts go |
 | `STAFF_APPROVAL_PING_USER_ID` | No | User pinged on each staff request |
 | `BIRTHDAY_CHANNEL_ID` | No | Future: birthday ping channel |
-| `CLIPS_CHANNEL_ID` | No | Future: auto-thread on clips channel |
-| `FOOD_CHANNEL_ID` | No | Future: auto-thread channel |
+| `CLIPS_CHANNEL_ID` | — | **Deprecated.** Auto-thread channels are now managed via `/sudo → Settings → Auto Threads` (DB-backed `auto_thread_channels` table). |
+| `FOOD_CHANNEL_ID` | — | **Deprecated.** Same as above. |
 | `UPTIME_KUMA_PUSH_URL` | No | Push monitor URL |
 | `BOT_OWNER_ID` | No (Yes for `/report`) | Receives DM on every `/report` for review approval, plus startup DMs |
 | `GITHUB_TOKEN` | No | Fine-grained PAT with `Issues: Read & Write` on `GITHUB_REPO`; required for `/report` |
@@ -109,6 +109,9 @@ Weekly auto-restart at Tuesday 4 AM via `squishybot-restart.timer`.
 |---|---|
 | `auto_channels` | Tracks active auto voice channels and their state |
 | `hub_channels` | Registry of managed hub voice channels |
+| `bot_settings` | Runtime key/value config overrides edited via `/sudo → Settings` |
+| `sudo_users` | Members granted sudo at runtime (beyond the immutable `SUDO_USER_IDS` env list) |
+| `auto_thread_channels` | Channels where every non-bot message gets an auto-thread (managed via `/sudo → Settings → Auto Threads`) |
 | `user_profiles` | User display names, birthdays, staff fields (future) |
 | `staff_approvals` | Pending staff role approval queue (future) |
 | `games` | Game definitions for role/channel management (future) |

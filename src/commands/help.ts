@@ -36,9 +36,11 @@ export async function execute(interaction: ChatInputCommandInteraction): Promise
   const sudoSection =
     '### 🛡️ Sudo / Admin\n' +
     '`/sudo` — opens the admin select menu:\n' +
-    '• **Settings** — runtime config (sudo users, channels, voice, feature flags) backed by `bot_settings` / `sudo_users`\n' +
+    '• **Settings** — runtime config (sudo users, channels, voice, auto-thread channels) backed by `bot_settings` / `sudo_users` / `auto_thread_channels`\n' +
     '• Active voice channels · Hub channels · Force cleanup · Pending approvals · Run reconciler · Restart instructions\n\n' +
-    'Right-click a member → **Manage User** — roles, voice status, disconnect, staff history'
+    'Right-click a member → **Manage User** — roles, voice status, disconnect, staff history\n\n' +
+    '### 🧵 Automatic\n' +
+    'Channels added under **/sudo → Settings → Auto Threads** get a public thread on every non-bot message. Default thread name: `{author} — {first line}`.'
 
   const container = new ContainerBuilder()
     .setAccentColor(0x5865f2)
