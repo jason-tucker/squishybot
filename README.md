@@ -87,11 +87,16 @@ cp .env.example .env
 | `CLIPS_CHANNEL_ID` | No | Future: auto-thread on clips |
 | `FOOD_CHANNEL_ID` | No | Future: auto-thread on food |
 | `UPTIME_KUMA_PUSH_URL` | No | Push monitor URL |
+| `BOT_OWNER_ID` | Yes for `/report` | Receives DM on every `/report` for review approval, plus startup pings (silent) |
+| `GITHUB_TOKEN` | Yes for `/report` | Fine-grained PAT with **Issues: Read & Write** on `GITHUB_REPO` |
+| `GITHUB_REPO` | Yes for `/report` | `owner/name`, e.g. `jason-tucker/squishybot` |
 
-### 3. Run database migrations
+### 3. Apply database schema
+
+SquishyBot uses `drizzle-kit push` — schema lives only in `src/db/schema/*.ts`, no SQL migration files in git. The Docker entrypoint runs the push automatically on every start. For local non-Docker dev:
 
 ```bash
-pnpm db:migrate
+pnpm drizzle-kit push
 ```
 
 ### 4. Deploy slash commands
@@ -158,20 +163,26 @@ sleep 5 && journalctl -u squishybot -n 10 --no-pager
 
 ## Slash commands
 
+Four top-level slash commands plus one right-click context menu. All responses are ephemeral.
+
 | Command | Access | Description |
 |---|---|---|
-| `/help` | Everyone | List available commands (sudo section appears for sudo users) |
-| `/squishy status` | Everyone | Bot status, uptime, active channel count |
-| `/squishy repair` | Sudo | Manually run the startup reconciler |
-| `/voice panel` | Owner/Host/Sudo | Open or refresh the control panel for your active voice channel |
-| `/voice claim` | Voice members | Claim ownership of an unclaimed auto channel |
-| `/voice delete` | Owner/Host/Sudo | Delete your auto voice channel |
-| `/staff request` | Everyone | Submit a staff role request to the approval thread |
-| `/sudo channels` | Sudo | List active auto channels |
-| `/sudo hubs` | Sudo | List managed hub channels |
-| `/sudo cleanup` | Sudo | Force cleanup of empty/orphaned channels |
-| `/sudo approvals` | Sudo | List pending staff approvals |
-| `/sudo restart` | Sudo | Show terminal restart instructions |
+| `/voice` | Owner / Host / Sudo | Open an ephemeral copy of the control panel for the auto channel you're in |
+| `/squishy` | Everyone | User-facing menu: bot status, feature explainers (Voice / Panel / Reports / Staff), staff-request button |
+| `/sudo` | Sudo | Admin select-menu panel (channels, hubs, cleanup, approvals, restart) |
+| `/report` | Everyone | Modal (Title / Type / Description / Steps) → DMs the owner with **Approve+Notify** / **Approve Silent** / **Reject+Notify** / **Reject Silent** buttons → on approve, files a GitHub issue against `GITHUB_REPO` |
+| Right-click user → **Manage User** | Sudo | Roles, voice status, disconnect, staff history |
 
-The control panel inside an auto text channel (Components V2) is the primary interface —
-slash commands are fallback escape hatches.
+### Voice control panel (in each auto-channel text channel)
+
+| Button | What it does |
+|---|---|
+| ✏️ **Rename** | Modal to set a custom name |
+| 🔒 **Lock** / 🔓 **Unlock** | Toggle Connect on `@everyone` |
+| 👑 **Add Host** | Pick a current member as a host |
+| ➖ **Remove Host** | Remove a host |
+| 📋 **Templates** | Auto / Counter / Comp 5-stack / Tryhard / Chill — sets name + user limit in one click |
+| 👤 **Claim** | Take ownership when the original owner has left |
+| 🗑️ **Delete** | Delete both voice + text channels right away |
+
+The persistent panel + the silent **📋 Open Panel** sticky at the bottom of the text channel are the primary interaction surfaces. Slash commands are fallback escape hatches.
