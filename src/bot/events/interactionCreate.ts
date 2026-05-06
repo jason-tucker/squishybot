@@ -61,6 +61,15 @@ export function registerInteractionCreate(client: Client) {
         } else if (id.startsWith('sudo:set:')) {
           const { handleSettingsButton } = await import('../../interactions/sudoSettings')
           await handleSettingsButton(interaction as ButtonInteraction)
+        } else if (id.startsWith('profile:edit:')) {
+          const { handleProfileEditButton } = await import('../../interactions/profileEditor')
+          await handleProfileEditButton(interaction as ButtonInteraction)
+        } else if (id.startsWith('profile:toggle:')) {
+          const { handleProfileToggle } = await import('../../interactions/profileEditor')
+          await handleProfileToggle(interaction as ButtonInteraction)
+        } else if (id.startsWith('profile:back:')) {
+          const { handleProfileBack } = await import('../../interactions/profileEditor')
+          await handleProfileBack(interaction as ButtonInteraction)
         }
 
       } else if (interaction.isChannelSelectMenu()) {
@@ -75,6 +84,9 @@ export function registerInteractionCreate(client: Client) {
         if (id === 'sudo:set:adduser') {
           const { handleSettingsUserSelect } = await import('../../interactions/sudoSettings')
           await handleSettingsUserSelect(interaction)
+        } else if (id === 'profile:select_user') {
+          const { handleProfileUserSelect } = await import('../../interactions/profileEditor')
+          await handleProfileUserSelect(interaction)
         }
 
       } else if (interaction.isStringSelectMenu()) {
@@ -110,6 +122,9 @@ export function registerInteractionCreate(client: Client) {
         } else if (id.startsWith('sudo:set:save:')) {
           const { handleSettingsModalSubmit } = await import('../../interactions/sudoSettings')
           await handleSettingsModalSubmit(interaction as ModalSubmitInteraction)
+        } else if (id.startsWith('profile:save:')) {
+          const { handleProfileModal } = await import('../../interactions/profileEditor')
+          await handleProfileModal(interaction as ModalSubmitInteraction)
         }
       }
     } catch (err) {

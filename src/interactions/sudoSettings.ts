@@ -36,7 +36,7 @@ import {
 } from 'discord.js'
 import { count } from 'drizzle-orm'
 import { db } from '../db/client'
-import { games, userProfiles } from '../db/schema'
+import { games } from '../db/schema'
 import { env } from '../config/env'
 import { sep } from '../utils/cv2'
 import { isSudo } from '../services/voice/permissions'
@@ -466,25 +466,9 @@ async function renderGames() {
   }
 }
 
-async function renderProfiles() {
-  const [{ value: profileCount }] = await db.select({ value: count() }).from(userProfiles).catch(() => [{ value: 0 }])
-  const container = new ContainerBuilder()
-    .setAccentColor(0x9b59b6)
-    .addTextDisplayComponents(new TextDisplayBuilder().setContent(
-      '### 👤 User Profiles\n' +
-      `_${profileCount} profile(s) on file._\n\n` +
-      '**Coming soon:** browse/edit profiles (display names, birthdays, staff fields).\n' +
-      'Schema is in place (\`user_profiles\`); editor lives here when it ships.'
-    ))
-  return {
-    flags: MessageFlags.IsComponentsV2 as number,
-    components: [
-      container,
-      new ActionRowBuilder<MessageActionRowComponentBuilder>().addComponents(
-        new ButtonBuilder().setCustomId('sudo:set:home').setLabel('Back').setStyle(ButtonStyle.Secondary)
-      ),
-    ],
-  }
+async function renderProfiles(guildId: string) {
+  const { renderSudoUserPicker } = await import('./profileEditor')
+  return renderSudoUserPicker(guildId)
 }
 
 // ---------------------------------------------------------------------------
@@ -533,7 +517,7 @@ export async function handleSettingsButton(interaction: ButtonInteraction): Prom
     } else if (category === 'games') {
       await interaction.update((await renderGames()) as any)
     } else if (category === 'profiles') {
-      await interaction.update((await renderProfiles()) as any)
+      await interaction.update((await renderProfiles(interaction.guildId!)) as any)
     } else {
       await interaction.reply({ content: `Unknown category: ${category}`, ephemeral: true })
     }
