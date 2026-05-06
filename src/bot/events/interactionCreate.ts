@@ -14,6 +14,7 @@ import { execute as manageUserExecute } from '../../commands/manageUser'
 import { execute as reportExecute } from '../../commands/report'
 import { execute as profileExecute } from '../../commands/profile'
 import { execute as gamesExecute } from '../../commands/games'
+import { execute as playExecute, autocomplete as playAutocomplete } from '../../commands/play'
 import { isVcCustomId } from '../../utils/customId'
 import { recordActivity } from '../../services/presence'
 
@@ -24,6 +25,7 @@ const commandHandlers = new Map<string, (i: ChatInputCommandInteraction) => Prom
   ['report', reportExecute],
   ['profile', profileExecute],
   ['games', gamesExecute],
+  ['play', playExecute],
 ])
 
 export function registerInteractionCreate(client: Client) {
@@ -34,6 +36,11 @@ export function registerInteractionCreate(client: Client) {
       if (interaction.isChatInputCommand()) {
         const handler = commandHandlers.get(interaction.commandName)
         if (handler) await handler(interaction)
+
+      } else if (interaction.isAutocomplete()) {
+        if (interaction.commandName === 'play') {
+          await playAutocomplete(interaction)
+        }
 
       } else if (interaction.isUserContextMenuCommand()) {
         if (interaction.commandName === 'Manage User') {

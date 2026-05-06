@@ -7,6 +7,7 @@ import { data as manageUserData } from '../commands/manageUser'
 import { data as reportData } from '../commands/report'
 import { data as profileData } from '../commands/profile'
 import { data as gamesData } from '../commands/games'
+import { data as playData } from '../commands/play'
 
 const commands = [
   voiceData.toJSON(),    // /voice  — voice channel control panel
@@ -15,6 +16,7 @@ const commands = [
   reportData.toJSON(),   // /report — file a GitHub issue
   profileData.toJSON(),  // /profile — self-service profile editor
   gamesData.toJSON(),    // /games — pick games for View / Pings (self mode)
+  playData.toJSON(),     // /play — LFG ping for a game
   manageUserData.toJSON(), // right-click → Manage User (context menu, sudo only)
 ]
 
