@@ -6,6 +6,7 @@ import { data as sudoData } from '../commands/sudo'
 import { data as manageUserData } from '../commands/manageUser'
 import { data as reportData } from '../commands/report'
 import { data as profileData } from '../commands/profile'
+import { data as gamesData } from '../commands/games'
 
 const commands = [
   voiceData.toJSON(),    // /voice  — voice channel control panel
@@ -13,6 +14,7 @@ const commands = [
   sudoData.toJSON(),     // /sudo   — admin panel (sudo only)
   reportData.toJSON(),   // /report — file a GitHub issue
   profileData.toJSON(),  // /profile — self-service profile editor
+  gamesData.toJSON(),    // /games — pick games for View / Pings (self mode)
   manageUserData.toJSON(), // right-click → Manage User (context menu, sudo only)
 ]
 

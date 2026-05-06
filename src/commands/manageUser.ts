@@ -59,6 +59,11 @@ export async function execute(interaction: UserContextMenuCommandInteraction): P
       .setLabel('Edit Profile')
       .setEmoji('👤')
       .setStyle(ButtonStyle.Primary),
+    new ButtonBuilder()
+      .setCustomId(`sudo_user:edit_games:${target.id}`)
+      .setLabel('Game Prefs')
+      .setEmoji('🎮')
+      .setStyle(ButtonStyle.Primary),
     ...(currentChannel ? [
       new ButtonBuilder()
         .setCustomId(`sudo_user:force_panel:${target.id}`)

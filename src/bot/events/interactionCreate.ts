@@ -13,6 +13,7 @@ import { execute as sudoExecute } from '../../commands/sudo'
 import { execute as manageUserExecute } from '../../commands/manageUser'
 import { execute as reportExecute } from '../../commands/report'
 import { execute as profileExecute } from '../../commands/profile'
+import { execute as gamesExecute } from '../../commands/games'
 import { isVcCustomId } from '../../utils/customId'
 import { recordActivity } from '../../services/presence'
 
@@ -22,6 +23,7 @@ const commandHandlers = new Map<string, (i: ChatInputCommandInteraction) => Prom
   ['sudo', sudoExecute],
   ['report', reportExecute],
   ['profile', profileExecute],
+  ['games', gamesExecute],
 ])
 
 export function registerInteractionCreate(client: Client) {

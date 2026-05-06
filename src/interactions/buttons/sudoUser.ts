@@ -64,6 +64,14 @@ export async function handleSudoUserButton(interaction: ButtonInteraction): Prom
     return
   }
 
+  if (action === 'edit_games') {
+    await interaction.deferUpdate()
+    const { renderPrefsEditor } = await import('../gamesEditor')
+    const payload = await renderPrefsEditor(interaction.guild!, targetId, 'sudo')
+    await interaction.editReply(payload as any)
+    return
+  }
+
   if (action === 'view_staff') {
     await interaction.deferUpdate()
     const records = await db.select().from(staffApprovals).where(eq(staffApprovals.userId, targetId))
