@@ -4,6 +4,7 @@ import { db } from '../../db/client'
 import { autoChannels } from '../../db/schema'
 import { eq } from 'drizzle-orm'
 import { env } from '../../config/env'
+import { getSetting } from '../settings'
 import type { AutoChannelRecord } from '../../types/voice'
 import { postOrUpdateControlPanel } from './controlPanel'
 import { postOrUpdateSticky } from './sticky'
@@ -32,7 +33,7 @@ export async function createAutoChannel(
     textChannel = await guild.channels.create({
       name: textChannelName,
       type: ChannelType.GuildText,
-      parent: env.AUTO_VOICE_CATEGORY_ID,
+      parent: getSetting('channel.auto_voice_category') ?? env.AUTO_VOICE_CATEGORY_ID,
       position: 0,
       permissionOverwrites: [
         { id: guild.roles.everyone, deny: [PermissionFlagsBits.ViewChannel], type: OverwriteType.Role },

@@ -11,7 +11,7 @@ import { syncTextChannelPermissions } from './permissions'
 import { seedHubsFromEnv } from './hubManager'
 import { createAutoChannel } from './autoChannel'
 import { logger } from '../logger'
-import { unregisterHubChannel, updateHubChannelId } from '../settings'
+import { getSetting, unregisterHubChannel, updateHubChannelId } from '../settings'
 
 export interface ReconcilerResult {
   recovered: number
@@ -103,7 +103,8 @@ export async function runReconciler(client: Client): Promise<ReconcilerResult> {
   const hubs = await db.select().from(hubChannels).where(eq(hubChannels.guildId, guild.id))
   const hubIds = new Set(hubs.map(h => h.channelId))
 
-  const category = await guild.channels.fetch(env.AUTO_VOICE_CATEGORY_ID).catch(() => null)
+  const categoryId = getSetting('channel.auto_voice_category') ?? env.AUTO_VOICE_CATEGORY_ID
+  const category = await guild.channels.fetch(categoryId).catch(() => null)
   if (category?.type === ChannelType.GuildCategory) {
     for (const [, channel] of (category as any).children.cache) {
       if (channel.type !== ChannelType.GuildVoice) continue

@@ -8,6 +8,7 @@ import { generateChannelName } from '../../utils/channelName'
 import { createAutoChannel } from './autoChannel'
 import { logger } from '../logger'
 import {
+  getSetting,
   isHubChannelCached,
   registerHubChannel,
   updateHubChannelId,
@@ -47,7 +48,7 @@ export async function seedHubsFromEnv(guild: Guild): Promise<void> {
     await registerHubChannel({
       guildId: guild.id,
       channelId: vc.id,
-      categoryId: vc.parentId ?? env.AUTO_VOICE_CATEGORY_ID,
+      categoryId: vc.parentId ?? getSetting('channel.auto_voice_category') ?? env.AUTO_VOICE_CATEGORY_ID,
       position: vc.position,
       label: vc.name,
     })

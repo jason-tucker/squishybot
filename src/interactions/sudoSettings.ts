@@ -47,9 +47,12 @@ import {
   getSetting,
   listAdditionalSudoUsers,
   listAutoThreadChannels,
+  listHubs,
+  registerHubChannel,
   removeAutoThreadChannel,
   removeSudoUser,
   setSetting,
+  unregisterHubChannel,
 } from '../services/settings'
 
 // ---------------------------------------------------------------------------
@@ -68,9 +71,19 @@ interface ChannelSettingDef {
 const CHANNEL_SETTINGS: ChannelSettingDef[] = [
   { key: 'channel.log', label: 'Log channel', description: 'Bot writes structured log lines here', envFallback: env.LOG_CHANNEL_ID, channelTypes: [ChannelType.GuildText] },
   { key: 'channel.admin', label: 'Admin channel', description: 'Sudo-only bot admin channel', envFallback: env.ADMIN_CHANNEL_ID, channelTypes: [ChannelType.GuildText] },
-  { key: 'channel.birthday', label: 'Birthday channel', description: 'Where birthday pings post (planned feature)', envFallback: env.BIRTHDAY_CHANNEL_ID, channelTypes: [ChannelType.GuildText] },
+  { key: 'channel.birthday', label: 'Birthday channel', description: 'Where birthday pings post', envFallback: env.BIRTHDAY_CHANNEL_ID, channelTypes: [ChannelType.GuildText] },
   { key: 'channel.staff_approval_thread', label: 'Staff approval thread', description: 'Where staff requests post for approval', envFallback: env.STAFF_APPROVAL_THREAD_ID, channelTypes: [ChannelType.PublicThread, ChannelType.PrivateThread] },
 ]
+
+// Voice category — managed under Voice (alongside cleanup delay) rather than
+// Channels because it pairs with the hub/auto-channel infrastructure.
+const VOICE_CATEGORY_SETTING: ChannelSettingDef = {
+  key: 'channel.auto_voice_category',
+  label: 'Auto-voice category',
+  description: 'Parent category for hubs and auto channels',
+  envFallback: env.AUTO_VOICE_CATEGORY_ID,
+  channelTypes: [ChannelType.GuildCategory],
+}
 
 interface NumericSettingDef {
   key: string
@@ -140,9 +153,10 @@ function renderHome() {
     new ButtonBuilder().setCustomId('sudo:set:nav:sudo_users').setLabel('Sudo Users').setEmoji('🛡️').setStyle(ButtonStyle.Primary),
     new ButtonBuilder().setCustomId('sudo:set:nav:channels').setLabel('Channels').setEmoji('📺').setStyle(ButtonStyle.Primary),
     new ButtonBuilder().setCustomId('sudo:set:nav:voice').setLabel('Voice').setEmoji('🔊').setStyle(ButtonStyle.Primary),
-    new ButtonBuilder().setCustomId('sudo:set:nav:auto_threads').setLabel('Auto Threads').setEmoji('🧵').setStyle(ButtonStyle.Primary),
+    new ButtonBuilder().setCustomId('sudo:set:nav:hubs').setLabel('Hub Channels').setEmoji('🪐').setStyle(ButtonStyle.Primary),
   )
   const row2 = new ActionRowBuilder<MessageActionRowComponentBuilder>().addComponents(
+    new ButtonBuilder().setCustomId('sudo:set:nav:auto_threads').setLabel('Auto Threads').setEmoji('🧵').setStyle(ButtonStyle.Primary),
     new ButtonBuilder().setCustomId('sudo:set:nav:games').setLabel('Games').setEmoji('🎮').setStyle(ButtonStyle.Secondary),
     new ButtonBuilder().setCustomId('sudo:set:nav:profiles').setLabel('User Profiles').setEmoji('👤').setStyle(ButtonStyle.Secondary),
   )
@@ -278,14 +292,25 @@ function renderVoice() {
     const sourceLabel = source === 'override' ? '⚙️ DB override' : '📄 env'
     lines.push(`**${def.label}** · \`${value}\` · _${sourceLabel}_\n_${def.description}_\n`)
   }
-  lines.push(`**Hub channel IDs** (env, immutable at runtime): ${env.HUB_CHANNEL_IDS.map(id => `<#${id}>`).join(', ') || '_none_'}`)
-  lines.push(`**Auto-voice category** (env, immutable at runtime): <#${env.AUTO_VOICE_CATEGORY_ID}>`)
+  const cat = effectiveChannelValue(VOICE_CATEGORY_SETTING)
+  const catSourceLabel = cat.source === 'override' ? '⚙️ DB override' : cat.source === 'env' ? '📄 env' : '— unset'
+  lines.push(`**${VOICE_CATEGORY_SETTING.label}** · ${channelMentionOrNone(cat.value)} · _${catSourceLabel}_\n_${VOICE_CATEGORY_SETTING.description}_`)
+  lines.push(`\n**Hub channels** are managed under the dedicated **Hub Channels** sub-panel (separate button on the Settings home).`)
 
   const container = new ContainerBuilder()
     .setAccentColor(0x5865f2)
     .addTextDisplayComponents(new TextDisplayBuilder().setContent(lines.join('\n')))
 
   const components: any[] = [container]
+  components.push(
+    new ActionRowBuilder<MessageActionRowComponentBuilder>().addComponents(
+      new ChannelSelectMenuBuilder()
+        .setCustomId(`sudo:set:channel:${VOICE_CATEGORY_SETTING.key}`)
+        .setPlaceholder(VOICE_CATEGORY_SETTING.label)
+        .setChannelTypes(VOICE_CATEGORY_SETTING.channelTypes)
+        .setMinValues(0).setMaxValues(1)
+    )
+  )
   for (const def of NUMERIC_SETTINGS) {
     components.push(
       new ActionRowBuilder<MessageActionRowComponentBuilder>().addComponents(
@@ -294,6 +319,67 @@ function renderVoice() {
       )
     )
   }
+  components.push(
+    new ActionRowBuilder<MessageActionRowComponentBuilder>().addComponents(
+      new ButtonBuilder().setCustomId('sudo:set:home').setLabel('Back').setStyle(ButtonStyle.Secondary),
+      new ButtonBuilder().setCustomId(`sudo:set:reset:${VOICE_CATEGORY_SETTING.key}`).setLabel('Reset Category').setEmoji('♻️').setStyle(ButtonStyle.Secondary),
+    )
+  )
+  return { flags: MessageFlags.IsComponentsV2 as number, components }
+}
+
+function renderHubs() {
+  const hubs = listHubs()
+
+  const lines: string[] = [
+    '### 🪐 Hub Channels',
+    '_Voice channels listed here act as auto-channel **hubs**: when a member joins one,_',
+    '_the hub renames in place into the member\'s personal room and a replacement hub spawns._\n',
+  ]
+  if (hubs.length === 0) {
+    lines.push('_No hubs registered. Pick a voice channel below to register one._')
+  } else {
+    for (const h of hubs) {
+      lines.push(`• <#${h.channelId}>  _${h.label}_  · category <#${h.categoryId}>`)
+    }
+  }
+  if (env.HUB_CHANNEL_IDS.length > 0) {
+    lines.push(`\n_Env \`HUB_CHANNEL_IDS\` (legacy seed): ${env.HUB_CHANNEL_IDS.map(id => `\`${id}\``).join(', ')}_`)
+  }
+
+  const container = new ContainerBuilder()
+    .setAccentColor(0x9b59b6)
+    .addTextDisplayComponents(new TextDisplayBuilder().setContent(lines.join('\n')))
+
+  const components: any[] = [container]
+
+  components.push(
+    new ActionRowBuilder<MessageActionRowComponentBuilder>().addComponents(
+      new ChannelSelectMenuBuilder()
+        .setCustomId('sudo:set:hub:add')
+        .setPlaceholder('Add a voice channel as a hub…')
+        .setChannelTypes([ChannelType.GuildVoice])
+        .setMinValues(0).setMaxValues(1)
+    )
+  )
+
+  if (hubs.length > 0) {
+    const removeOptions = hubs.slice(0, 25).map(h => ({
+      label: (h.label || h.channelId).slice(0, 100),
+      value: h.channelId,
+      emoji: '❌',
+      description: `<#${h.channelId}> in category ${h.categoryId}`.slice(0, 100),
+    }))
+    components.push(
+      new ActionRowBuilder<MessageActionRowComponentBuilder>().addComponents(
+        new StringSelectMenuBuilder()
+          .setCustomId('sudo:set:hub:remove')
+          .setPlaceholder('Unregister a hub…')
+          .addOptions(removeOptions)
+      )
+    )
+  }
+
   components.push(
     new ActionRowBuilder<MessageActionRowComponentBuilder>().addComponents(
       new ButtonBuilder().setCustomId('sudo:set:home').setLabel('Back').setStyle(ButtonStyle.Secondary)
@@ -440,6 +526,8 @@ export async function handleSettingsButton(interaction: ButtonInteraction): Prom
       await interaction.update(renderChannelsReset() as any)
     } else if (category === 'voice') {
       await interaction.update(renderVoice() as any)
+    } else if (category === 'hubs') {
+      await interaction.update(renderHubs() as any)
     } else if (category === 'auto_threads') {
       await interaction.update(renderAutoThreads() as any)
     } else if (category === 'games') {
@@ -452,12 +540,12 @@ export async function handleSettingsButton(interaction: ButtonInteraction): Prom
     return
   }
 
-  // sudo:set:reset:{key}  — clear a numeric setting override
+  // sudo:set:reset:{key}  — clear a numeric or voice-side setting override
   if (id.startsWith('sudo:set:reset:')) {
     const key = id.slice('sudo:set:reset:'.length)
     await clearSetting(key)
-    // Heuristic: numeric settings live in voice category for now.
-    if (NUMERIC_SETTINGS.some(d => d.key === key)) {
+    // Heuristic: numeric + voice-category settings live in the Voice panel.
+    if (NUMERIC_SETTINGS.some(d => d.key === key) || key === VOICE_CATEGORY_SETTING.key) {
       await interaction.update(renderVoice() as any)
     } else {
       await interaction.update(renderHome() as any)
@@ -506,8 +594,27 @@ export async function handleSettingsChannelSelect(interaction: ChannelSelectMenu
     return
   }
 
+  if (id === 'sudo:set:hub:add') {
+    const channelId = interaction.values[0]
+    if (channelId && interaction.guild) {
+      const vc = await interaction.guild.channels.fetch(channelId).catch(() => null)
+      if (vc?.isVoiceBased()) {
+        const categoryOverride = getSetting('channel.auto_voice_category')
+        await registerHubChannel({
+          channelId: vc.id,
+          guildId: interaction.guild.id,
+          categoryId: vc.parentId ?? categoryOverride ?? env.AUTO_VOICE_CATEGORY_ID,
+          position: vc.position,
+          label: vc.name,
+        })
+      }
+    }
+    await interaction.update(renderHubs() as any)
+    return
+  }
+
   const key = id.slice('sudo:set:channel:'.length)
-  const def = CHANNEL_SETTINGS.find(d => d.key === key)
+  const def = CHANNEL_SETTINGS.find(d => d.key === key) ?? (key === VOICE_CATEGORY_SETTING.key ? VOICE_CATEGORY_SETTING : null)
   if (!def) {
     await interaction.reply({ content: `Unknown channel setting: ${key}`, ephemeral: true })
     return
@@ -516,7 +623,12 @@ export async function handleSettingsChannelSelect(interaction: ChannelSelectMenu
   if (channelId) {
     await setSetting(def.key, channelId, interaction.user.id)
   }
-  await interaction.update(renderChannels() as any)
+  // Re-render the panel the select lives in.
+  if (def.key === VOICE_CATEGORY_SETTING.key) {
+    await interaction.update(renderVoice() as any)
+  } else {
+    await interaction.update(renderChannels() as any)
+  }
 }
 
 export async function handleSettingsUserSelect(interaction: UserSelectMenuInteraction): Promise<void> {
@@ -549,6 +661,12 @@ export async function handleSettingsStringSelect(interaction: StringSelectMenuIn
     const channelId = interaction.values[0]
     if (channelId) await removeAutoThreadChannel(channelId)
     await interaction.update(renderAutoThreads() as any)
+    return
+  }
+  if (id === 'sudo:set:hub:remove') {
+    const channelId = interaction.values[0]
+    if (channelId) await unregisterHubChannel(channelId)
+    await interaction.update(renderHubs() as any)
     return
   }
 }
