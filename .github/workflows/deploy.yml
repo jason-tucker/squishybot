@@ -115,11 +115,13 @@ jobs:
             docker compose ps squishybot
 
       # ── 8. Notify Discord — success ───────────────────────────────────────────
+      # Skipped silently if the webhook isn't configured.
       - name: Notify success
         if: success()
         env:
           WEBHOOK: ${{ secrets.DISCORD_DEPLOY_WEBHOOK }}
         run: |
+          if [ -z "$WEBHOOK" ]; then echo "DISCORD_DEPLOY_WEBHOOK not set — skipping notification"; exit 0; fi
           SHORT_SHA="${GITHUB_SHA::7}"
           COMMIT_MSG=$(git log -1 --pretty=format:"%s")
           curl -s -o /dev/null -X POST "$WEBHOOK" \
@@ -139,6 +141,7 @@ jobs:
         env:
           WEBHOOK: ${{ secrets.DISCORD_DEPLOY_WEBHOOK }}
         run: |
+          if [ -z "$WEBHOOK" ]; then echo "DISCORD_DEPLOY_WEBHOOK not set — skipping notification"; exit 0; fi
           SHORT_SHA="${GITHUB_SHA::7}"
           COMMIT_MSG=$(git log -1 --pretty=format:"%s")
           curl -s -o /dev/null -X POST "$WEBHOOK" \
