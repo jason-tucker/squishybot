@@ -8,7 +8,7 @@
  */
 import { eq } from 'drizzle-orm'
 import { db } from '../db/client'
-import { botSettings, sudoUsers } from '../db/schema'
+import { botSettings, sudoUsers, autoThreadChannels } from '../db/schema'
 
 // ---------------------------------------------------------------------------
 // In-memory caches
@@ -17,15 +17,33 @@ import { botSettings, sudoUsers } from '../db/schema'
 const settingsCache = new Map<string, string>()
 const sudoUsersCache = new Set<string>()
 
+export interface AutoThreadConfig {
+  channelId: string
+  guildId: string
+  nameTemplate: string | null
+  archiveDuration: number | null
+}
+const autoThreadCache = new Map<string, AutoThreadConfig>()
+
 export async function loadSettings(): Promise<void> {
   settingsCache.clear()
   sudoUsersCache.clear()
-  const [rows, sudo] = await Promise.all([
+  autoThreadCache.clear()
+  const [rows, sudo, threads] = await Promise.all([
     db.select().from(botSettings).catch(() => []),
     db.select().from(sudoUsers).catch(() => []),
+    db.select().from(autoThreadChannels).catch(() => []),
   ])
   for (const r of rows) settingsCache.set(r.key, r.value)
   for (const s of sudo) sudoUsersCache.add(s.userId)
+  for (const t of threads) {
+    autoThreadCache.set(t.channelId, {
+      channelId: t.channelId,
+      guildId: t.guildId,
+      nameTemplate: t.nameTemplate,
+      archiveDuration: t.archiveDuration,
+    })
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -93,4 +111,57 @@ export async function addSudoUser(userId: string, byDiscordId?: string, note?: s
 export async function removeSudoUser(userId: string): Promise<void> {
   await db.delete(sudoUsers).where(eq(sudoUsers.userId, userId))
   sudoUsersCache.delete(userId)
+}
+
+// ---------------------------------------------------------------------------
+// Auto-thread channels — message in any of these channels gets a thread
+// ---------------------------------------------------------------------------
+
+export function isAutoThreadChannel(channelId: string): boolean {
+  return autoThreadCache.has(channelId)
+}
+
+export function getAutoThreadConfig(channelId: string): AutoThreadConfig | null {
+  return autoThreadCache.get(channelId) ?? null
+}
+
+export function listAutoThreadChannels(): AutoThreadConfig[] {
+  return Array.from(autoThreadCache.values())
+}
+
+export async function addAutoThreadChannel(
+  channelId: string,
+  guildId: string,
+  byDiscordId?: string,
+  options?: { nameTemplate?: string | null; archiveDuration?: number | null }
+): Promise<void> {
+  const cfg: AutoThreadConfig = {
+    channelId,
+    guildId,
+    nameTemplate: options?.nameTemplate ?? null,
+    archiveDuration: options?.archiveDuration ?? null,
+  }
+  await db.insert(autoThreadChannels)
+    .values({
+      channelId,
+      guildId,
+      nameTemplate: cfg.nameTemplate,
+      archiveDuration: cfg.archiveDuration,
+      addedByDiscordId: byDiscordId ?? null,
+    })
+    .onConflictDoUpdate({
+      target: autoThreadChannels.channelId,
+      set: {
+        guildId,
+        nameTemplate: cfg.nameTemplate,
+        archiveDuration: cfg.archiveDuration,
+        addedByDiscordId: byDiscordId ?? null,
+      },
+    })
+  autoThreadCache.set(channelId, cfg)
+}
+
+export async function removeAutoThreadChannel(channelId: string): Promise<void> {
+  await db.delete(autoThreadChannels).where(eq(autoThreadChannels.channelId, channelId))
+  autoThreadCache.delete(channelId)
 }
