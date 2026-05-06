@@ -1,4 +1,4 @@
-import { pgTable, text, uuid, timestamp, integer } from 'drizzle-orm/pg-core'
+import { pgTable, text, uuid, timestamp, integer, boolean } from 'drizzle-orm/pg-core'
 
 export const userProfiles = pgTable('user_profiles', {
   id: uuid('id').defaultRandom().primaryKey(),
@@ -8,6 +8,8 @@ export const userProfiles = pgTable('user_profiles', {
   displayName: text('display_name'),
   birthdayMonth: integer('birthday_month'),
   birthdayDay: integer('birthday_day'),
+  birthdayPingsEnabled: boolean('birthday_pings_enabled').notNull().default(true),
+  birthdayYearVisible: boolean('birthday_year_visible').notNull().default(false),
   staffCategory: text('staff_category'),
   department: text('department'),
   tier: text('tier'),
