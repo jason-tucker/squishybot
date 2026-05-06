@@ -91,6 +91,9 @@ export function registerInteractionCreate(client: Client) {
         } else if (id.startsWith('play:join:')) {
           const { handleJoinButton } = await import('../../commands/play')
           await handleJoinButton(interaction as ButtonInteraction)
+        } else if (id.startsWith('play:cancel:')) {
+          const { handleCancelButton } = await import('../../commands/play')
+          await handleCancelButton(interaction as ButtonInteraction)
         } else if (id.startsWith('games:cat:')) {
           const { handleCatalogButton } = await import('../../interactions/gamesEditor')
           await handleCatalogButton(interaction as ButtonInteraction)
@@ -117,6 +120,12 @@ export function registerInteractionCreate(client: Client) {
         } else if (id === 'profile:select_user') {
           const { handleProfileUserSelect } = await import('../../interactions/profileEditor')
           await handleProfileUserSelect(interaction)
+        } else if (id === 'sudo:manage_user_pick') {
+          const { requireSudo } = await import('../../services/voice/permissions')
+          if (!await requireSudo(interaction)) return
+          const targetId = interaction.values[0]
+          const { renderManagePanel } = await import('../../commands/manageUser')
+          await interaction.update(await renderManagePanel(interaction.guild!, targetId) as any)
         }
 
       } else if (interaction.isRoleSelectMenu()) {

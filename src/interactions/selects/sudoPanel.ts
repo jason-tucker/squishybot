@@ -7,6 +7,7 @@ import {
   type MessageActionRowComponentBuilder,
   TextDisplayBuilder,
   MessageFlags,
+  UserSelectMenuBuilder,
 } from 'discord.js'
 import { db } from '../../db/client'
 import { autoChannels, hubChannels, staffApprovals } from '../../db/schema'
@@ -99,6 +100,25 @@ export async function handleSudoPanelSelect(interaction: StringSelectMenuInterac
   if (value === 'settings') {
     const { showSettingsPanel } = await import('../sudoSettings')
     await showSettingsPanel(interaction)
+    return
+  }
+
+  if (value === 'manage_user') {
+    const container = new ContainerBuilder()
+      .setAccentColor(0x5865f2)
+      .addTextDisplayComponents(new TextDisplayBuilder().setContent('## 👤 Manage user'))
+      .addSeparatorComponents(sep())
+      .addTextDisplayComponents(new TextDisplayBuilder().setContent('Pick a member to manage:'))
+    const picker = new ActionRowBuilder<MessageActionRowComponentBuilder>().addComponents(
+      new UserSelectMenuBuilder()
+        .setCustomId('sudo:manage_user_pick')
+        .setPlaceholder('Pick a member…')
+        .setMinValues(1).setMaxValues(1),
+    )
+    const back = new ActionRowBuilder<MessageActionRowComponentBuilder>().addComponents(
+      new ButtonBuilder().setCustomId('sudo:home').setLabel('Back to /sudo').setEmoji('🏠').setStyle(ButtonStyle.Secondary),
+    )
+    await interaction.editReply({ flags: MessageFlags.IsComponentsV2, components: [container, picker, back] } as any)
     return
   }
 }

@@ -48,10 +48,6 @@ export const data = new SlashCommandBuilder()
     .setRequired(true)
     .setAutocomplete(true)
   )
-  .addBooleanOption(o => o
-    .setName('force')
-    .setDescription('Sudo only — bypass the per-game cooldown')
-  )
 
 // ---------------------------------------------------------------------------
 // In-memory session state, keyed by message ID
@@ -97,6 +93,11 @@ function buildPanel(game: Game, session: LfgSession, options?: { initialPing?: b
       .setLabel('I want to play!')
       .setEmoji('🎮')
       .setStyle(ButtonStyle.Primary),
+    new ButtonBuilder()
+      .setCustomId(`play:cancel:${session.hostId}`)
+      .setLabel('Cancel')
+      .setEmoji('✖️')
+      .setStyle(ButtonStyle.Danger),
   )
 
   // Lock allowed mentions:
@@ -137,17 +138,13 @@ export async function execute(interaction: ChatInputCommandInteraction): Promise
     return
   }
 
-  const force = interaction.options.getBoolean('force') ?? false
-  if (force && !sudo) {
-    await interaction.editReply({ content: '❌ `force:true` is sudo-only.' })
-    return
-  }
-  if (!force) {
+  // Sudo bypasses the cooldown entirely — no flag needed.
+  if (!sudo) {
     const check = checkPlayCooldown(interaction.guild.id, member.id, game.id)
     if (!check.ok) {
       const m = Math.floor(check.remainingSec / 60), s = check.remainingSec % 60
       const wait = m > 0 ? `${m}m ${s}s` : `${s}s`
-      await interaction.editReply({ content: `🕒 Cooldown — try again in **${wait}**. Sudo can pass \`force:true\` to bypass.` })
+      await interaction.editReply({ content: `🕒 Cooldown — try again in **${wait}**.` })
       return
     }
   }
@@ -172,8 +169,8 @@ export async function execute(interaction: ChatInputCommandInteraction): Promise
   const sent = await (channel as TextChannel).send(buildPanel(game, session, { initialPing: true }) as any)
   sessions.set(sent.id, session)
 
-  if (!force) markPlayUsed(interaction.guild.id, member.id, game.id)
-  logger.info(`/play game=${game.name} host=${member.id} message=${sent.id} force=${force}`)
+  if (!sudo) markPlayUsed(interaction.guild.id, member.id, game.id)
+  logger.info(`/play game=${game.name} host=${member.id} message=${sent.id} sudo=${sudo}`)
   await interaction.editReply({ content: `✅ Posted in <#${channel.id}>.` })
 }
 
@@ -230,6 +227,38 @@ export async function handleJoinButton(interaction: ButtonInteraction): Promise<
   else session.players.splice(idx, 1)
 
   await interaction.update(buildPanel(game, session) as any)
+}
+
+/**
+ * Cancel an LFG session. Allowed for the host (encoded in the customId so
+ * cancel works even after a restart) and any sudo user. Deletes the message.
+ */
+export async function handleCancelButton(interaction: ButtonInteraction): Promise<void> {
+  if (!interaction.guild || !interaction.message) {
+    await interaction.deferUpdate().catch(() => {})
+    return
+  }
+
+  const hostId = interaction.customId.split(':')[2]
+  const member = await interaction.guild.members.fetch(interaction.user.id)
+  const allowed = interaction.user.id === hostId || isSudo(member)
+  if (!allowed) {
+    await interaction.reply({ content: '❌ Only the host or a sudo user can cancel this LFG.', ephemeral: true })
+    return
+  }
+
+  sessions.delete(interaction.message.id)
+  try {
+    await interaction.message.delete()
+  } catch {
+    // Fall back to a benign edit if delete fails (e.g. permission missing).
+    await interaction.update({ flags: MessageFlags.IsComponentsV2, components: [
+      new ContainerBuilder().setAccentColor(0xed4245).addTextDisplayComponents(
+        new TextDisplayBuilder().setContent(`❌ LFG cancelled by <@${interaction.user.id}>.`)
+      ),
+    ] } as any).catch(() => {})
+  }
+  logger.info(`/play cancel by=${interaction.user.id} host=${hostId} message=${interaction.message.id}`)
 }
 
 /** Rebuild a session from an existing message's text (mentions only). */

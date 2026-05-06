@@ -176,7 +176,7 @@ export async function togglePref(
 // /play rate limit — in-memory map keyed by (guildId:userId:gameId)
 // ---------------------------------------------------------------------------
 
-const PLAY_COOLDOWN_MS = 30 * 60_000  // 30 min
+const PLAY_COOLDOWN_MS = 10 * 60_000  // 10 min — sudo bypasses entirely (see /play)
 const lastPlayAt = new Map<string, number>()
 
 export function checkPlayCooldown(guildId: string, userId: string, gameId: string): { ok: true } | { ok: false; remainingSec: number } {

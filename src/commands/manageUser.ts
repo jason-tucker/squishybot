@@ -1,13 +1,15 @@
 import {
-  ContextMenuCommandBuilder,
-  ApplicationCommandType,
-  UserContextMenuCommandInteraction,
-  ContainerBuilder,
-  TextDisplayBuilder,
   ActionRowBuilder,
+  ApplicationCommandType,
   ButtonBuilder,
   ButtonStyle,
+  ContainerBuilder,
+  ContextMenuCommandBuilder,
+  type Guild,
+  type MessageActionRowComponentBuilder,
   MessageFlags,
+  TextDisplayBuilder,
+  type UserContextMenuCommandInteraction,
 } from 'discord.js'
 import { db } from '../db/client'
 import { autoChannels } from '../db/schema'
@@ -20,13 +22,9 @@ export const data = new ContextMenuCommandBuilder()
   .setType(ApplicationCommandType.User)
   .setDMPermission(false)
 
-export async function execute(interaction: UserContextMenuCommandInteraction): Promise<void> {
-  await interaction.deferReply({ ephemeral: true })
-  if (!await requireSudo(interaction)) return
+export async function renderManagePanel(guild: Guild, targetUserId: string): Promise<{ flags: number; components: any[] }> {
+  const target = await guild.members.fetch(targetUserId)
 
-  const target = await interaction.guild!.members.fetch(interaction.targetId)
-
-  // Check if they own or are in any auto channel
   const [ownedChannel] = await db.select().from(autoChannels)
     .where(eq(autoChannels.ownerUserId, target.id))
 
@@ -37,18 +35,18 @@ export async function execute(interaction: UserContextMenuCommandInteraction): P
 
   const lines: string[] = [
     `**User:** ${target.displayName} (<@${target.id}>)`,
-    `**Roles:** ${target.roles.cache.filter(r => r.id !== interaction.guild!.roles.everyone.id).map(r => r.name).join(', ') || 'none'}`,
+    `**Roles:** ${target.roles.cache.filter(r => r.id !== guild.roles.everyone.id).map(r => r.name).join(', ') || 'none'}`,
     `**Voice:** ${voiceChannel ? `<#${voiceChannel.id}>${currentChannel ? ' (auto channel)' : ''}` : 'Not in voice'}`,
     `**Owns channel:** ${ownedChannel ? `<#${ownedChannel.voiceChannelId}>` : 'No'}`,
   ]
 
   const container = new ContainerBuilder()
     .setAccentColor(0x5865f2)
-    .addTextDisplayComponents(new TextDisplayBuilder().setContent(`## 👤 Manage User`))
+    .addTextDisplayComponents(new TextDisplayBuilder().setContent('## 👤 Manage'))
     .addSeparatorComponents(sep())
     .addTextDisplayComponents(new TextDisplayBuilder().setContent(lines.join('\n')))
 
-  const buttons = new ActionRowBuilder<ButtonBuilder>().addComponents(
+  const buttons = new ActionRowBuilder<MessageActionRowComponentBuilder>().addComponents(
     new ButtonBuilder()
       .setCustomId(`sudo_user:edit_profile:${target.id}`)
       .setLabel('Edit Profile')
@@ -78,8 +76,18 @@ export async function execute(interaction: UserContextMenuCommandInteraction): P
       .setStyle(ButtonStyle.Secondary),
   )
 
-  await interaction.editReply({
-    flags: MessageFlags.IsComponentsV2,
-    components: buttons.components.length > 0 ? [container, buttons] : [container],
-  } as any)
+  const back = new ActionRowBuilder<MessageActionRowComponentBuilder>().addComponents(
+    new ButtonBuilder().setCustomId('sudo:home').setLabel('Back to /sudo').setEmoji('🏠').setStyle(ButtonStyle.Secondary),
+  )
+
+  return {
+    flags: MessageFlags.IsComponentsV2 as number,
+    components: [container, buttons, back],
+  }
+}
+
+export async function execute(interaction: UserContextMenuCommandInteraction): Promise<void> {
+  await interaction.deferReply({ ephemeral: true })
+  if (!await requireSudo(interaction)) return
+  await interaction.editReply(await renderManagePanel(interaction.guild!, interaction.targetId) as any)
 }
