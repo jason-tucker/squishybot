@@ -44,12 +44,17 @@ Roadmap, completed work, and open action items are tracked in the [Bot Developme
 - The bot DMs the owner with the contents and four buttons: **Approve+Notify**, **Approve Silent**, **Reject+Notify**, **Reject Silent**
 - On approve, the bot files the issue against `GITHUB_REPO` via the GitHub REST API and (optionally) DMs the reporter the issue URL
 
+### Sudo Panel
+
+- `/sudo` opens an admin select menu: **Settings**, active channels, hubs, force cleanup, pending approvals, run reconciler, restart instructions
+- **Settings** is a runtime config editor — overrides the values that would normally come from `.env` for: extra sudo users, channel IDs (log / admin / birthday / clips / food / staff approval thread), voice cleanup delay, and feature flags. Reset on any field falls back to the env value.
+- Settings persist in the `bot_settings` table; runtime-added sudo users persist in `sudo_users`.
+
 ### Planned Features
 
 - Game role and channel management with opt-in ping system
 - Birthday pings
-- Automatic threads in clips/food channels
-- Sudo user management panel
+- Automatic threads in clips/food channels (toggle is already wired in **/sudo → Settings → Features**)
 
 ---
 
@@ -169,7 +174,7 @@ Four top-level slash commands plus one right-click context menu. All responses a
 |---|---|---|
 | `/voice` | Owner / Host / Sudo | Open an ephemeral copy of the control panel for the auto channel you're in |
 | `/squishy` | Everyone | User-facing menu: bot status, feature explainers (Voice / Panel / Reports / Staff), staff-request button |
-| `/sudo` | Sudo | Admin select-menu panel (channels, hubs, cleanup, approvals, restart) |
+| `/sudo` | Sudo | Admin select-menu panel: Settings (sudo users, channels, voice, features, games, profiles), active channels, hubs, force cleanup, pending approvals, run reconciler, restart instructions |
 | `/report` | Everyone | Modal (Title / Type / Description / Steps) → DMs the owner with **Approve+Notify** / **Approve Silent** / **Reject+Notify** / **Reject Silent** buttons → on approve, files a GitHub issue against `GITHUB_REPO` |
 | Right-click user → **Manage User** | Sudo | Roles, voice status, disconnect, staff history |
 

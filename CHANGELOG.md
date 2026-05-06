@@ -15,8 +15,8 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ### Changed
 - `cleanupScheduler` now reads `voice.cleanup_delay_ms` from the runtime settings cache before falling back to the env value.
-
-### Changed
+- `/help` rewritten to reflect the actual command surface — removed listings for non-existent subcommands (`/squishy status`, `/voice panel/claim/delete`, `/squishy repair`, `/sudo channels/hubs/cleanup/approvals/restart`); the sudo section now describes the `/sudo` select menu and its Settings sub-panel.
+- README — `/sudo` row in the slash-commands table now describes the full menu surface; new "Sudo Panel" feature section explains runtime config overrides; removed "Sudo user management panel" from Planned Features (it shipped) and noted that the auto-thread feature flag is already wired even though the auto-thread behavior itself isn't built yet.
 - Internal: extracted shared Components V2 `sep()` helper to `src/utils/cv2.ts` and replaced inline `SeparatorBuilder` constructions across 10 files. No behavior change.
 - Internal: extracted `requireControl()` helper in `src/interactions/buttons/voiceControl.ts` to deduplicate the 7-action permission-check + ephemeral-error pattern. No behavior change.
 

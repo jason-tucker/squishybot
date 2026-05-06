@@ -22,25 +22,23 @@ export async function execute(interaction: ChatInputCommandInteraction): Promise
   const everyoneSection =
     '### 👥 Everyone\n' +
     '`/help` — show this list\n' +
-    '`/squishy status` — bot uptime + active channel count\n' +
-    '`/staff request` — request to join the server staff team'
+    '`/squishy` — bot status + feature menu (voice / panel / staff requests / reports)\n' +
+    '`/staff request` — request to join the server staff team\n' +
+    '`/report` — file a bug or feature request (owner reviews via DM, then files a GitHub issue)'
 
   const voiceSection =
     '### 🔊 Voice channels\n' +
     'Join a **hub** voice channel and SquishyBot will turn it into your own room.\n' +
-    'A private text channel appears with a **control panel** for rename, lock, hosts, and delete.\n\n' +
-    '`/voice panel` — re-open the control panel for your active voice channel\n' +
-    '`/voice claim` — claim ownership when the previous owner leaves\n' +
-    '`/voice delete` — delete your auto voice channel'
+    'A private text channel appears with a **control panel** for rename, lock, hosts, templates, claim, and delete.\n\n' +
+    '`/voice` — open an ephemeral copy of the control panel for the auto channel you\'re in\n' +
+    '_(All voice controls live on the panel itself — there are no sub-commands.)_'
 
   const sudoSection =
     '### 🛡️ Sudo / Admin\n' +
-    '`/squishy repair` — manually run the channel reconciler\n' +
-    '`/sudo channels` — list active auto voice channels\n' +
-    '`/sudo hubs` — list managed hub channels\n' +
-    '`/sudo cleanup` — force cleanup of stale/empty channels\n' +
-    '`/sudo approvals` — view pending staff approvals\n' +
-    '`/sudo restart` — instructions to restart the bot from the terminal'
+    '`/sudo` — opens the admin select menu:\n' +
+    '• **Settings** — runtime config (sudo users, channels, voice, feature flags) backed by `bot_settings` / `sudo_users`\n' +
+    '• Active voice channels · Hub channels · Force cleanup · Pending approvals · Run reconciler · Restart instructions\n\n' +
+    'Right-click a member → **Manage User** — roles, voice status, disconnect, staff history'
 
   const container = new ContainerBuilder()
     .setAccentColor(0x5865f2)
