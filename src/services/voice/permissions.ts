@@ -2,10 +2,13 @@ import type { GuildMember, VoiceChannel, TextChannel, OverwriteResolvable } from
 import { PermissionFlagsBits, OverwriteType } from 'discord.js'
 import { env } from '../../config/env'
 import type { AutoChannelRecord } from '../../types/voice'
+import { isAdditionalSudo } from '../settings'
 
 export function isSudo(member: GuildMember): boolean {
   if (env.SUDO_USER_IDS.includes(member.id)) return true
-  return env.SUDO_ROLE_IDS.some(roleId => member.roles.cache.has(roleId))
+  if (env.SUDO_ROLE_IDS.some(roleId => member.roles.cache.has(roleId))) return true
+  // Runtime additions via /sudo → Settings → Sudo Users (cached in memory).
+  return isAdditionalSudo(member.id)
 }
 
 export function isOwner(member: GuildMember, record: AutoChannelRecord): boolean {

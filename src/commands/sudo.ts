@@ -52,6 +52,7 @@ export async function execute(interaction: ChatInputCommandInteraction): Promise
       .setCustomId('sudo:action')
       .setPlaceholder('Choose an action...')
       .addOptions([
+        { label: 'Settings', value: 'settings', emoji: '⚙️', description: 'Edit runtime config: sudo users, channels, voice, features' },
         { label: 'Active voice channels', value: 'channels', emoji: '🔊' },
         { label: 'Hub channels', value: 'hubs', emoji: '🪐' },
         { label: 'Force cleanup', value: 'cleanup', emoji: '🧹' },

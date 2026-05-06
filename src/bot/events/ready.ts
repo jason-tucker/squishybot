@@ -4,6 +4,7 @@ import { runReconciler } from '../../services/voice/reconciler'
 import { logger, attachClientToLogger } from '../../services/logger'
 import { initPresence } from '../../services/presence'
 import { env } from '../../config/env'
+import { loadSettings } from '../../services/settings'
 
 export function registerReadyEvent(client: Client) {
   client.once('clientReady', async (c) => {
@@ -11,6 +12,8 @@ export function registerReadyEvent(client: Client) {
     initPresence(c)
     logger.info(`Logged in as ${c.user.tag}`)
     startHealthPush()
+    // Load runtime settings + sudo-user overrides from DB into in-memory caches.
+    await loadSettings().catch(err => logger.error('Failed to load settings on startup', err))
 
     const guild = c.guilds.cache.get(env.GUILD_ID)
     const guildName = guild?.name ?? '(not a member)'

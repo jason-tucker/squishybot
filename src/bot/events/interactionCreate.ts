@@ -58,6 +58,23 @@ export function registerInteractionCreate(client: Client) {
         } else if (id.startsWith('report_approve_') || id.startsWith('report_reject_')) {
           const { handleReportReview } = await import('../../interactions/buttons/reportReview')
           await handleReportReview(interaction as ButtonInteraction)
+        } else if (id.startsWith('sudo:set:')) {
+          const { handleSettingsButton } = await import('../../interactions/sudoSettings')
+          await handleSettingsButton(interaction as ButtonInteraction)
+        }
+
+      } else if (interaction.isChannelSelectMenu()) {
+        const id = interaction.customId
+        if (id.startsWith('sudo:set:channel:')) {
+          const { handleSettingsChannelSelect } = await import('../../interactions/sudoSettings')
+          await handleSettingsChannelSelect(interaction)
+        }
+
+      } else if (interaction.isUserSelectMenu()) {
+        const id = interaction.customId
+        if (id === 'sudo:set:adduser') {
+          const { handleSettingsUserSelect } = await import('../../interactions/sudoSettings')
+          await handleSettingsUserSelect(interaction)
         }
 
       } else if (interaction.isStringSelectMenu()) {
@@ -74,6 +91,9 @@ export function registerInteractionCreate(client: Client) {
         } else if (id === 'squishy:section') {
           const { handleSquishyPanelSelect } = await import('../../interactions/selects/squishyPanel')
           await handleSquishyPanelSelect(interaction as StringSelectMenuInteraction)
+        } else if (id === 'sudo:set:removeuser' || id === 'sudo:set:reset_channel') {
+          const { handleSettingsStringSelect } = await import('../../interactions/sudoSettings')
+          await handleSettingsStringSelect(interaction as StringSelectMenuInteraction)
         }
 
       } else if (interaction.isModalSubmit()) {
@@ -87,6 +107,9 @@ export function registerInteractionCreate(client: Client) {
         } else if (id === 'report:submit') {
           const { handleReportSubmit } = await import('../../interactions/modals/reportSubmit')
           await handleReportSubmit(interaction as ModalSubmitInteraction)
+        } else if (id.startsWith('sudo:set:save:')) {
+          const { handleSettingsModalSubmit } = await import('../../interactions/sudoSettings')
+          await handleSettingsModalSubmit(interaction as ModalSubmitInteraction)
         }
       }
     } catch (err) {

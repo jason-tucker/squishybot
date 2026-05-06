@@ -91,6 +91,12 @@ export async function handleSudoPanelSelect(interaction: StringSelectMenuInterac
       0x5865f2)
     return
   }
+
+  if (value === 'settings') {
+    const { showSettingsPanel } = await import('../sudoSettings')
+    await showSettingsPanel(interaction)
+    return
+  }
 }
 
 async function sendPanel(

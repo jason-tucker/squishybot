@@ -4,13 +4,15 @@ import { autoChannels } from '../../db/schema'
 import { eq } from 'drizzle-orm'
 import { env } from '../../config/env'
 import { logger } from '../logger'
+import { settingOrNumber } from '../settings'
 
 const pendingTimers = new Map<string, ReturnType<typeof setTimeout>>()
 
 export function scheduleCleanup(client: Client, voiceChannelId: string): void {
   if (pendingTimers.has(voiceChannelId)) return
 
-  const delay = env.VOICE_CLEANUP_DELAY_MS
+  // Runtime-overridable via /sudo → Settings → Voice; falls back to env.
+  const delay = settingOrNumber('voice.cleanup_delay_ms', env.VOICE_CLEANUP_DELAY_MS)
 
   if (delay === 0) {
     // Instant — run on next tick, still allows a reconnect within the same event loop cycle

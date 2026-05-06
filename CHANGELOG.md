@@ -8,7 +8,13 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ## [Unreleased]
 
 ### Added
+- **`/sudo → Settings` panel** — runtime-editable bot config without redeploying. New `bot_settings` table (key/value, swept into an in-memory cache at boot) backs ChannelSelectMenu pickers for log/admin/birthday/clips/food/staff-approval-thread channel IDs, a numeric editor for `voice.cleanup_delay_ms`, and toggle buttons for feature flags (`feature.clips_auto_thread`, `feature.food_auto_thread`). Each setting shows source (⚙️ DB override vs 📄 env) and has a Reset button to clear the override and fall back to env.
+- **`/sudo → Settings → Sudo Users`** — grant sudo to any member via Discord's native UserSelectMenu, revoke via a select of current additions. Backed by a new `sudo_users` table; `isSudo()` consults env (immutable) + this DB-backed cache (mutable). `SUDO_USER_IDS` env-defined sudo users still cannot be removed at runtime.
+- **`/sudo → Settings → Games`** and **`User Profiles`** stub panels — show counts from the existing `games` / `user_profiles` tables and link out for future feature implementation. Schemas already exist; the editors land here when those features ship.
 - README link to the [Bot Development project board](https://github.com/users/jason-tucker/projects/3) — full roadmap, completed work, and open action items tracked there with `Tucker Action` and `Blocked` statuses.
+
+### Changed
+- `cleanupScheduler` now reads `voice.cleanup_delay_ms` from the runtime settings cache before falling back to the env value.
 
 ### Changed
 - Internal: extracted shared Components V2 `sep()` helper to `src/utils/cv2.ts` and replaced inline `SeparatorBuilder` constructions across 10 files. No behavior change.
