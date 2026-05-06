@@ -67,6 +67,11 @@ export async function sendMainPanel(interaction: ChatInputCommandInteraction | S
 
   const buttonRow = new ActionRowBuilder<ButtonBuilder>().addComponents(
     new ButtonBuilder()
+      .setCustomId('open_my_profile')
+      .setLabel('Edit My Profile')
+      .setEmoji('👤')
+      .setStyle(ButtonStyle.Primary),
+    new ButtonBuilder()
       .setCustomId('open_staff_request')
       .setLabel('Request Staff Role')
       .setEmoji('📝')

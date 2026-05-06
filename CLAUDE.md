@@ -21,6 +21,8 @@ When you add a new per-user feature, follow the pattern. Don't ship a self-servi
 
 The Manage User context menu (`src/commands/manageUser.ts`) is the canonical landing pad for sudo-acts-on-behalf flows — add a new button there for every new per-user surface.
 
+**Avoid command bloat for self-service entry points.** Don't register a top-level slash command for every per-user feature — push them through `/squishy`'s panel-with-buttons UX instead. Profile editing is reachable via the **Edit My Profile** button on `/squishy`, not a `/profile` command. Reserve top-level slash commands for high-frequency or high-value flows (`/games`, `/play`, `/voice`, `/report`).
+
 ---
 
 ## What this bot does
@@ -51,10 +53,9 @@ Slash commands are consolidated to four top-level commands plus one context menu
 | Command | Description | Permission |
 |---|---|---|
 | `/voice` | Open an ephemeral copy of the control panel for the channel you're currently in | Owner/Host/Sudo |
-| `/squishy` | User-facing menu: bot status, feature explainers, staff request button | Everyone |
+| `/squishy` | User-facing menu: bot status, feature explainers, **Edit My Profile** button (opens profileEditor in self mode), Request Staff Role button | Everyone |
 | `/sudo` | Admin select-menu panel (channels, hubs, auto threads, cleanup, approvals, restart) | Sudo |
 | `/report` | Open a modal to file a GitHub issue (Title / Type / Description / Steps); owner approves via DM before it lands on GitHub | Everyone |
-| `/profile` | Self-service profile editor — display name, birthday, birthday-ping opt-out | Everyone |
 | `/games` | Pick which games you want View / LFG-ping roles for | Everyone |
 | `/play <game>` | Post an LFG ping in the game's channel; per-(user,game) cooldown 30 min | Everyone |
 | Right-click user → **Manage User** | Edit Profile, Game Prefs, voice status, disconnect, staff history | Sudo |

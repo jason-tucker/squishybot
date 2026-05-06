@@ -12,7 +12,6 @@ import { execute as squishyExecute } from '../../commands/squishy'
 import { execute as sudoExecute } from '../../commands/sudo'
 import { execute as manageUserExecute } from '../../commands/manageUser'
 import { execute as reportExecute } from '../../commands/report'
-import { execute as profileExecute } from '../../commands/profile'
 import { execute as gamesExecute } from '../../commands/games'
 import { execute as playExecute, autocomplete as playAutocomplete } from '../../commands/play'
 import { isVcCustomId } from '../../utils/customId'
@@ -23,7 +22,6 @@ const commandHandlers = new Map<string, (i: ChatInputCommandInteraction) => Prom
   ['squishy', squishyExecute],
   ['sudo', sudoExecute],
   ['report', reportExecute],
-  ['profile', profileExecute],
   ['games', gamesExecute],
   ['play', playExecute],
 ])
@@ -60,6 +58,12 @@ export function registerInteractionCreate(client: Client) {
         } else if (id === 'open_staff_request') {
           const { showStaffRequestModal } = await import('../../commands/staff')
           await showStaffRequestModal(interaction as ButtonInteraction)
+        } else if (id === 'open_my_profile') {
+          await interaction.deferReply({ ephemeral: true })
+          const member = await interaction.guild!.members.fetch(interaction.user.id)
+          const { renderProfileEditor } = await import('../../interactions/profileEditor')
+          const payload = await renderProfileEditor(interaction.guildId!, interaction.user.id, member.displayName, 'self')
+          await interaction.editReply(payload as any)
         } else if (id.startsWith('staff:')) {
           const { handleStaffApprovalButton } = await import('../../interactions/buttons/staffApproval')
           await handleStaffApprovalButton(interaction as ButtonInteraction)

@@ -66,13 +66,13 @@ Roadmap, completed work, and open action items are tracked in the [Bot Developme
 ### User Profile Editor
 
 - **Sudo edits anyone's profile** — `/sudo → Settings → User Profiles` lets a sudo member browse profiles by Discord member picker, or right-click any member → **Manage User → Edit Profile** for a faster path. Sudo can edit: display name, real name, birthday, staff category / department / tier / leadership title, and the birthday opt-out flags.
-- **Self-service** — `/profile` opens the same editor in self mode for the caller. Limited to display name, birthday, and the two birthday flags. All edits are logged.
+- **Self-service** — `/squishy → Edit My Profile` opens the same editor in self mode for the caller. Limited to display name, birthday, and the two birthday flags. All edits are logged.
 
 ### Game Roles + LFG Pings
 
 - **Catalog (sudo)** — `/sudo → Settings → Games` lets sudo define games with a name, aliases, View role, Ping role, channel, optional category, sort order, visibility, and archive flag.
 - **Member opt-in** — `/games` lists every visible game with two toggles per game: **View** (assigns the View role) and **Pings** (assigns the LFG Ping role). Toggling immediately syncs the role on Discord.
-- **Sudo-acts-on-behalf** — sudo can right-click any member → **Manage User → Game Prefs** and toggle View / Pings on that member's behalf. Same UI, same flow.
+- **Sudo-acts-on-behalf** — sudo can right-click any member → **Manage User → Game Prefs** and toggle View / Pings on that member's behalf. Same UI, same flow. Same pattern applies to profile editing — `/squishy → Edit My Profile` for self, **Manage User → Edit Profile** for sudo.
 - **`/play <game>`** — LFG ping. Autocompletes on name + aliases. Posts in the game's channel mentioning its Ping role. 30-minute per-(user, game) cooldown; sudo can pass `force:true` to bypass. Bot will never `@everyone` / `@here` regardless of arguments — user-supplied text has raw mentions stripped.
 
 ### Planned Features
@@ -196,9 +196,8 @@ Four top-level slash commands plus one right-click context menu. All responses a
 | Command | Access | Description |
 |---|---|---|
 | `/voice` | Owner / Host / Sudo | Open an ephemeral copy of the control panel for the auto channel you're in |
-| `/squishy` | Everyone | User-facing menu: bot status, feature explainers (Voice / Panel / Reports / Staff), staff-request button |
+| `/squishy` | Everyone | User-facing menu: bot status, feature explainers (Voice / Panel / Reports / Staff), profile editor button, staff-request button |
 | `/sudo` | Sudo | Admin select-menu panel: Settings (sudo users, channels, voice, hubs, auto threads, games, user profiles), active channels, hubs, force cleanup, pending approvals, run reconciler, restart instructions |
-| `/profile` | Everyone | Self-service profile editor — display name, birthday, birthday-ping opt-out |
 | `/games` | Everyone | Pick which games you want View access + LFG pings for |
 | `/play` | Everyone | LFG ping — picks the game, optional party size / when / platform / rank / message; rate-limited |
 | `/report` | Everyone | Modal (Title / Type / Description / Steps) → DMs the owner with **Approve+Notify** / **Approve Silent** / **Reject+Notify** / **Reject Silent** buttons → on approve, files a GitHub issue against `GITHUB_REPO` |
