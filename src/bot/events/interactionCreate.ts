@@ -41,7 +41,7 @@ export function registerInteractionCreate(client: Client) {
         }
 
       } else if (interaction.isUserContextMenuCommand()) {
-        if (interaction.commandName === 'Manage User') {
+        if (interaction.commandName === 'Manage') {
           await manageUserExecute(interaction as UserContextMenuCommandInteraction)
         }
 
@@ -73,6 +73,9 @@ export function registerInteractionCreate(client: Client) {
         } else if (id.startsWith('report_approve_') || id.startsWith('report_reject_')) {
           const { handleReportReview } = await import('../../interactions/buttons/reportReview')
           await handleReportReview(interaction as ButtonInteraction)
+        } else if (id === 'sudo:home') {
+          const { handleSudoHomeButton } = await import('../../commands/sudo')
+          await handleSudoHomeButton(interaction as ButtonInteraction)
         } else if (id.startsWith('sudo:set:')) {
           const { handleSettingsButton } = await import('../../interactions/sudoSettings')
           await handleSettingsButton(interaction as ButtonInteraction)
@@ -85,6 +88,9 @@ export function registerInteractionCreate(client: Client) {
         } else if (id.startsWith('profile:back:')) {
           const { handleProfileBack } = await import('../../interactions/profileEditor')
           await handleProfileBack(interaction as ButtonInteraction)
+        } else if (id.startsWith('play:join:')) {
+          const { handleJoinButton } = await import('../../commands/play')
+          await handleJoinButton(interaction as ButtonInteraction)
         } else if (id.startsWith('games:cat:')) {
           const { handleCatalogButton } = await import('../../interactions/gamesEditor')
           await handleCatalogButton(interaction as ButtonInteraction)

@@ -1,6 +1,10 @@
 import {
   type StringSelectMenuInteraction,
+  ActionRowBuilder,
+  ButtonBuilder,
+  ButtonStyle,
   ContainerBuilder,
+  type MessageActionRowComponentBuilder,
   TextDisplayBuilder,
   MessageFlags,
 } from 'discord.js'
@@ -111,8 +115,12 @@ async function sendPanel(
     .addSeparatorComponents(sep())
     .addTextDisplayComponents(new TextDisplayBuilder().setContent(body.slice(0, 3500)))
 
+  const back = new ActionRowBuilder<MessageActionRowComponentBuilder>().addComponents(
+    new ButtonBuilder().setCustomId('sudo:home').setLabel('Back to /sudo').setEmoji('🏠').setStyle(ButtonStyle.Secondary),
+  )
+
   await interaction.editReply({
     flags: MessageFlags.IsComponentsV2,
-    components: [container],
+    components: [container, back],
   } as any)
 }

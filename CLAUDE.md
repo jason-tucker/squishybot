@@ -57,8 +57,8 @@ Slash commands are consolidated to four top-level commands plus one context menu
 | `/sudo` | Admin select-menu panel (channels, hubs, auto threads, cleanup, approvals, restart) | Sudo |
 | `/report` | Open a modal to file a GitHub issue (Title / Type / Description / Steps); owner approves via DM before it lands on GitHub | Everyone |
 | `/games` | Pick which games you want View / LFG-ping roles for | Everyone |
-| `/play <game>` | Post an LFG ping in the game's channel; per-(user,game) cooldown 30 min | Everyone |
-| Right-click user → **Manage User** | Edit Profile, Game Prefs, voice status, disconnect, staff history | Sudo |
+| `/play <game>` | Post a CV2 LFG message in the game's channel with a "🎮 I want to play!" toggle button. 30-min per-(user,game) cooldown. State in-memory + parse-from-message fallback. | Everyone |
+| Right-click user → **Manage** | Edit Profile, Game Prefs, voice status, disconnect, staff history | Sudo |
 
 The persistent control panel (in each auto-channel text channel) is the primary
 interaction surface. A silent sticky message at the bottom of every auto-channel

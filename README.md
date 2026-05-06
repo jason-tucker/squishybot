@@ -73,7 +73,7 @@ Roadmap, completed work, and open action items are tracked in the [Bot Developme
 - **Catalog (sudo)** — `/sudo → Settings → Games` lets sudo define games with a name, aliases, View role, Ping role, channel, optional category, sort order, visibility, and archive flag.
 - **Member opt-in** — `/games` lists every visible game with two toggles per game: **View** (assigns the View role) and **Pings** (assigns the LFG Ping role). Toggling immediately syncs the role on Discord.
 - **Sudo-acts-on-behalf** — sudo can right-click any member → **Manage User → Game Prefs** and toggle View / Pings on that member's behalf. Same UI, same flow. Same pattern applies to profile editing — `/squishy → Edit My Profile` for self, **Manage User → Edit Profile** for sudo.
-- **`/play <game>`** — LFG ping. Autocompletes on name + aliases. Posts in the game's channel mentioning its Ping role. 30-minute per-(user, game) cooldown; sudo can pass `force:true` to bypass. Bot will never `@everyone` / `@here` regardless of arguments — user-supplied text has raw mentions stripped.
+- **`/play <game>`** — LFG ping. Autocompletes on name + aliases. Posts a Components V2 message in the game's channel pinging the LFG role; anyone can click the **🎮 I want to play!** button to join the session (toggle on/off). The host is locked in — they delete the message to cancel. 30-minute per-(user, game) cooldown; sudo can pass `force:true` to bypass.
 
 ### Planned Features
 
@@ -199,9 +199,9 @@ Four top-level slash commands plus one right-click context menu. All responses a
 | `/squishy` | Everyone | User-facing menu: bot status, feature explainers (Voice / Panel / Reports / Staff), profile editor button, staff-request button |
 | `/sudo` | Sudo | Admin select-menu panel: Settings (sudo users, channels, voice, hubs, auto threads, games, user profiles), active channels, hubs, force cleanup, pending approvals, run reconciler, restart instructions |
 | `/games` | Everyone | Pick which games you want View access + LFG pings for |
-| `/play` | Everyone | LFG ping — picks the game, optional party size / when / platform / rank / message; rate-limited |
+| `/play` | Everyone | LFG ping. Posts a CV2 message in the game's channel with a "🎮 I want to play!" button others can click to join the session. Rate-limited per-(user, game). |
 | `/report` | Everyone | Modal (Title / Type / Description / Steps) → DMs the owner with **Approve+Notify** / **Approve Silent** / **Reject+Notify** / **Reject Silent** buttons → on approve, files a GitHub issue against `GITHUB_REPO` |
-| Right-click user → **Manage User** | Sudo | Roles, voice status, disconnect, staff history |
+| Right-click user → **Manage** | Sudo | Roles, voice status, disconnect, staff history, profile + game prefs editors |
 
 ### Voice control panel (in each auto-channel text channel)
 

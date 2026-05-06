@@ -1,70 +1,120 @@
 /**
- * /play <game> — LFG ping for a game.
+ * /play <game>
  *
- * Resolves the game by name or alias, checks the per-(user, game) cooldown
- * (30 min, in-memory), and posts in the game's configured channel mentioning
- * its ping-role. Sudo can override the cooldown by passing `force:true`.
+ * Posts a Components V2 LFG message in the game's channel pinging the
+ * configured ping_role_id. The message lists the host and any members who
+ * subsequently click the "I want to play!" button (toggle: clicking again
+ * removes you).
  *
- * The bot will never @everyone or @here regardless of arguments. Mentions
- * inside the user-supplied `message` are stripped to prevent abuse.
+ * Player-list state is held in-memory keyed by message ID; on a cache miss
+ * (e.g. after a bot restart) the handler re-derives the list by parsing
+ * mentions out of the message itself.
  */
 import {
+  ActionRowBuilder,
+  ButtonBuilder,
+  ButtonInteraction,
+  ButtonStyle,
   ChannelType,
   ChatInputCommandInteraction,
+  ContainerBuilder,
+  type AutocompleteInteraction,
+  type MessageActionRowComponentBuilder,
+  MessageFlags,
   PermissionFlagsBits,
   SlashCommandBuilder,
+  TextDisplayBuilder,
   type TextChannel,
 } from 'discord.js'
 import { isSudo } from '../services/voice/permissions'
 import {
-  checkPlayCooldown, findGameByNameOrAlias, listGames, markPlayUsed,
+  checkPlayCooldown,
+  findGameByNameOrAlias,
+  getGame,
+  listGames,
+  markPlayUsed,
+  type Game,
 } from '../services/games'
+import { sep } from '../utils/cv2'
 import { logger } from '../services/logger'
 
 export const data = new SlashCommandBuilder()
   .setName('play')
-  .setDescription('Ping the LFG role for a game')
+  .setDescription('Start an LFG ping for a game — others can join with one click')
   .setDMPermission(false)
   .addStringOption(o => o
     .setName('game')
-    .setDescription('Which game to LFG for (name or alias)')
+    .setDescription('Which game (name or alias)')
     .setRequired(true)
     .setAutocomplete(true)
-  )
-  .addIntegerOption(o => o
-    .setName('party_size')
-    .setDescription('How many players you need (1–32)')
-    .setMinValue(1).setMaxValue(32)
-  )
-  .addStringOption(o => o
-    .setName('when')
-    .setDescription('When (e.g. "now", "9pm EST")')
-  )
-  .addStringOption(o => o
-    .setName('platform')
-    .setDescription('Platform (PC / PS / Xbox / etc.)')
-  )
-  .addStringOption(o => o
-    .setName('rank')
-    .setDescription('Skill / rank info')
-  )
-  .addStringOption(o => o
-    .setName('message')
-    .setDescription('Free-form note (200 char max, no role/user mentions)')
   )
   .addBooleanOption(o => o
     .setName('force')
     .setDescription('Sudo only — bypass the per-game cooldown')
   )
 
-function stripMentions(s: string): string {
-  return s
-    // Insert U+200B (zero-width space) to keep "@everyone" / "@here" visible-as-text but unparsed.
-    .replace(/@(everyone|here)/gi, '@​$1')
-    .replace(/<@&\d+>/g, '[role]')
-    .replace(/<@!?\d+>/g, '[user]')
-    .replace(/<#\d+>/g, '[channel]')
+// ---------------------------------------------------------------------------
+// In-memory session state, keyed by message ID
+// ---------------------------------------------------------------------------
+
+interface LfgSession {
+  gameId: string
+  hostId: string
+  /** Excludes the host. Order = click order. */
+  players: string[]
 }
+
+const sessions = new Map<string, LfgSession>()
+
+// ---------------------------------------------------------------------------
+// Message rendering
+// ---------------------------------------------------------------------------
+
+function buildPanel(game: Game, session: LfgSession, options?: { initialPing?: boolean }): {
+  flags: number
+  components: any[]
+  allowedMentions: { roles: string[]; users: string[]; parse: never[] }
+} {
+  const headerLine = options?.initialPing && game.pingRoleId
+    ? `<@&${game.pingRoleId}> **🎮 LFG: ${game.name}**`
+    : `**🎮 LFG: ${game.name}**`
+
+  const playerLines: string[] = [`👑 <@${session.hostId}> _(host)_`]
+  for (const id of session.players) playerLines.push(`• <@${id}>`)
+  const total = 1 + session.players.length
+
+  const container = new ContainerBuilder()
+    .setAccentColor(0x5865f2)
+    .addTextDisplayComponents(new TextDisplayBuilder().setContent(headerLine))
+    .addSeparatorComponents(sep())
+    .addTextDisplayComponents(new TextDisplayBuilder().setContent(
+      `**Players (${total})**\n${playerLines.join('\n')}`
+    ))
+
+  const button = new ActionRowBuilder<MessageActionRowComponentBuilder>().addComponents(
+    new ButtonBuilder()
+      .setCustomId(`play:join:${game.id}`)
+      .setLabel('I want to play!')
+      .setEmoji('🎮')
+      .setStyle(ButtonStyle.Primary),
+  )
+
+  // Lock allowed mentions:
+  //  - users: just the host (so they don't ping themselves on subsequent edits)
+  //  - roles: the ping role IFF this is the initial post
+  //  - parse: [] so @everyone/@here are never resolved
+  const allowedRoles = options?.initialPing && game.pingRoleId ? [game.pingRoleId] : []
+
+  return {
+    flags: MessageFlags.IsComponentsV2,
+    components: [container, button],
+    allowedMentions: { roles: allowedRoles, users: [session.hostId], parse: [] },
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Command + autocomplete
+// ---------------------------------------------------------------------------
 
 export async function execute(interaction: ChatInputCommandInteraction): Promise<void> {
   if (!interaction.guild) {
@@ -92,13 +142,11 @@ export async function execute(interaction: ChatInputCommandInteraction): Promise
     await interaction.editReply({ content: '❌ `force:true` is sudo-only.' })
     return
   }
-
   if (!force) {
     const check = checkPlayCooldown(interaction.guild.id, member.id, game.id)
     if (!check.ok) {
-      const min = Math.floor(check.remainingSec / 60)
-      const sec = check.remainingSec % 60
-      const wait = min > 0 ? `${min}m ${sec}s` : `${sec}s`
+      const m = Math.floor(check.remainingSec / 60), s = check.remainingSec % 60
+      const wait = m > 0 ? `${m}m ${s}s` : `${s}s`
       await interaction.editReply({ content: `🕒 Cooldown — try again in **${wait}**. Sudo can pass \`force:true\` to bypass.` })
       return
     }
@@ -120,40 +168,18 @@ export async function execute(interaction: ChatInputCommandInteraction): Promise
     return
   }
 
-  const partySize = interaction.options.getInteger('party_size')
-  const when = interaction.options.getString('when')
-  const platform = interaction.options.getString('platform')
-  const rank = interaction.options.getString('rank')
-  const messageRaw = interaction.options.getString('message')
-  const message = messageRaw ? stripMentions(messageRaw).slice(0, 200) : null
-
-  const ping = game.pingRoleId ? `<@&${game.pingRoleId}>` : ''
-  const lines: string[] = []
-  lines.push(`${ping} **LFG: ${game.name}** — host <@${member.id}>`.trim())
-  const meta: string[] = []
-  if (partySize) meta.push(`party of ${partySize}`)
-  if (when) meta.push(`when: ${when}`)
-  if (platform) meta.push(`platform: ${platform}`)
-  if (rank) meta.push(`rank: ${rank}`)
-  if (meta.length) lines.push(`-# ${meta.join(' · ')}`)
-  if (message) lines.push(message)
-
-  const allowedRoles = game.pingRoleId ? [game.pingRoleId] : []
-  await (channel as TextChannel).send({
-    content: lines.join('\n'),
-    allowedMentions: { users: [member.id], roles: allowedRoles, parse: [] },
-  })
+  const session: LfgSession = { gameId: game.id, hostId: member.id, players: [] }
+  const sent = await (channel as TextChannel).send(buildPanel(game, session, { initialPing: true }) as any)
+  sessions.set(sent.id, session)
 
   if (!force) markPlayUsed(interaction.guild.id, member.id, game.id)
-
-  logger.info(`/play game=${game.name} host=${member.id} channel=${channel.id} force=${force}`)
+  logger.info(`/play game=${game.name} host=${member.id} message=${sent.id} force=${force}`)
   await interaction.editReply({ content: `✅ Posted in <#${channel.id}>.` })
 }
 
-export async function autocomplete(interaction: import('discord.js').AutocompleteInteraction): Promise<void> {
+export async function autocomplete(interaction: AutocompleteInteraction): Promise<void> {
   const focused = interaction.options.getFocused().toLowerCase()
-  const games = listGames()
-  const matches = games
+  const matches = listGames()
     .filter(g =>
       g.name.toLowerCase().includes(focused) ||
       g.aliases.some(a => a.toLowerCase().includes(focused))
@@ -161,4 +187,67 @@ export async function autocomplete(interaction: import('discord.js').Autocomplet
     .slice(0, 25)
     .map(g => ({ name: g.name, value: g.name }))
   await interaction.respond(matches).catch(() => {})
+}
+
+// ---------------------------------------------------------------------------
+// Join button — toggles the clicker's presence in the player list.
+// ---------------------------------------------------------------------------
+
+export async function handleJoinButton(interaction: ButtonInteraction): Promise<void> {
+  if (!interaction.guild || !interaction.message) {
+    await interaction.deferUpdate().catch(() => {})
+    return
+  }
+
+  const messageId = interaction.message.id
+  let session = sessions.get(messageId)
+
+  // Cache miss (e.g. after a restart): rebuild from the message itself.
+  if (!session) {
+    const recovered = recoverSessionFromMessage(interaction)
+    if (!recovered) {
+      await interaction.reply({ content: '❌ This LFG session is no longer active.', ephemeral: true })
+      return
+    }
+    session = recovered
+    sessions.set(messageId, session)
+  }
+
+  const game = getGame(session.gameId)
+  if (!game) {
+    await interaction.reply({ content: '❌ This game has been removed from the catalog.', ephemeral: true })
+    return
+  }
+
+  const userId = interaction.user.id
+  if (userId === session.hostId) {
+    await interaction.reply({ content: 'You\'re the host — you\'re already in. Delete the message to cancel.', ephemeral: true })
+    return
+  }
+
+  const idx = session.players.indexOf(userId)
+  if (idx === -1) session.players.push(userId)
+  else session.players.splice(idx, 1)
+
+  await interaction.update(buildPanel(game, session) as any)
+}
+
+/** Rebuild a session from an existing message's text (mentions only). */
+function recoverSessionFromMessage(interaction: ButtonInteraction): LfgSession | null {
+  const gameId = interaction.customId.split(':')[2]
+  if (!gameId) return null
+  // Components V2: the panel content is in the Container's TextDisplay components.
+  // The interaction message's `components` array preserves them.
+  const allText = JSON.stringify(interaction.message.components)
+  const mentions = Array.from(allText.matchAll(/<@(\d{15,25})>/g)).map(m => m[1])
+  if (mentions.length === 0) return null
+  const [hostId, ...players] = mentions
+  const seen = new Set<string>([hostId])
+  const dedupedPlayers: string[] = []
+  for (const id of players) {
+    if (seen.has(id)) continue
+    seen.add(id)
+    dedupedPlayers.push(id)
+  }
+  return { gameId, hostId, players: dedupedPlayers }
 }

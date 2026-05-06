@@ -1,6 +1,8 @@
 import {
   SlashCommandBuilder,
   ChatInputCommandInteraction,
+  ButtonInteraction,
+  StringSelectMenuInteraction,
   ContainerBuilder,
   TextDisplayBuilder,
   ActionRowBuilder,
@@ -10,7 +12,7 @@ import {
 import { db } from '../db/client'
 import { autoChannels, hubChannels, staffApprovals } from '../db/schema'
 import { and, eq } from 'drizzle-orm'
-import { isSudo } from '../services/voice/permissions'
+import { requireSudo } from '../services/voice/permissions'
 import { env } from '../config/env'
 import { sep } from '../utils/cv2'
 
@@ -19,15 +21,7 @@ export const data = new SlashCommandBuilder()
   .setDescription('Bot management (sudo only)')
   .setDMPermission(false)
 
-export async function execute(interaction: ChatInputCommandInteraction): Promise<void> {
-  const member = await interaction.guild!.members.fetch(interaction.user.id)
-  if (!isSudo(member)) {
-    await interaction.reply({ content: '❌ Sudo access required.', ephemeral: true })
-    return
-  }
-
-  await interaction.deferReply({ ephemeral: true })
-
+export async function renderSudoHome(): Promise<{ flags: number; components: any[] }> {
   const guildId = env.GUILD_ID
   const [channels, hubs, pending] = await Promise.all([
     db.select().from(autoChannels).where(eq(autoChannels.guildId, guildId)),
@@ -62,8 +56,25 @@ export async function execute(interaction: ChatInputCommandInteraction): Promise
       ])
   )
 
-  await interaction.editReply({
-    flags: MessageFlags.IsComponentsV2,
-    components: [container, menu],
-  } as any)
+  return { flags: MessageFlags.IsComponentsV2 as number, components: [container, menu] }
+}
+
+export async function execute(interaction: ChatInputCommandInteraction): Promise<void> {
+  const member = await interaction.guild!.members.fetch(interaction.user.id)
+  if (!member) return
+  // Re-use the same auth path as the rest of the sudo surface.
+  const { isSudo } = await import('../services/voice/permissions')
+  if (!isSudo(member)) {
+    await interaction.reply({ content: '❌ Sudo access required.', ephemeral: true })
+    return
+  }
+
+  await interaction.deferReply({ ephemeral: true })
+  await interaction.editReply(await renderSudoHome() as any)
+}
+
+/** Handler for the "Back to /sudo" button on sub-panels. */
+export async function handleSudoHomeButton(interaction: ButtonInteraction | StringSelectMenuInteraction): Promise<void> {
+  if (!await requireSudo(interaction)) return
+  await interaction.update(await renderSudoHome() as any)
 }

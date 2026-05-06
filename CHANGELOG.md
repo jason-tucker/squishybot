@@ -7,6 +7,11 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### Changed
+- **`/play <game>` is now an LFG-with-join-button flow.** Drops `party_size` / `when` / `platform` / `rank` / `message` args — `/play` takes just `<game>` (and `force` for sudo). The bot posts a Components V2 message in the game's channel, pings the configured ping role, and shows a "🎮 I want to play!" button. Anyone clicking the button toggles their presence in the player list (host can't toggle themselves out — they delete the message to cancel). State held in-memory keyed by message ID with parse-from-message recovery on cache miss (so existing posts survive bot restarts). `allowedMentions` still hardened so `@everyone`/`@here` can never resolve.
+- **Right-click context menu renamed `Manage User` → `Manage`.** Same panel, same buttons (Edit Profile, Game Prefs, View Channel Panel, Disconnect from Voice, View Staff Record).
+- **`/sudo` sub-panels now have a "🏠 Back to /sudo" button** — every panel reachable from the top-level select menu (Active voice channels, Hub channels, Force cleanup, Pending approvals, Run reconciler, Restart instructions) and the Settings home gets a one-click jump back to the original `/sudo` view instead of having to dismiss + rerun the command. New customId `sudo:home` with handler in `commands/sudo.ts` re-rendering the original menu.
+
 ### Added
 - **`/sudo → Settings` panel** — runtime-editable bot config without redeploying. New `bot_settings` table (key/value, swept into an in-memory cache at boot) backs ChannelSelectMenu pickers for log/admin/birthday/staff-approval-thread channel IDs and a numeric editor for `voice.cleanup_delay_ms`. Each setting shows source (⚙️ DB override vs 📄 env) and has a Reset button to clear the override and fall back to env.
 - **`/sudo → Settings → Sudo Users`** — grant sudo to any member via Discord's native UserSelectMenu, revoke via a select of current additions. Backed by a new `sudo_users` table; `isSudo()` consults env (immutable) + this DB-backed cache (mutable). `SUDO_USER_IDS` env-defined sudo users still cannot be removed at runtime.

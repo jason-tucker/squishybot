@@ -16,7 +16,7 @@ import { requireSudo } from '../services/voice/permissions'
 import { sep } from '../utils/cv2'
 
 export const data = new ContextMenuCommandBuilder()
-  .setName('Manage User')
+  .setName('Manage')
   .setType(ApplicationCommandType.User)
   .setDMPermission(false)
 

@@ -146,8 +146,11 @@ function renderHome() {
     new ButtonBuilder().setCustomId('sudo:set:nav:games').setLabel('Games').setEmoji('🎮').setStyle(ButtonStyle.Secondary),
     new ButtonBuilder().setCustomId('sudo:set:nav:profiles').setLabel('User Profiles').setEmoji('👤').setStyle(ButtonStyle.Secondary),
   )
+  const navRow = new ActionRowBuilder<MessageActionRowComponentBuilder>().addComponents(
+    new ButtonBuilder().setCustomId('sudo:home').setLabel('Back to /sudo').setEmoji('🏠').setStyle(ButtonStyle.Secondary),
+  )
 
-  return { flags: MessageFlags.IsComponentsV2 as number, components: [container, row1, row2] }
+  return { flags: MessageFlags.IsComponentsV2 as number, components: [container, row1, row2, navRow] }
 }
 
 async function renderSudoUsers() {
