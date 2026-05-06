@@ -14,7 +14,7 @@ export function buildStickyPayload(voiceChannelId: string) {
   const container = new ContainerBuilder()
     .addTextDisplayComponents(
       new TextDisplayBuilder().setContent(
-        '-# This channel will be deleted, don\'t intend for things to stay here.'
+        `-# This channel (and <#${voiceChannelId}>) will be deleted, don't intend for things to stay here.`
       )
     )
 
