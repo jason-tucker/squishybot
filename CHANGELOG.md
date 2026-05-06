@@ -15,6 +15,10 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - **`/sudo → Settings → Games`** and **`User Profiles`** stub panels — show counts from the existing `games` / `user_profiles` tables and link out for future feature implementation. Schemas already exist; the editors land here when those features ship.
 - README link to the [Bot Development project board](https://github.com/users/jason-tucker/projects/3) — full roadmap, completed work, and open action items tracked there with `Tucker Action` and `Blocked` statuses.
 
+- **`/sudo → Settings → Hub Channels`** — runtime-managed list of voice channels that act as auto-channel hubs. ChannelSelectMenu (voice only) adds; StringSelectMenu unregisters. Newly added hubs inherit the channel's current parent (or the auto-voice category override) and label. `HUB_CHANNEL_IDS` env is now optional — kept as a legacy seed list that runs once on boot when set, but the DB is authoritative going forward.
+- **`channel.auto_voice_category` setting** — override the env-defined `AUTO_VOICE_CATEGORY_ID` from the Voice sub-panel without restarting. Wired through `autoChannel.ts`, `hubManager.ts`, and the reconciler so changes take effect on the next channel create.
+- **In-memory hubs cache** — `loadSettings()` now also seeds a `hubsCache`, and `isHubChannel()` is a sync cache lookup instead of a per-event DB query. Hot path on every voice state update.
+
 ### Removed
 - The static `feature.clips_auto_thread` / `feature.food_auto_thread` toggles and their `channel.clips` / `channel.food` channel-pickers. Auto-thread channels are now data, not code — managed via the new `Auto Threads` sub-panel. The corresponding env vars (`CLIPS_CHANNEL_ID`, `FOOD_CHANNEL_ID`) are unused; safe to drop from `.env`.
 - The `Features` button on the `/sudo → Settings` home — the only flags it housed were the two auto-thread toggles. The infrastructure (`BOOLEAN_SETTINGS`, `effectiveBoolValue`, `renderFeatures`, `sudo:set:toggle:{key}` handler) is gone; reintroduce when a future flag actually needs a toggle.

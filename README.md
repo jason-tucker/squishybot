@@ -47,8 +47,8 @@ Roadmap, completed work, and open action items are tracked in the [Bot Developme
 ### Sudo Panel
 
 - `/sudo` opens an admin select menu: **Settings**, active channels, hubs, force cleanup, pending approvals, run reconciler, restart instructions
-- **Settings** is a runtime config editor — overrides the values that would normally come from `.env` for: extra sudo users, channel IDs (log / admin / birthday / staff approval thread), voice cleanup delay, and the list of auto-thread channels. Reset on any field falls back to the env value.
-- Settings persist in `bot_settings` (key/value), `sudo_users` (members granted sudo at runtime), and `auto_thread_channels` (the dynamic auto-thread list).
+- **Settings** is a runtime config editor — overrides the values that would normally come from `.env` for: extra sudo users, channel IDs (log / admin / birthday / staff approval thread), voice cleanup delay, the auto-voice category, the list of registered hubs, and the list of auto-thread channels. Reset on any field falls back to the env value.
+- Settings persist in `bot_settings` (key/value), `sudo_users` (members granted sudo at runtime), `hub_channels` (DB-authoritative hub list), and `auto_thread_channels` (the dynamic auto-thread list).
 
 ### Auto Threads
 
@@ -85,8 +85,8 @@ cp .env.example .env
 | `DISCORD_CLIENT_ID` | Yes | Application ID |
 | `DATABASE_URL` | Yes | PostgreSQL connection string |
 | `GUILD_ID` | Yes | Single guild this bot serves |
-| `AUTO_VOICE_CATEGORY_ID` | Yes | Category for hubs and auto channels |
-| `HUB_CHANNEL_IDS` | Yes | Comma-separated hub voice channel IDs |
+| `AUTO_VOICE_CATEGORY_ID` | Yes | Default category for hubs and auto channels (overridable via `/sudo → Settings → Voice → Auto-voice category`) |
+| `HUB_CHANNEL_IDS` | No | Comma-separated voice channel IDs to seed as hubs on first boot. Once registered, the DB is authoritative and this env var can be cleared. Add/remove hubs at runtime via `/sudo → Settings → Hub Channels`. |
 | `SUDO_ROLE_IDS` | No | Comma-separated role IDs with admin powers |
 | `SUDO_USER_IDS` | No | Comma-separated user IDs with admin powers |
 | `LOG_CHANNEL_ID` | No | Channel for bot log messages |

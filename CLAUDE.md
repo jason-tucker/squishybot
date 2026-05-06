@@ -86,8 +86,8 @@ Weekly auto-restart at Tuesday 4 AM via `squishybot-restart.timer`.
 | `GUILD_ID` | Yes | The single guild this bot serves |
 | `SUDO_ROLE_IDS` | No | Comma-separated role IDs with bot-admin powers |
 | `SUDO_USER_IDS` | No | Comma-separated user IDs with bot-admin powers |
-| `AUTO_VOICE_CATEGORY_ID` | Yes | Discord category ID for hubs and auto channels |
-| `HUB_CHANNEL_IDS` | Yes | Comma-separated voice channel IDs that are hubs |
+| `AUTO_VOICE_CATEGORY_ID` | Yes | Default Discord category for hubs and auto channels. Overridable at runtime via `/sudo → Settings → Voice → Auto-voice category` (`channel.auto_voice_category` key in `bot_settings`). |
+| `HUB_CHANNEL_IDS` | No | Legacy seed list of hub voice channel IDs. Authoritative source is now the `hub_channels` table; manage via `/sudo → Settings → Hub Channels`. Env is only consulted on boot to seed any IDs not yet in DB. |
 | `VOICE_CLEANUP_DELAY_MS` | No | ms before empty channel cleanup (default: 30000) |
 | `LOG_CHANNEL_ID` | No | Bot posts structured log messages here |
 | `ADMIN_CHANNEL_ID` | No | Sudo-only bot admin channel |

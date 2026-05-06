@@ -36,7 +36,7 @@ export async function execute(interaction: ChatInputCommandInteraction): Promise
   const sudoSection =
     '### 🛡️ Sudo / Admin\n' +
     '`/sudo` — opens the admin select menu:\n' +
-    '• **Settings** — runtime config (sudo users, channels, voice, auto-thread channels) backed by `bot_settings` / `sudo_users` / `auto_thread_channels`\n' +
+    '• **Settings** — runtime config (sudo users, channels, voice + auto-voice category, hub channels, auto-thread channels) backed by `bot_settings` / `sudo_users` / `hub_channels` / `auto_thread_channels`\n' +
     '• Active voice channels · Hub channels · Force cleanup · Pending approvals · Run reconciler · Restart instructions\n\n' +
     'Right-click a member → **Manage User** — roles, voice status, disconnect, staff history\n\n' +
     '### 🧵 Automatic\n' +
