@@ -27,7 +27,7 @@ export function registerVoiceStateUpdate(client: Client): void {
     // --- JOINED A CHANNEL ---
     if (joinedChannelId && joinedChannelId !== leftChannelId) {
       // Check if it's a hub
-      if (await isHubChannel(joinedChannelId)) {
+      if (isHubChannel(joinedChannelId)) {
         await handleHubJoin(client, guild, member, joinedChannelId)
         return
       }

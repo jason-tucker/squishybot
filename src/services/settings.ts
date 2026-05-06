@@ -8,7 +8,7 @@
  */
 import { eq } from 'drizzle-orm'
 import { db } from '../db/client'
-import { botSettings, sudoUsers, autoThreadChannels } from '../db/schema'
+import { botSettings, sudoUsers, autoThreadChannels, hubChannels } from '../db/schema'
 
 // ---------------------------------------------------------------------------
 // In-memory caches
@@ -25,14 +25,26 @@ export interface AutoThreadConfig {
 }
 const autoThreadCache = new Map<string, AutoThreadConfig>()
 
+export interface HubInfo {
+  id: string
+  channelId: string
+  guildId: string
+  categoryId: string
+  position: number
+  label: string
+}
+const hubsCache = new Map<string, HubInfo>()  // keyed by channelId
+
 export async function loadSettings(): Promise<void> {
   settingsCache.clear()
   sudoUsersCache.clear()
   autoThreadCache.clear()
-  const [rows, sudo, threads] = await Promise.all([
+  hubsCache.clear()
+  const [rows, sudo, threads, hubs] = await Promise.all([
     db.select().from(botSettings).catch(() => []),
     db.select().from(sudoUsers).catch(() => []),
     db.select().from(autoThreadChannels).catch(() => []),
+    db.select().from(hubChannels).catch(() => []),
   ])
   for (const r of rows) settingsCache.set(r.key, r.value)
   for (const s of sudo) sudoUsersCache.add(s.userId)
@@ -42,6 +54,16 @@ export async function loadSettings(): Promise<void> {
       guildId: t.guildId,
       nameTemplate: t.nameTemplate,
       archiveDuration: t.archiveDuration,
+    })
+  }
+  for (const h of hubs) {
+    hubsCache.set(h.channelId, {
+      id: h.id,
+      channelId: h.channelId,
+      guildId: h.guildId,
+      categoryId: h.categoryId,
+      position: h.position,
+      label: h.label,
     })
   }
 }
@@ -164,4 +186,64 @@ export async function addAutoThreadChannel(
 export async function removeAutoThreadChannel(channelId: string): Promise<void> {
   await db.delete(autoThreadChannels).where(eq(autoThreadChannels.channelId, channelId))
   autoThreadCache.delete(channelId)
+}
+
+// ---------------------------------------------------------------------------
+// Hub channels — managed at runtime, replaces the env HUB_CHANNEL_IDS list
+// ---------------------------------------------------------------------------
+
+export function isHubChannelCached(channelId: string): boolean {
+  return hubsCache.has(channelId)
+}
+
+export function getHubInfo(channelId: string): HubInfo | null {
+  return hubsCache.get(channelId) ?? null
+}
+
+export function listHubs(): HubInfo[] {
+  return Array.from(hubsCache.values())
+}
+
+export async function registerHubChannel(input: {
+  channelId: string
+  guildId: string
+  categoryId: string
+  position: number
+  label: string
+}): Promise<void> {
+  const [row] = await db.insert(hubChannels)
+    .values({
+      channelId: input.channelId,
+      guildId: input.guildId,
+      categoryId: input.categoryId,
+      position: input.position,
+      label: input.label,
+    })
+    .onConflictDoNothing({ target: hubChannels.channelId })
+    .returning()
+
+  // If we hit the conflict, fetch the existing row instead.
+  const final = row ?? (await db.select().from(hubChannels).where(eq(hubChannels.channelId, input.channelId)))[0]
+  if (!final) return
+  hubsCache.set(final.channelId, {
+    id: final.id,
+    channelId: final.channelId,
+    guildId: final.guildId,
+    categoryId: final.categoryId,
+    position: final.position,
+    label: final.label,
+  })
+}
+
+export async function unregisterHubChannel(channelId: string): Promise<void> {
+  await db.delete(hubChannels).where(eq(hubChannels.channelId, channelId))
+  hubsCache.delete(channelId)
+}
+
+/** Update the cached hub's tracked channelId after the reconciler creates a replacement. */
+export function updateHubChannelId(oldChannelId: string, newChannelId: string): void {
+  const hub = hubsCache.get(oldChannelId)
+  if (!hub) return
+  hubsCache.delete(oldChannelId)
+  hubsCache.set(newChannelId, { ...hub, channelId: newChannelId })
 }

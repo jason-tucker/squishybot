@@ -11,6 +11,7 @@ import { syncTextChannelPermissions } from './permissions'
 import { seedHubsFromEnv } from './hubManager'
 import { createAutoChannel } from './autoChannel'
 import { logger } from '../logger'
+import { unregisterHubChannel, updateHubChannelId } from '../settings'
 
 export interface ReconcilerResult {
   recovered: number
@@ -137,7 +138,7 @@ export async function runReconciler(client: Client): Promise<ReconcilerResult> {
 
       if (existing) {
         logger.warn(`Reconciler: hub ${hub.id} stale; channel "${hub.label}" already exists as ${existing.id} — removing hub row`)
-        await db.delete(hubChannels).where(eq(hubChannels.id, hub.id)).catch(() => {})
+        await unregisterHubChannel(hub.channelId).catch(() => {})
         continue
       }
 
@@ -149,6 +150,7 @@ export async function runReconciler(client: Client): Promise<ReconcilerResult> {
           position: hub.position,
         })
         await db.update(hubChannels).set({ channelId: newHub.id }).where(eq(hubChannels.id, hub.id))
+        updateHubChannelId(hub.channelId, newHub.id)
         result.hubs++
         logger.info(`Reconciler: recreated hub ${hub.label} (${newHub.id})`)
       } catch (err) {

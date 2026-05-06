@@ -7,16 +7,26 @@ import { env } from '../../config/env'
 import { generateChannelName } from '../../utils/channelName'
 import { createAutoChannel } from './autoChannel'
 import { logger } from '../logger'
+import {
+  isHubChannelCached,
+  registerHubChannel,
+  updateHubChannelId,
+} from '../settings'
 
-export async function isHubChannel(channelId: string): Promise<boolean> {
-  const [row] = await db.select().from(hubChannels).where(eq(hubChannels.channelId, channelId))
-  return !!row
+export function isHubChannel(channelId: string): boolean {
+  return isHubChannelCached(channelId)
 }
 
+/**
+ * Seed hubs from `HUB_CHANNEL_IDS` env var. Legacy compatibility — the
+ * authoritative source is now the `hub_channels` table managed via
+ * `/sudo → Settings → Hub Channels`. Skipped entirely when the env list is empty.
+ */
 export async function seedHubsFromEnv(guild: Guild): Promise<void> {
+  if (env.HUB_CHANNEL_IDS.length === 0) return
+
   for (const channelId of env.HUB_CHANNEL_IDS) {
-    const existing = await db.select().from(hubChannels).where(eq(hubChannels.channelId, channelId))
-    if (existing.length > 0) continue
+    if (isHubChannelCached(channelId)) continue
 
     const vc = await guild.channels.fetch(channelId).catch(() => null)
     if (!vc?.isVoiceBased()) {
@@ -34,14 +44,14 @@ export async function seedHubsFromEnv(guild: Guild): Promise<void> {
       continue
     }
 
-    await db.insert(hubChannels).values({
+    await registerHubChannel({
       guildId: guild.id,
       channelId: vc.id,
       categoryId: vc.parentId ?? env.AUTO_VOICE_CATEGORY_ID,
       position: vc.position,
       label: vc.name,
     })
-    logger.info(`Registered hub: ${vc.name} (${channelId})`)
+    logger.info(`Registered hub from env: ${vc.name} (${channelId})`)
   }
 }
 
@@ -85,6 +95,7 @@ async function createReplacementHub(guild: Guild, originalHub: typeof hubChannel
     await db.update(hubChannels)
       .set({ channelId: newHub.id })
       .where(eq(hubChannels.id, originalHub.id))
+    updateHubChannelId(originalHub.channelId, newHub.id)
 
     logger.info(`Replacement hub created: ${newHub.name} (${newHub.id})`)
   } catch (err) {
