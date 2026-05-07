@@ -10,6 +10,8 @@ export type VoiceAction =
   | 'rename'
   | 'lock'
   | 'unlock'
+  | 'hide'
+  | 'show'
   | 'hosts'
   | 'claim'
   | 'templates'

@@ -48,6 +48,16 @@ export async function handleVoiceControlSelect(interaction: StringSelectMenuInte
     ])
     if (vc?.isVoiceBased() && tc?.isTextBased()) {
       await syncTextChannelPermissions(tc as any, vc as any, { ...record, hostUserIds: newHosts }, interaction.client.user!.id)
+      // If the VC is hidden, hosts need an explicit view allow to find it from
+      // the channel list. On removal, drop the overwrite so they go back to
+      // @everyone-deny visibility.
+      if (record.isHidden) {
+        if (op === 'add') {
+          await vc.permissionOverwrites.edit(userId, { ViewChannel: true }).catch(() => {})
+        } else {
+          await vc.permissionOverwrites.edit(userId, { ViewChannel: null }).catch(() => {})
+        }
+      }
     }
     const updated = { ...record, hostUserIds: newHosts }
     await postOrUpdateControlPanel(interaction.client, updated)

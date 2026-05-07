@@ -20,6 +20,7 @@ import { canControlChannel, isSudo } from '../../services/voice/permissions'
 import { postOrUpdateControlPanel, buildPanelPayloadForRecord } from '../../services/voice/controlPanel'
 import { deleteAutoChannel } from '../../services/voice/autoChannel'
 import { sep } from '../../utils/cv2'
+import { env } from '../../config/env'
 
 type AutoChannelRecord = typeof autoChannels.$inferSelect
 
@@ -128,6 +129,49 @@ export async function handleVoiceControlButton(interaction: ButtonInteraction): 
     await interaction.update({ ...payload, content: null } as any).catch(() => {})
 
     // Also sync the tracked panel if it's a different message (duplicate panels case)
+    if (interaction.message.id !== record.controlPanelMsgId) {
+      await postOrUpdateControlPanel(interaction.client, updated)
+    }
+    return
+  }
+
+  if (action === 'hide' || action === 'show') {
+    if (!await requireControl(interaction, member, record)) return
+
+    const isHidden = action === 'hide'
+    const guild = interaction.guild!
+    const vc = await guild.channels.fetch(record.voiceChannelId).catch(() => null)
+    if (vc?.isVoiceBased()) {
+      const everyone = guild.roles.everyone
+      if (isHidden) {
+        // Deny @everyone, then re-grant view to the people who need it so they
+        // don't lose access to their own channel: bot (must keep managing it),
+        // owner, current hosts, and sudo roles.
+        await vc.permissionOverwrites.edit(everyone, { ViewChannel: false }).catch(() => {})
+        const explicitAllows = new Set<string>([
+          interaction.client.user!.id,
+          record.ownerUserId,
+          ...record.hostUserIds,
+        ])
+        for (const id of explicitAllows) {
+          await vc.permissionOverwrites.edit(id, { ViewChannel: true }).catch(() => {})
+        }
+        for (const roleId of env.SUDO_ROLE_IDS) {
+          await vc.permissionOverwrites.edit(roleId, { ViewChannel: true }).catch(() => {})
+        }
+      } else {
+        // Restore @everyone visibility. Leave the explicit allows in place —
+        // they're inert when @everyone is allowed and harmless to keep.
+        await vc.permissionOverwrites.edit(everyone, { ViewChannel: null }).catch(() => {})
+      }
+    }
+
+    await db.update(autoChannels).set({ isHidden }).where(eq(autoChannels.voiceChannelId, voiceChannelId))
+    const updated = { ...record, isHidden }
+
+    const payload = await buildPanelPayloadForRecord(interaction.client, updated)
+    await interaction.update({ ...payload, content: null } as any).catch(() => {})
+
     if (interaction.message.id !== record.controlPanelMsgId) {
       await postOrUpdateControlPanel(interaction.client, updated)
     }
@@ -245,6 +289,12 @@ export async function handleVoiceControlButton(interaction: ButtonInteraction): 
     const newHosts = record.hostUserIds.filter(id => id !== member.id)
     await db.update(autoChannels).set({ ownerUserId: member.id, hostUserIds: newHosts }).where(eq(autoChannels.voiceChannelId, voiceChannelId))
     const updated = { ...record, ownerUserId: member.id, hostUserIds: newHosts }
+
+    // While hidden the new owner needs an explicit view-channel allow so
+    // they don't lose track of their own VC after leaving voice.
+    if (record.isHidden) {
+      await vc.permissionOverwrites.edit(member.id, { ViewChannel: true }).catch(() => {})
+    }
 
     const payload = await buildPanelPayloadForRecord(interaction.client, updated)
     await interaction.update({ ...payload, content: null } as any).catch(() => {})
