@@ -9,6 +9,7 @@ import type { AutoChannelRecord } from '../../types/voice'
 import { postOrUpdateControlPanel } from './controlPanel'
 import { postOrUpdateSticky } from './sticky'
 import { scheduleCleanup, cancelCleanup } from './cleanupScheduler'
+import { cancelAllHideGracesFor } from './hideGrace'
 import { logger } from '../logger'
 
 export async function createAutoChannel(
@@ -74,6 +75,7 @@ export async function deleteAutoChannel(client: Client, record: AutoChannelRecor
   if (!guild) return
 
   cancelCleanup(record.voiceChannelId)
+  cancelAllHideGracesFor(record.voiceChannelId)
 
   await Promise.all([
     guild.channels.delete(record.voiceChannelId).catch(() => {}),

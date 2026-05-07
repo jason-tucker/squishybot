@@ -3,9 +3,10 @@ import { db } from '../../db/client'
 import { autoChannels } from '../../db/schema'
 import { eq } from 'drizzle-orm'
 import { isHubChannel, handleHubJoin } from '../../services/voice/hubManager'
-import { addMemberToTextChannel, removeMemberFromTextChannel } from '../../services/voice/permissions'
+import { addMemberToTextChannel, isSudo, removeMemberFromTextChannel } from '../../services/voice/permissions'
 import { scheduleCleanup, cancelCleanup } from '../../services/voice/cleanupScheduler'
 import { postOrUpdateControlPanel } from '../../services/voice/controlPanel'
+import { cancelHideGrace, grantHideGrace } from '../../services/voice/hideGrace'
 import { logger } from '../../services/logger'
 import { recordActivity } from '../../services/presence'
 import { env } from '../../config/env'
@@ -36,6 +37,9 @@ export function registerVoiceStateUpdate(client: Client): void {
       const [record] = await db.select().from(autoChannels).where(eq(autoChannels.voiceChannelId, joinedChannelId))
       if (record) {
         cancelCleanup(joinedChannelId)
+        // They're back inside the VC — they have inherent view, no need to keep
+        // a pending grace timer running.
+        cancelHideGrace(joinedChannelId, member.id)
         const textChannel = await guild.channels.fetch(record.textChannelId).catch(() => null)
         if (textChannel?.isTextBased()) {
           await addMemberToTextChannel(textChannel as any, member)
@@ -63,6 +67,14 @@ export function registerVoiceStateUpdate(client: Client): void {
 
       const vc = await guild.channels.fetch(leftChannelId).catch(() => null)
       if (!vc?.isVoiceBased()) return
+
+      // Hide-grace: when leaving a hidden VC, non-sudo regular members lose
+      // visibility. Give them 90s to rejoin (e.g. after a network blip).
+      // Owner/hosts/sudo already hold permanent ViewChannel allows from the
+      // hide flow, so they don't need this.
+      if (record.isHidden && !isSpecialUser && !isSudo(member)) {
+        await grantHideGrace(vc, member.id)
+      }
 
       // Handle ownership transfer if owner left
       if (record.ownerUserId === member.id && vc.members.size > 0) {
