@@ -52,14 +52,28 @@ export async function createAutoChannel(
     return null
   }
 
-  // 3. Insert DB record
-  const [record] = await db.insert(autoChannels).values({
-    guildId: guild.id,
-    voiceChannelId: existingVoiceChannel.id,
-    textChannelId: textChannel.id,
-    ownerUserId: owner.id,
-    sourceHubId,
-  }).returning()
+  // 3. Insert DB record. Guarded with a try/catch because the unique
+  //    constraint on voice_channel_id can fire when a parallel hub-join
+  //    raced ahead of us (see hubManager). On collision we delete the
+  //    half-created text channel so we don't leak an orphan.
+  let record: AutoChannelRecord
+  try {
+    const [row] = await db.insert(autoChannels).values({
+      guildId: guild.id,
+      voiceChannelId: existingVoiceChannel.id,
+      textChannelId: textChannel.id,
+      ownerUserId: owner.id,
+      sourceHubId,
+    }).returning()
+    record = row
+  } catch (err: any) {
+    if (err?.cause?.code === '23505' || err?.code === '23505') {
+      logger.warn(`createAutoChannel: voice_channel_id=${existingVoiceChannel.id} already exists — likely a concurrent hub join. Cleaning up half-created text channel.`)
+      await textChannel.delete().catch(() => {})
+      return null
+    }
+    throw err
+  }
   trackAutoChannelText(record.textChannelId)
 
   // 4. Post control panel + sticky

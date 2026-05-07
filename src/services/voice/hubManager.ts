@@ -56,32 +56,60 @@ export async function seedHubsFromEnv(guild: Guild): Promise<void> {
   }
 }
 
+// Per-hub lock — guards against two voiceStateUpdate events racing through
+// handleHubJoin for the same hub before the cache flips to the replacement.
+// Without this the second invocation hits the unique constraint on
+// auto_channels.voice_channel_id and throws.
+const handlingHubs = new Set<string>()
+
 export async function handleHubJoin(client: Client, guild: Guild, member: GuildMember, hubChannelId: string): Promise<void> {
-  const [hubRecord] = await db.select().from(hubChannels).where(eq(hubChannels.channelId, hubChannelId))
-  if (!hubRecord) return
-
-  const hubVc = await guild.channels.fetch(hubChannelId).catch(() => null) as VoiceChannel | null
-  if (!hubVc?.isVoiceBased()) return
-
-  // Collect existing auto channel names to avoid collisions
-  const existingRecords = await db.select({ voiceChannelId: autoChannels.voiceChannelId }).from(autoChannels)
-  const existingNames: string[] = []
-  for (const r of existingRecords) {
-    const vc = await guild.channels.fetch(r.voiceChannelId).catch(() => null)
-    if (vc) existingNames.push(vc.name)
-  }
-
-  const channelName = generateChannelName(member, existingNames)
-
-  // Create the auto channel (renames hub in place, creates text channel)
-  const record = await createAutoChannel(client, guild, member, hubVc, hubChannelId, channelName)
-  if (!record) {
-    logger.error(`Failed to create auto channel for ${member.displayName}`)
+  // Idempotency: if the hub has already been promoted to an auto channel
+  // (created moments ago by a parallel join), do nothing here. The earlier
+  // auto_channels check in voiceStateUpdate is the primary guard; this
+  // double-checks in case the lookup-then-insert window was crossed by yet
+  // another concurrent event.
+  const [existing] = await db.select().from(autoChannels)
+    .where(eq(autoChannels.voiceChannelId, hubChannelId))
+  if (existing) {
+    logger.warn(`handleHubJoin: ${hubChannelId} is already an auto channel — skipping concurrent hub join from ${member.id}`)
     return
   }
 
-  // Create replacement hub in same category
-  await createReplacementHub(guild, hubRecord)
+  if (handlingHubs.has(hubChannelId)) {
+    logger.warn(`handleHubJoin: ${hubChannelId} already being processed — skipping concurrent join from ${member.id}`)
+    return
+  }
+  handlingHubs.add(hubChannelId)
+
+  try {
+    const [hubRecord] = await db.select().from(hubChannels).where(eq(hubChannels.channelId, hubChannelId))
+    if (!hubRecord) return
+
+    const hubVc = await guild.channels.fetch(hubChannelId).catch(() => null) as VoiceChannel | null
+    if (!hubVc?.isVoiceBased()) return
+
+    // Collect existing auto channel names to avoid collisions
+    const existingRecords = await db.select({ voiceChannelId: autoChannels.voiceChannelId }).from(autoChannels)
+    const existingNames: string[] = []
+    for (const r of existingRecords) {
+      const vc = await guild.channels.fetch(r.voiceChannelId).catch(() => null)
+      if (vc) existingNames.push(vc.name)
+    }
+
+    const channelName = generateChannelName(member, existingNames)
+
+    // Create the auto channel (renames hub in place, creates text channel)
+    const record = await createAutoChannel(client, guild, member, hubVc, hubChannelId, channelName)
+    if (!record) {
+      logger.error(`Failed to create auto channel for ${member.displayName}`)
+      return
+    }
+
+    // Create replacement hub in same category
+    await createReplacementHub(guild, hubRecord)
+  } finally {
+    handlingHubs.delete(hubChannelId)
+  }
 }
 
 async function createReplacementHub(guild: Guild, originalHub: typeof hubChannels.$inferSelect): Promise<void> {

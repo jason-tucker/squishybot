@@ -27,13 +27,14 @@ export function registerVoiceStateUpdate(client: Client): void {
 
     // --- JOINED A CHANNEL ---
     if (joinedChannelId && joinedChannelId !== leftChannelId) {
-      // Check if it's a hub
-      if (isHubChannel(joinedChannelId)) {
-        await handleHubJoin(client, guild, member, joinedChannelId)
-        return
-      }
-
-      // Check if it's an existing auto channel
+      // Check auto_channels FIRST. The hub-cache eviction lags the hub→auto
+      // rename by a couple of awaits (it lives in createReplacementHub which
+      // runs after createAutoChannel returns). Anyone joining the same channel
+      // ID during that window — typically the second of two near-simultaneous
+      // joiners — would otherwise be misclassified as a hub join, hit the
+      // unique constraint on auto_channels.voice_channel_id, and crash. By
+      // checking auto_channels first we route them straight into the joined
+      // user's room as a normal join.
       const [record] = await db.select().from(autoChannels).where(eq(autoChannels.voiceChannelId, joinedChannelId))
       if (record) {
         cancelCleanup(joinedChannelId)
@@ -48,6 +49,13 @@ export function registerVoiceStateUpdate(client: Client): void {
           .set({ lastActiveAt: new Date() })
           .where(eq(autoChannels.voiceChannelId, joinedChannelId))
           .catch(() => {})
+        return
+      }
+
+      // Otherwise — actual hub join.
+      if (isHubChannel(joinedChannelId)) {
+        await handleHubJoin(client, guild, member, joinedChannelId)
+        return
       }
     }
 
