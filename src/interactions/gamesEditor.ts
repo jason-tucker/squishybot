@@ -208,15 +208,25 @@ export async function renderPrefsList(guild: Guild, targetUserId: string, mode: 
   if (prefs.length === 0) {
     lines.push('_No games defined yet. Ask sudo to set up the catalog at `/sudo → Settings → Games`._')
   } else {
-    // Compact summary table — current settings live above the dropdown.
-    lines.push('| Game | View | Pings | Interested |')
-    lines.push('|---|:---:|:---:|---:|')
-    for (const p of prefs) {
+    const fmtLine = (p: ResolvedPref) => {
       const v = p.wantsView ? (p.fromRole.view ? '🟢ᴿ' : '🟢') : '⚪'
       const r = p.wantsPing ? (p.fromRole.ping ? '🔔ᴿ' : '🔔') : '⚪'
-      const c = interest.get(p.game.id)?.any ?? 0
-      lines.push(`| **${p.game.name}** | ${v} | ${r} | ${c} |`)
+      const active = p.wantsView || p.wantsPing
+      return `${v} ${r}  ${active ? `**${p.game.name}**` : p.game.name}`
     }
+    const active = prefs.filter(p => p.wantsView || p.wantsPing)
+    const inactive = prefs.filter(p => !p.wantsView && !p.wantsPing)
+
+    if (active.length > 0) {
+      lines.push('**Your games**')
+      for (const p of active) lines.push(fmtLine(p))
+    }
+    if (inactive.length > 0) {
+      if (active.length > 0) lines.push('')
+      lines.push(active.length > 0 ? '**Available**' : '**Games**')
+      for (const p of inactive) lines.push(fmtLine(p))
+    }
+
     if (prefs.some(p => p.fromRole.view || p.fromRole.ping)) {
       lines.push('')
       lines.push('-# ᴿ = inferred from a Discord role you already have. Toggle to make it explicit.')
