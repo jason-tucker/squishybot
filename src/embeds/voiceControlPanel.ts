@@ -37,12 +37,29 @@ export function buildControlPanelPayload(record: AutoChannelRecord, ownerTag: st
 
   const vcId = record.voiceChannelId
 
-  const row1 = new ActionRowBuilder<MessageActionRowComponentBuilder>().addComponents(
+  // Customization row — name + people + presets.
+  const customizeRow = new ActionRowBuilder<MessageActionRowComponentBuilder>().addComponents(
     new ButtonBuilder()
       .setCustomId(encodeVcId(vcId, 'rename'))
       .setLabel('Rename')
       .setEmoji('✏️')
       .setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder()
+      .setCustomId(encodeVcId(vcId, 'hosts'))
+      .setLabel('Hosts')
+      .setEmoji('👑')
+      .setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder()
+      .setCustomId(encodeVcId(vcId, 'templates'))
+      .setLabel('Templates')
+      .setEmoji('📋')
+      .setStyle(ButtonStyle.Secondary),
+  )
+
+  // State row — lock and hide are independent toggles, paired so they're
+  // always visible together. Discord clients used to crowd the hide button
+  // off-screen when these were mixed in with rename/hosts at 4-per-row.
+  const stateRow = new ActionRowBuilder<MessageActionRowComponentBuilder>().addComponents(
     new ButtonBuilder()
       .setCustomId(encodeVcId(vcId, record.isLocked ? 'unlock' : 'lock'))
       .setLabel(record.isLocked ? 'Unlock' : 'Lock')
@@ -53,19 +70,10 @@ export function buildControlPanelPayload(record: AutoChannelRecord, ownerTag: st
       .setLabel(record.isHidden ? 'Show' : 'Hide')
       .setEmoji(record.isHidden ? '👁️' : '🙈')
       .setStyle(record.isHidden ? ButtonStyle.Success : ButtonStyle.Primary),
-    new ButtonBuilder()
-      .setCustomId(encodeVcId(vcId, 'hosts'))
-      .setLabel('Hosts')
-      .setEmoji('👑')
-      .setStyle(ButtonStyle.Secondary),
   )
 
-  const row2 = new ActionRowBuilder<MessageActionRowComponentBuilder>().addComponents(
-    new ButtonBuilder()
-      .setCustomId(encodeVcId(vcId, 'templates'))
-      .setLabel('Templates')
-      .setEmoji('📋')
-      .setStyle(ButtonStyle.Secondary),
+  // Ownership / destructive row.
+  const ownerRow = new ActionRowBuilder<MessageActionRowComponentBuilder>().addComponents(
     new ButtonBuilder()
       .setCustomId(encodeVcId(vcId, 'claim'))
       .setLabel('Claim')
@@ -80,6 +88,6 @@ export function buildControlPanelPayload(record: AutoChannelRecord, ownerTag: st
 
   return {
     flags: MessageFlags.IsComponentsV2 as number,
-    components: [container, row1, row2],
+    components: [container, customizeRow, stateRow, ownerRow],
   }
 }
