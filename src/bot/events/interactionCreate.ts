@@ -127,6 +127,9 @@ export function registerInteractionCreate(client: Client) {
         if (id.startsWith('sudo:set:channel:') || id === 'sudo:set:autothread:add' || id === 'sudo:set:hub:add') {
           const { handleSettingsChannelSelect } = await import('../../interactions/sudoSettings')
           await handleSettingsChannelSelect(interaction)
+        } else if (id.startsWith('games:cat:channel:')) {
+          const { handleCatalogChannelSelect } = await import('../../interactions/gamesEditor')
+          await handleCatalogChannelSelect(interaction)
         }
 
       } else if (interaction.isUserSelectMenu()) {

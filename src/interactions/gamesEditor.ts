@@ -34,10 +34,11 @@
  *   games:prefs:back:{mode}:{uid}                      button — Done / close
  */
 import {
-  ActionRowBuilder, ButtonBuilder, ButtonStyle, ContainerBuilder, MessageFlags,
+  ActionRowBuilder, ButtonBuilder, ButtonStyle, ChannelSelectMenuBuilder, ChannelType,
+  ContainerBuilder, MessageFlags,
   ModalBuilder, RoleSelectMenuBuilder, StringSelectMenuBuilder,
   TextDisplayBuilder, TextInputBuilder, TextInputStyle,
-  type ButtonInteraction, type Guild,
+  type ButtonInteraction, type ChannelSelectMenuInteraction, type Guild,
   type MessageActionRowComponentBuilder, type ModalSubmitInteraction,
   type RoleSelectMenuInteraction, type StringSelectMenuInteraction,
 } from 'discord.js'
@@ -45,7 +46,8 @@ import { sep } from '../utils/cv2'
 import { requireSudo } from '../services/voice/permissions'
 import {
   createGame, deleteGame, gameCount, gameInterestCounts, getGame, listGames,
-  matchedRoleId, resolvePrefs, setPref, updateGame, type Game, type ResolvedPref,
+  matchedPingRoleId, matchedViewChannel, resolvePrefs, setPref, updateGame,
+  type Game, type ResolvedPref,
 } from '../services/games'
 
 // ===========================================================================
@@ -106,10 +108,8 @@ function renderGameDetail(g: Game) {
   lines.push(`### 🎮 ${g.name}`)
   if (g.aliases.length) lines.push(`_aka ${g.aliases.join(', ')}_`)
   lines.push('')
-  lines.push(`**View role** — ${g.roleId ? `<@&${g.roleId}>` : '_unset_'}`)
-  lines.push(`**Ping role** — ${g.pingRoleId ? `<@&${g.pingRoleId}>` : '_unset_'}`)
-  lines.push(`**Channel**   — ${g.channelId ? `<#${g.channelId}>` : '_unset_'}`)
-  lines.push(`**Category**  — ${g.categoryId ? `<#${g.categoryId}>` : '_unset_'}`)
+  lines.push(`**View channel** — ${g.channelId ? `<#${g.channelId}>` : '_unset_'} _(toggling "View" adds/removes a member overwrite here)_`)
+  lines.push(`**Ping role** — ${g.pingRoleId ? `<@&${g.pingRoleId}>` : '_unset (will name-match)_'} _(toggling "Pings" adds/removes this role)_`)
   lines.push(`**Sort order** — \`${g.sortOrder}\``)
   lines.push(`**Visible** — ${g.isVisible ? '🟢 yes' : '🔴 hidden'}`)
   lines.push(`**Archived** — ${g.isArchived ? '📦 yes' : '🟢 no'}`)
@@ -129,12 +129,14 @@ function renderGameDetail(g: Game) {
     )
   )
 
-  const viewSelect = new RoleSelectMenuBuilder()
-    .setCustomId(`games:cat:role:${g.id}:view`)
-    .setPlaceholder('View role (assigned when wantsView=true)')
+  // View channel — text channels only.
+  const channelSelect = new ChannelSelectMenuBuilder()
+    .setCustomId(`games:cat:channel:${g.id}:view`)
+    .setPlaceholder('Game channel (toggled by "Add View")')
+    .setChannelTypes(ChannelType.GuildText, ChannelType.GuildAnnouncement, ChannelType.GuildForum)
     .setMinValues(0).setMaxValues(1)
-  if (g.roleId) viewSelect.addDefaultRoles(g.roleId)
-  components.push(new ActionRowBuilder<MessageActionRowComponentBuilder>().addComponents(viewSelect))
+  if (g.channelId) channelSelect.addDefaultChannels(g.channelId)
+  components.push(new ActionRowBuilder<MessageActionRowComponentBuilder>().addComponents(channelSelect))
 
   const pingSelect = new RoleSelectMenuBuilder()
     .setCustomId(`games:cat:role:${g.id}:ping`)
@@ -286,22 +288,22 @@ export async function renderPrefsDetail(
 
   const interest = (await gameInterestCounts(guild)).get(gameId) ?? { view: 0, ping: 0, any: 0 }
 
-  // Resolve the actual roles we'd sync — picks up the explicit catalog role
-  // first, falls back to a name-match for the view role.
-  const viewRoleId = matchedRoleId(guild, game, 'view')
-  const pingRoleId = matchedRoleId(guild, game, 'ping')
+  // View is now backed by a per-channel permission overwrite on game.channelId.
+  // Ping is backed by the matched ping role (explicit OR name-fallback).
+  const viewChannel = matchedViewChannel(guild, game)
+  const pingRoleId = matchedPingRoleId(guild, game)
 
   const viewLabel = (() => {
-    if (!viewRoleId) return '⚪ no role linked'
-    const tag = `<@&${viewRoleId}>`
+    if (!viewChannel) return '⚪ no channel linked'
+    const tag = `<#${viewChannel.id}>`
     if (!p.wantsView) return `⚪ no — ${tag}`
-    return `🟢 yes${p.fromRole.view ? ' _(via role, not yet saved)_' : ''} — ${tag}`
+    return `🟢 yes${p.fromRole.view ? ' _(via existing channel access, not yet saved)_' : ''} — ${tag}`
   })()
   const pingLabel = (() => {
     if (!pingRoleId) return '⚪ no role linked'
     const tag = `<@&${pingRoleId}>`
     if (!p.wantsPing) return `⚪ no — ${tag}`
-    return `🔔 yes${p.fromRole.ping ? ' _(via role, not yet saved)_' : ''} — ${tag}`
+    return `🔔 yes${p.fromRole.ping ? ' _(via existing role, not yet saved)_' : ''} — ${tag}`
   })()
 
   const lines: string[] = []
@@ -312,7 +314,7 @@ export async function renderPrefsDetail(
   lines.push(`• View access — ${viewLabel}`)
   lines.push(`• LFG pings — ${pingLabel}`)
   lines.push('')
-  lines.push(`**Server interest** — ${interest.view} with view · ${interest.ping} with pings · **${interest.any} interested overall**`)
+  lines.push(`**Server interest** — ${interest.view} with channel access · ${interest.ping} with pings · **${interest.any} interested overall**`)
 
   const container = new ContainerBuilder()
     .setAccentColor(mode === 'sudo' ? 0xed4245 : 0x5865f2)
@@ -320,10 +322,10 @@ export async function renderPrefsDetail(
 
   const viewBtn = new ButtonBuilder()
     .setCustomId(`games:prefs:set:${mode}:${targetUserId}:${gameId}:view:${p.wantsView ? '0' : '1'}`)
-    .setLabel(p.wantsView ? 'Remove View' : 'Add View')
-    .setEmoji(p.wantsView ? '🚫' : '👁️')
+    .setLabel(p.wantsView ? 'Leave Channel' : 'Join Channel')
+    .setEmoji(p.wantsView ? '🚪' : '👁️')
     .setStyle(p.wantsView ? ButtonStyle.Danger : ButtonStyle.Success)
-    .setDisabled(!viewRoleId)
+    .setDisabled(!viewChannel)
 
   const pingBtn = new ButtonBuilder()
     .setCustomId(`games:prefs:set:${mode}:${targetUserId}:${gameId}:ping:${p.wantsPing ? '0' : '1'}`)
@@ -341,11 +343,11 @@ export async function renderPrefsDetail(
     ),
   ]
 
-  if (!viewRoleId || !pingRoleId) {
+  if (!viewChannel || !pingRoleId) {
     container.addSeparatorComponents(sep())
     const missing: string[] = []
-    if (!viewRoleId) missing.push('a view role (no role named like the game found)')
-    if (!pingRoleId) missing.push('a ping role configured')
+    if (!viewChannel) missing.push('a game channel linked')
+    if (!pingRoleId) missing.push('a ping role linked (no role named like the game found)')
     container.addTextDisplayComponents(new TextDisplayBuilder().setContent(
       `-# ⚠️ This game has no ${missing.join(' and ')}. Sudo can wire one up at \`/sudo → Settings → Games\`.`
     ))
@@ -478,7 +480,19 @@ export async function handleCatalogRoleSelect(interaction: RoleSelectMenuInterac
   if (!await requireSudo(interaction)) return
   const [, , , gid, kind] = interaction.customId.split(':')  // games:cat:role:{gid}:{kind}
   const roleId = interaction.values[0] ?? null
+  // Only ping is wired through the catalog role-select now; legacy `view` kind
+  // is accepted for backward compat with any stale messages but writes pingRoleId
+  // to avoid silently re-introducing the deprecated view role behavior.
   const patch: Partial<Game> = kind === 'view' ? { roleId } : { pingRoleId: roleId }
+  const updated = await updateGame(gid, patch)
+  if (updated) await interaction.update(renderGameDetail(updated) as any)
+}
+
+export async function handleCatalogChannelSelect(interaction: ChannelSelectMenuInteraction): Promise<void> {
+  if (!await requireSudo(interaction)) return
+  const [, , , gid, kind] = interaction.customId.split(':')  // games:cat:channel:{gid}:{kind}
+  const channelId = interaction.values[0] ?? null
+  const patch: Partial<Game> = kind === 'category' ? { categoryId: channelId } : { channelId }
   const updated = await updateGame(gid, patch)
   if (updated) await interaction.update(renderGameDetail(updated) as any)
 }

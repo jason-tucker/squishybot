@@ -7,7 +7,8 @@
  * /play resolve), so it lives in an in-memory cache loaded by loadSettings()
  * and refreshed on every catalog mutation.
  */
-import type { Guild, GuildMember } from 'discord.js'
+import type { Guild, GuildBasedChannel, GuildMember } from 'discord.js'
+import { PermissionFlagsBits } from 'discord.js'
 import { and, eq, inArray } from 'drizzle-orm'
 import { db } from '../db/client'
 import { games, userGamePrefs } from '../db/schema'
@@ -119,19 +120,20 @@ export async function listPrefs(guildId: string, userId: string): Promise<GamePr
 }
 
 /**
- * Find the Discord role that matches a game by id (preferred) or by
- * name/alias (case-insensitive fallback). Lets us auto-prefill prefs and
- * interest counts even when sudo hasn't wired the role explicitly.
+ * Find the Discord role that matches a game's PING role.
  *
- * `kind='view'` checks game.roleId first; `kind='ping'` checks game.pingRoleId.
- * Both fall back to name+alias matching against guild.roles.cache when unset.
+ *   1. Prefer the explicit `pingRoleId` on the catalog row.
+ *   2. Fall back to a case-insensitive name/alias match against the guild
+ *      roles cache. Most servers already have a role named after the game
+ *      (e.g. `Overwatch`, `Minecraft`); we treat those as the ping role
+ *      so /games and /play work without sudo wiring every entry first.
+ *
+ * `view` is now backed by a per-channel permission overwrite (see
+ * `matchedViewChannel` and the setPref view branch); the legacy `roleId`
+ * field is preserved on the schema but no longer surfaced.
  */
-export function matchedRoleId(guild: Guild, game: Game, kind: 'view' | 'ping'): string | null {
-  const explicit = kind === 'view' ? game.roleId : game.pingRoleId
-  if (explicit && guild.roles.cache.has(explicit)) return explicit
-  // Name/alias fallback — only applies for the view role (the canonical "I play this" role).
-  // Ping roles are typically named distinctively (e.g. "Overwatch Pings"), so we don't auto-match.
-  if (kind === 'ping') return null
+export function matchedPingRoleId(guild: Guild, game: Game): string | null {
+  if (game.pingRoleId && guild.roles.cache.has(game.pingRoleId)) return game.pingRoleId
   const candidates = [game.name, ...game.aliases].map(s => s.trim().toLowerCase()).filter(Boolean)
   for (const role of guild.roles.cache.values()) {
     if (candidates.includes(role.name.trim().toLowerCase())) return role.id
@@ -139,21 +141,28 @@ export function matchedRoleId(guild: Guild, game: Game, kind: 'view' | 'ping'): 
   return null
 }
 
+/** Resolve the channel that "View" toggles access to. Explicit only — no name fallback (channel naming varies too much). */
+export function matchedViewChannel(guild: Guild, game: Game): GuildBasedChannel | null {
+  if (!game.channelId) return null
+  return guild.channels.cache.get(game.channelId) ?? null
+}
+
 /**
  * All visible+non-archived games, paired with the target's effective prefs.
  *
- * Effective = DB row || member holds the configured Discord role.
- * If a member has the role but no DB row, that's recorded in `fromRole`
- * so the UI can show "(role)" and the writer can persist it on next toggle.
+ * Effective state per game:
+ *   wantsView = DB row || member has channel-level VIEW_CHANNEL allow on game.channelId
+ *   wantsPing = DB row || member holds the matched ping role
  *
- * Pass `member` to use role-based prefill; pass guildId+userId only for the
- * DB-only path (e.g. background jobs).
+ * `fromRole` flags state inferred from current Discord state rather than an
+ * explicit DB row (so the UI can mark it as "via existing access"). The name
+ * is historical — for view it's now "via existing channel access" — but the
+ * meaning to consumers is the same: not yet persisted.
  */
 export async function resolvePrefs(guildOrId: Guild | string, userOrMember: string | GuildMember): Promise<ResolvedPref[]> {
   const guildId = typeof guildOrId === 'string' ? guildOrId : guildOrId.id
   const userId = typeof userOrMember === 'string' ? userOrMember : userOrMember.id
   const member = typeof userOrMember === 'string' ? null : userOrMember
-  // Only Guild-form input gives us role-name fallback; the string-only path is DB-only.
   const guild: Guild | null = typeof guildOrId === 'string' ? null : guildOrId
 
   const visible = listGames()
@@ -164,23 +173,38 @@ export async function resolvePrefs(guildOrId: Guild | string, userOrMember: stri
     const p = byGame.get(g.id)
     const dbView = p?.wantsView ?? false
     const dbPing = p?.wantsPing ?? false
-    const viewRoleId = guild ? matchedRoleId(guild, g, 'view') : g.roleId
-    const pingRoleId = g.pingRoleId  // ping roles only resolve explicitly; see matchedRoleId
-    const roleView = !!(member && viewRoleId && member.roles.cache.has(viewRoleId))
+
+    // View — explicit member-level VIEW_CHANNEL allow on game.channelId.
+    let channelView = false
+    if (member && guild) {
+      const ch = matchedViewChannel(guild, g)
+      const ow = ch && 'permissionOverwrites' in ch ? (ch as any).permissionOverwrites.cache.get(member.id) : null
+      if (ow?.allow?.has(PermissionFlagsBits.ViewChannel)) channelView = true
+    }
+
+    // Ping — name-fallback resolves the role.
+    const pingRoleId = guild ? matchedPingRoleId(guild, g) : g.pingRoleId
     const rolePing = !!(member && pingRoleId && member.roles.cache.has(pingRoleId))
+
     return {
       game: g,
-      wantsView: dbView || roleView,
+      wantsView: dbView || channelView,
       wantsPing: dbPing || rolePing,
-      fromRole: { view: !dbView && roleView, ping: !dbPing && rolePing },
+      fromRole: { view: !dbView && channelView, ping: !dbPing && rolePing },
     }
   })
 }
 
 /**
- * Set a pref to an explicit value (instead of toggle), syncing the role.
- * Use this when the UI knows the desired end state — avoids ambiguity when
- * effective state was inferred from a role but the DB row says false.
+ * Set a pref to an explicit value, persisting it in the DB and applying the
+ * Discord-side change (channel overwrite for view, role for ping).
+ *
+ *   view  → channel-level ViewChannel/ReadMessageHistory allow on game.channelId
+ *           (delete the member overwrite when value=false).
+ *   ping  → add/remove the matched ping role.
+ *
+ * The DB row is always written so that prefs persist across the user leaving
+ * and rejoining the server (see `restoreMemberPrefs` for the rejoin path).
  */
 export async function setPref(
   member: GuildMember,
@@ -203,23 +227,69 @@ export async function setPref(
     set: { [which === 'view' ? 'wantsView' : 'wantsPing']: value },
   }).returning()
 
-  // Resolve the role to sync. Falls back to name-match for view roles when
-  // sudo hasn't wired one explicitly — keeps "I have the role" and "I have
-  // the pref" in sync even when the catalog is half-configured.
-  const roleId = matchedRoleId(member.guild, game, which)
-  if (roleId) {
-    try {
-      const reason = `game-pref set by=${editor.editorDiscordId} mode=${editor.mode}`
-      if (value) await member.roles.add(roleId, reason)
-      else await member.roles.remove(roleId, reason)
-    } catch (err) {
-      logger.warn(`Failed to sync role ${roleId} for ${member.id} on game ${game.name}:`, err)
-    }
+  const reason = `game-pref set by=${editor.editorDiscordId} mode=${editor.mode}`
+  if (which === 'view') {
+    await applyViewAccess(member, game, value, reason)
+  } else {
+    await applyPingRole(member, game, value, reason)
   }
 
   logger.info(`game-pref-set by=${editor.editorDiscordId} target=${member.id} mode=${editor.mode} game=${game.name} which=${which} now=${value}`)
-
   return { wantsView: row.wantsView, wantsPing: row.wantsPing }
+}
+
+async function applyViewAccess(member: GuildMember, game: Game, value: boolean, reason: string): Promise<void> {
+  const ch = matchedViewChannel(member.guild, game)
+  if (!ch || !('permissionOverwrites' in ch)) return
+  try {
+    if (value) {
+      await (ch as any).permissionOverwrites.edit(member.id, {
+        ViewChannel: true,
+        ReadMessageHistory: true,
+      }, { reason })
+    } else {
+      await (ch as any).permissionOverwrites.delete(member.id, reason)
+    }
+  } catch (err) {
+    logger.warn(`Failed to sync view channel ${ch.id} for ${member.id} on game ${game.name}:`, err)
+  }
+}
+
+async function applyPingRole(member: GuildMember, game: Game, value: boolean, reason: string): Promise<void> {
+  const roleId = matchedPingRoleId(member.guild, game)
+  if (!roleId) return
+  try {
+    if (value) await member.roles.add(roleId, reason)
+    else await member.roles.remove(roleId, reason)
+  } catch (err) {
+    logger.warn(`Failed to sync ping role ${roleId} for ${member.id} on game ${game.name}:`, err)
+  }
+}
+
+/**
+ * Re-apply every persisted pref for a member to Discord. Called from the
+ * guildMemberAdd handler so a returning user gets their channel access and
+ * ping roles back even though Discord drops their roles/overwrites on leave.
+ *
+ * Best-effort: failures are warned, never thrown — we don't want one missing
+ * channel to block the rest of someone's prefs from restoring.
+ */
+export async function restoreMemberPrefs(member: GuildMember): Promise<{ restored: number; skipped: number }> {
+  const prefs = await listPrefs(member.guild.id, member.id)
+  let restored = 0
+  let skipped = 0
+  for (const p of prefs) {
+    const game = getGame(p.gameId)
+    if (!game) { skipped++; continue }
+    const reason = `game-pref restore on rejoin (member ${member.id})`
+    if (p.wantsView) await applyViewAccess(member, game, true, reason)
+    if (p.wantsPing) await applyPingRole(member, game, true, reason)
+    if (p.wantsView || p.wantsPing) restored++
+  }
+  if (restored > 0) {
+    logger.info(`Restored game prefs for ${member.user.tag} (${member.id}): ${restored} game(s)`)
+  }
+  return { restored, skipped }
 }
 
 // ---------------------------------------------------------------------------
@@ -269,22 +339,29 @@ export async function gameInterestCounts(guild: Guild): Promise<Map<string, Game
     }
   }
 
-  // 2. Walk roles from guild.roles.cache. role.members reflects the in-memory
-  //    member cache; we rely on GUILD_MEMBERS intent + Partials.GuildMember.
+  // 2. View interest: members with explicit channel-level VIEW_CHANNEL allow
+  //    on game.channelId. Walks the channel's permission overwrites cache
+  //    (member-typed overwrites with the bit set) and unions with DB rows.
+  //    Ping interest: members holding the matched ping role.
   const out = new Map<string, GameInterest>()
   for (const g of all) {
     const viewIds = new Set(dbViewByGame.get(g.id) ?? [])
     const pingIds = new Set(dbPingByGame.get(g.id) ?? [])
-    const viewRoleId = matchedRoleId(guild, g, 'view')
-    const pingRoleId = matchedRoleId(guild, g, 'ping')
-    if (viewRoleId) {
-      const role = guild.roles.cache.get(viewRoleId)
-      if (role) for (const id of role.members.keys()) viewIds.add(id)
+
+    const ch = matchedViewChannel(guild, g)
+    if (ch && 'permissionOverwrites' in ch) {
+      for (const ow of (ch as any).permissionOverwrites.cache.values()) {
+        // OverwriteType.Member === 1 in discord.js
+        if (ow.type === 1 && ow.allow?.has(PermissionFlagsBits.ViewChannel)) viewIds.add(ow.id)
+      }
     }
+
+    const pingRoleId = matchedPingRoleId(guild, g)
     if (pingRoleId) {
       const role = guild.roles.cache.get(pingRoleId)
       if (role) for (const id of role.members.keys()) pingIds.add(id)
     }
+
     const any = new Set<string>([...viewIds, ...pingIds])
     out.set(g.id, { view: viewIds.size, ping: pingIds.size, any: any.size })
   }
