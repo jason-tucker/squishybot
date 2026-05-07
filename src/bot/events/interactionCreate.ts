@@ -8,7 +8,8 @@ import {
   UserContextMenuCommandInteraction,
 } from 'discord.js'
 import { execute as voiceExecute } from '../../commands/voice'
-import { execute as squishyExecute } from '../../commands/squishy'
+import { execute as helpExecute } from '../../commands/help'
+import { execute as settingsExecute } from '../../commands/settings'
 import { execute as sudoExecute } from '../../commands/sudo'
 import { execute as manageUserExecute } from '../../commands/manageUser'
 import { execute as reportExecute } from '../../commands/report'
@@ -19,7 +20,8 @@ import { recordActivity } from '../../services/presence'
 
 const commandHandlers = new Map<string, (i: ChatInputCommandInteraction) => Promise<void>>([
   ['voice', voiceExecute],
-  ['squishy', squishyExecute],
+  ['help', helpExecute],
+  ['settings', settingsExecute],
   ['sudo', sudoExecute],
   ['report', reportExecute],
   ['games', gamesExecute],
@@ -50,20 +52,23 @@ export function registerInteractionCreate(client: Client) {
         if (isVcCustomId(id)) {
           const { handleVoiceControlButton } = await import('../../interactions/buttons/voiceControl')
           await handleVoiceControlButton(interaction as ButtonInteraction)
-        } else if (id === 'squishy:back') {
+        } else if (id === 'help:back') {
           const member = await interaction.guild!.members.fetch(interaction.user.id)
-          const { sendMainPanel } = await import('../../commands/squishy')
+          const { sendHelpPanel } = await import('../../commands/help')
           const { isSudo } = await import('../../services/voice/permissions')
-          await sendMainPanel(interaction as any, isSudo(member))
+          await sendHelpPanel(interaction as any, isSudo(member))
+        } else if (id === 'settings:home') {
+          const { handleSettingsHomeButton } = await import('../../commands/settings')
+          await handleSettingsHomeButton(interaction as ButtonInteraction)
+        } else if (id === 'settings:profile') {
+          const { handleSettingsProfileButton } = await import('../../commands/settings')
+          await handleSettingsProfileButton(interaction as ButtonInteraction)
+        } else if (id === 'settings:games') {
+          const { handleSettingsGamesButton } = await import('../../commands/settings')
+          await handleSettingsGamesButton(interaction as ButtonInteraction)
         } else if (id === 'open_staff_request') {
           const { showStaffRequestModal } = await import('../../commands/staff')
           await showStaffRequestModal(interaction as ButtonInteraction)
-        } else if (id === 'open_my_profile') {
-          await interaction.deferReply({ ephemeral: true })
-          const member = await interaction.guild!.members.fetch(interaction.user.id)
-          const { renderProfileEditor } = await import('../../interactions/profileEditor')
-          const payload = await renderProfileEditor(interaction.guildId!, interaction.user.id, member.displayName, 'self')
-          await interaction.editReply(payload as any)
         } else if (id.startsWith('staff:')) {
           const { handleStaffApprovalButton } = await import('../../interactions/buttons/staffApproval')
           await handleStaffApprovalButton(interaction as ButtonInteraction)
@@ -106,9 +111,12 @@ export function registerInteractionCreate(client: Client) {
         } else if (id.startsWith('games:cat:')) {
           const { handleCatalogButton } = await import('../../interactions/gamesEditor')
           await handleCatalogButton(interaction as ButtonInteraction)
-        } else if (id.startsWith('games:prefs:toggle:')) {
-          const { handlePrefsToggle } = await import('../../interactions/gamesEditor')
-          await handlePrefsToggle(interaction as ButtonInteraction)
+        } else if (id.startsWith('games:prefs:set:')) {
+          const { handlePrefsSet } = await import('../../interactions/gamesEditor')
+          await handlePrefsSet(interaction as ButtonInteraction)
+        } else if (id.startsWith('games:prefs:list:')) {
+          const { handlePrefsList } = await import('../../interactions/gamesEditor')
+          await handlePrefsList(interaction as ButtonInteraction)
         } else if (id.startsWith('games:prefs:back:')) {
           const { handlePrefsBack } = await import('../../interactions/gamesEditor')
           await handlePrefsBack(interaction as ButtonInteraction)
@@ -155,15 +163,18 @@ export function registerInteractionCreate(client: Client) {
         } else if (id === 'sudo:action') {
           const { handleSudoPanelSelect } = await import('../../interactions/selects/sudoPanel')
           await handleSudoPanelSelect(interaction as StringSelectMenuInteraction)
-        } else if (id === 'squishy:section') {
-          const { handleSquishyPanelSelect } = await import('../../interactions/selects/squishyPanel')
-          await handleSquishyPanelSelect(interaction as StringSelectMenuInteraction)
+        } else if (id === 'help:section') {
+          const { handleHelpPanelSelect } = await import('../../interactions/selects/helpPanel')
+          await handleHelpPanelSelect(interaction as StringSelectMenuInteraction)
         } else if (id === 'sudo:set:removeuser' || id === 'sudo:set:reset_channel' || id === 'sudo:set:autothread:remove' || id === 'sudo:set:hub:remove') {
           const { handleSettingsStringSelect } = await import('../../interactions/sudoSettings')
           await handleSettingsStringSelect(interaction as StringSelectMenuInteraction)
         } else if (id === 'games:cat:select') {
           const { handleCatalogStringSelect } = await import('../../interactions/gamesEditor')
           await handleCatalogStringSelect(interaction as StringSelectMenuInteraction)
+        } else if (id.startsWith('games:prefs:pick:')) {
+          const { handlePrefsPick } = await import('../../interactions/gamesEditor')
+          await handlePrefsPick(interaction as StringSelectMenuInteraction)
         }
 
       } else if (interaction.isModalSubmit()) {

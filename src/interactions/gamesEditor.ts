@@ -6,7 +6,14 @@
  *
  *   2. Prefs editor — set view/ping toggles per game on a target user.
  *      Entry: /games (mode='self') OR Manage User → Game Prefs (mode='sudo').
- *      Entry: renderPrefsEditor(guildId, targetUserId, mode).
+ *      Entry: renderPrefsEditor(guild, targetUserId, mode).
+ *
+ *      Two screens:
+ *      - List: container shows the target's current games (View / Pings / role-or-DB),
+ *        a StringSelect lists every game with inline status + interest count.
+ *        Picking an option drills into Detail.
+ *      - Detail: container shows one game (interest count, target's effective state),
+ *        with explicit Set buttons for View / Pings + Back.
  *
  * customId families:
  *   games:cat:list                          button — back to catalog list
@@ -21,8 +28,10 @@
  *   games:cat:toggle:{gid}:{flag}           button — flip isVisible / isArchived
  *   games:cat:delete:{gid}                  button — confirm + delete
  *
- *   games:prefs:toggle:{mode}:{uid}:{gid}:{which}   button
- *   games:prefs:back:{mode}:{uid}                   button
+ *   games:prefs:list:{mode}:{uid}                      button — go back to list
+ *   games:prefs:pick:{mode}:{uid}                      string-select — pick a game (drill in)
+ *   games:prefs:set:{mode}:{uid}:{gid}:{which}:{val}   button — explicit set (val = '1'|'0')
+ *   games:prefs:back:{mode}:{uid}                      button — Done / close
  */
 import {
   ActionRowBuilder, ButtonBuilder, ButtonStyle, ContainerBuilder, MessageFlags,
@@ -35,8 +44,8 @@ import {
 import { sep } from '../utils/cv2'
 import { requireSudo } from '../services/voice/permissions'
 import {
-  createGame, deleteGame, gameCount, getGame, listGames, resolvePrefs,
-  togglePref, updateGame, type Game,
+  createGame, deleteGame, gameCount, gameInterestCounts, getGame, listGames,
+  matchedRoleId, resolvePrefs, setPref, updateGame, type Game, type ResolvedPref,
 } from '../services/games'
 
 // ===========================================================================
@@ -161,23 +170,54 @@ function renderGameDetail(g: Game) {
 
 export type PrefsMode = 'self' | 'sudo'
 
+const SELECT_MAX = 25  // Discord cap on string-select options
+
+function statusEmoji(p: ResolvedPref): string {
+  if (p.wantsView && p.wantsPing) return '🟢'
+  if (p.wantsView) return '👁️'
+  if (p.wantsPing) return '🔔'
+  return '⚪'
+}
+
+function statusInline(p: ResolvedPref): string {
+  // "View ✓ (role) · Pings ✓"
+  const view = p.wantsView ? (p.fromRole.view ? 'View✓ᴿ' : 'View✓') : 'View ·'
+  const ping = p.wantsPing ? (p.fromRole.ping ? 'Pings✓ᴿ' : 'Pings✓') : 'Pings ·'
+  return `${view} • ${ping}`
+}
+
+/** Top-level entry — renders the LIST view. Detail is renderPrefsDetail. */
 export async function renderPrefsEditor(guild: Guild, targetUserId: string, mode: PrefsMode) {
+  return renderPrefsList(guild, targetUserId, mode)
+}
+
+export async function renderPrefsList(guild: Guild, targetUserId: string, mode: PrefsMode) {
   const member = await guild.members.fetch(targetUserId).catch(() => null)
   const targetName = member?.displayName ?? `<@${targetUserId}>`
-  const prefs = await resolvePrefs(guild.id, targetUserId)
+  const prefs = await resolvePrefs(guild, member ?? targetUserId)
+  const interest = await gameInterestCounts(guild)
 
   const lines: string[] = [`### 🎮 Game Prefs — ${targetName}`]
-  if (mode === 'sudo') lines.push('_Sudo edit. Toggles apply roles on the target._')
-  else lines.push('_Pick a game to toggle View access and LFG pings._')
+  lines.push(mode === 'sudo'
+    ? '_Sudo edit. Toggling syncs the corresponding Discord role on the target._'
+    : '_Pick a game from the dropdown to toggle View access and LFG pings._')
   lines.push('')
 
   if (prefs.length === 0) {
     lines.push('_No games defined yet. Ask sudo to set up the catalog at `/sudo → Settings → Games`._')
   } else {
-    lines.push('| Game | View | Pings |')
-    lines.push('|---|---|---|')
+    // Compact summary table — current settings live above the dropdown.
+    lines.push('| Game | View | Pings | Interested |')
+    lines.push('|---|:---:|:---:|---:|')
     for (const p of prefs) {
-      lines.push(`| **${p.game.name}** | ${p.wantsView ? '🟢' : '⚪'} | ${p.wantsPing ? '🔔' : '⚪'} |`)
+      const v = p.wantsView ? (p.fromRole.view ? '🟢ᴿ' : '🟢') : '⚪'
+      const r = p.wantsPing ? (p.fromRole.ping ? '🔔ᴿ' : '🔔') : '⚪'
+      const c = interest.get(p.game.id)?.any ?? 0
+      lines.push(`| **${p.game.name}** | ${v} | ${r} | ${c} |`)
+    }
+    if (prefs.some(p => p.fromRole.view || p.fromRole.ping)) {
+      lines.push('')
+      lines.push('-# ᴿ = inferred from a Discord role you already have. Toggle to make it explicit.')
     }
   }
 
@@ -187,36 +227,35 @@ export async function renderPrefsEditor(guild: Guild, targetUserId: string, mode
 
   const components: any[] = [container]
 
-  // 4-row cap: each game row holds (label, view-toggle, ping-toggle) = 3 buttons,
-  // and Discord allows 5 action rows per V2 message minus the Container and the Done row.
-  const visiblePrefs = prefs.slice(0, 4)
-  for (const p of visiblePrefs) {
+  if (prefs.length > 0) {
+    // Discord caps each option's description at 100 chars; we trim defensively.
+    const opts = prefs.slice(0, SELECT_MAX).map(p => {
+      const c = interest.get(p.game.id)
+      const interestStr = c ? `${c.view} view · ${c.ping} ping` : '0 view · 0 ping'
+      const desc = `Yours: ${statusInline(p)} — ${interestStr}`.slice(0, 100)
+      return {
+        label: p.game.name.slice(0, 100),
+        value: p.game.id,
+        description: desc,
+        emoji: statusEmoji(p),
+      }
+    })
+
     components.push(
       new ActionRowBuilder<MessageActionRowComponentBuilder>().addComponents(
-        new ButtonBuilder()
-          .setCustomId(`games:prefs:noop:${p.game.id}`)
-          .setLabel(p.game.name.slice(0, 80))
-          .setStyle(ButtonStyle.Secondary)
-          .setDisabled(true),
-        new ButtonBuilder()
-          .setCustomId(`games:prefs:toggle:${mode}:${targetUserId}:${p.game.id}:view`)
-          .setLabel(p.wantsView ? 'View ✓' : 'View')
-          .setEmoji(p.wantsView ? '🟢' : '⚪')
-          .setStyle(p.wantsView ? ButtonStyle.Success : ButtonStyle.Secondary),
-        new ButtonBuilder()
-          .setCustomId(`games:prefs:toggle:${mode}:${targetUserId}:${p.game.id}:ping`)
-          .setLabel(p.wantsPing ? 'Pings ✓' : 'Pings')
-          .setEmoji(p.wantsPing ? '🔔' : '⚪')
-          .setStyle(p.wantsPing ? ButtonStyle.Success : ButtonStyle.Secondary),
+        new StringSelectMenuBuilder()
+          .setCustomId(`games:prefs:pick:${mode}:${targetUserId}`)
+          .setPlaceholder('Pick a game to toggle View / Pings…')
+          .addOptions(opts)
       )
     )
-  }
 
-  if (prefs.length > 4) {
-    container.addSeparatorComponents(sep())
-    container.addTextDisplayComponents(new TextDisplayBuilder().setContent(
-      `_Showing first 4 of ${prefs.length} games. Pagination coming when the catalog grows._`
-    ))
+    if (prefs.length > SELECT_MAX) {
+      container.addSeparatorComponents(sep())
+      container.addTextDisplayComponents(new TextDisplayBuilder().setContent(
+        `-# Showing first ${SELECT_MAX} of ${prefs.length} games. Ask sudo to archive unused ones.`
+      ))
+    }
   }
 
   components.push(
@@ -228,11 +267,102 @@ export async function renderPrefsEditor(guild: Guild, targetUserId: string, mode
   return { flags: MessageFlags.IsComponentsV2 as number, components }
 }
 
+export async function renderPrefsDetail(
+  guild: Guild,
+  targetUserId: string,
+  mode: PrefsMode,
+  gameId: string,
+) {
+  const game = getGame(gameId)
+  if (!game) return renderPrefsList(guild, targetUserId, mode)
+
+  const member = await guild.members.fetch(targetUserId).catch(() => null)
+  const targetName = member?.displayName ?? `<@${targetUserId}>`
+
+  // Effective state for this single game.
+  const all = await resolvePrefs(guild, member ?? targetUserId)
+  const p = all.find(r => r.game.id === gameId)
+  if (!p) return renderPrefsList(guild, targetUserId, mode)
+
+  const interest = (await gameInterestCounts(guild)).get(gameId) ?? { view: 0, ping: 0, any: 0 }
+
+  // Resolve the actual roles we'd sync — picks up the explicit catalog role
+  // first, falls back to a name-match for the view role.
+  const viewRoleId = matchedRoleId(guild, game, 'view')
+  const pingRoleId = matchedRoleId(guild, game, 'ping')
+
+  const viewLabel = (() => {
+    if (!viewRoleId) return '⚪ no role linked'
+    const tag = `<@&${viewRoleId}>`
+    if (!p.wantsView) return `⚪ no — ${tag}`
+    return `🟢 yes${p.fromRole.view ? ' _(via role, not yet saved)_' : ''} — ${tag}`
+  })()
+  const pingLabel = (() => {
+    if (!pingRoleId) return '⚪ no role linked'
+    const tag = `<@&${pingRoleId}>`
+    if (!p.wantsPing) return `⚪ no — ${tag}`
+    return `🔔 yes${p.fromRole.ping ? ' _(via role, not yet saved)_' : ''} — ${tag}`
+  })()
+
+  const lines: string[] = []
+  lines.push(`### 🎮 ${game.name}`)
+  if (game.aliases.length) lines.push(`_aka ${game.aliases.join(', ')}_`)
+  lines.push('')
+  lines.push(`**${targetName}'s prefs**`)
+  lines.push(`• View access — ${viewLabel}`)
+  lines.push(`• LFG pings — ${pingLabel}`)
+  lines.push('')
+  lines.push(`**Server interest** — ${interest.view} with view · ${interest.ping} with pings · **${interest.any} interested overall**`)
+
+  const container = new ContainerBuilder()
+    .setAccentColor(mode === 'sudo' ? 0xed4245 : 0x5865f2)
+    .addTextDisplayComponents(new TextDisplayBuilder().setContent(lines.join('\n')))
+
+  const viewBtn = new ButtonBuilder()
+    .setCustomId(`games:prefs:set:${mode}:${targetUserId}:${gameId}:view:${p.wantsView ? '0' : '1'}`)
+    .setLabel(p.wantsView ? 'Remove View' : 'Add View')
+    .setEmoji(p.wantsView ? '🚫' : '👁️')
+    .setStyle(p.wantsView ? ButtonStyle.Danger : ButtonStyle.Success)
+    .setDisabled(!viewRoleId)
+
+  const pingBtn = new ButtonBuilder()
+    .setCustomId(`games:prefs:set:${mode}:${targetUserId}:${gameId}:ping:${p.wantsPing ? '0' : '1'}`)
+    .setLabel(p.wantsPing ? 'Remove Pings' : 'Add Pings')
+    .setEmoji(p.wantsPing ? '🔕' : '🔔')
+    .setStyle(p.wantsPing ? ButtonStyle.Danger : ButtonStyle.Success)
+    .setDisabled(!pingRoleId)
+
+  const components: any[] = [
+    container,
+    new ActionRowBuilder<MessageActionRowComponentBuilder>().addComponents(viewBtn, pingBtn),
+    new ActionRowBuilder<MessageActionRowComponentBuilder>().addComponents(
+      new ButtonBuilder().setCustomId(`games:prefs:list:${mode}:${targetUserId}`).setLabel('Back to list').setStyle(ButtonStyle.Secondary),
+      new ButtonBuilder().setCustomId(`games:prefs:back:${mode}:${targetUserId}`).setLabel('Done').setStyle(ButtonStyle.Secondary),
+    ),
+  ]
+
+  if (!viewRoleId || !pingRoleId) {
+    container.addSeparatorComponents(sep())
+    const missing: string[] = []
+    if (!viewRoleId) missing.push('a view role (no role named like the game found)')
+    if (!pingRoleId) missing.push('a ping role configured')
+    container.addTextDisplayComponents(new TextDisplayBuilder().setContent(
+      `-# ⚠️ This game has no ${missing.join(' and ')}. Sudo can wire one up at \`/sudo → Settings → Games\`.`
+    ))
+  }
+
+  return { flags: MessageFlags.IsComponentsV2 as number, components }
+}
+
 // ===========================================================================
 // Authorization helpers
 // ===========================================================================
 
-async function authorizePrefs(interaction: ButtonInteraction | ModalSubmitInteraction, mode: PrefsMode, targetUserId: string): Promise<boolean> {
+async function authorizePrefs(
+  interaction: ButtonInteraction | ModalSubmitInteraction | StringSelectMenuInteraction,
+  mode: PrefsMode,
+  targetUserId: string,
+): Promise<boolean> {
   if (mode === 'sudo') return requireSudo(interaction)
   if (interaction.user.id !== targetUserId) {
     if (interaction.isRepliable() && !interaction.replied && !interaction.deferred) {
@@ -411,9 +541,28 @@ export async function handleCatalogModal(interaction: ModalSubmitInteraction): P
 // Prefs handlers
 // ===========================================================================
 
-export async function handlePrefsToggle(interaction: ButtonInteraction): Promise<void> {
-  // games:prefs:toggle:{mode}:{uid}:{gid}:{which}
-  const [, , , mode, uid, gid, which] = interaction.customId.split(':')
+/** games:prefs:list:{mode}:{uid} — back to the dropdown list view. */
+export async function handlePrefsList(interaction: ButtonInteraction): Promise<void> {
+  const [, , , mode, uid] = interaction.customId.split(':')
+  if (!await authorizePrefs(interaction, mode as PrefsMode, uid)) return
+  await interaction.update(await renderPrefsList(interaction.guild!, uid, mode as PrefsMode) as any)
+}
+
+/** games:prefs:pick:{mode}:{uid} — string-select picked a game; drill into detail. */
+export async function handlePrefsPick(interaction: StringSelectMenuInteraction): Promise<void> {
+  const [, , , mode, uid] = interaction.customId.split(':')
+  if (!await authorizePrefs(interaction, mode as PrefsMode, uid)) return
+  const gid = interaction.values[0]
+  if (!gid) {
+    await interaction.update(await renderPrefsList(interaction.guild!, uid, mode as PrefsMode) as any)
+    return
+  }
+  await interaction.update(await renderPrefsDetail(interaction.guild!, uid, mode as PrefsMode, gid) as any)
+}
+
+/** games:prefs:set:{mode}:{uid}:{gid}:{which}:{value} — explicit set, then re-render detail. */
+export async function handlePrefsSet(interaction: ButtonInteraction): Promise<void> {
+  const [, , , mode, uid, gid, which, valStr] = interaction.customId.split(':')
   if (!await authorizePrefs(interaction, mode as PrefsMode, uid)) return
 
   const member = await interaction.guild!.members.fetch(uid).catch(() => null)
@@ -422,12 +571,17 @@ export async function handlePrefsToggle(interaction: ButtonInteraction): Promise
     return
   }
 
-  await togglePref(member, gid, which as 'view' | 'ping', {
+  const value = valStr === '1'
+  const result = await setPref(member, gid, which as 'view' | 'ping', value, {
     editorDiscordId: interaction.user.id,
     mode: mode as PrefsMode,
   })
+  if (!result) {
+    await interaction.reply({ content: '❌ Game not found.', ephemeral: true })
+    return
+  }
 
-  await interaction.update(await renderPrefsEditor(interaction.guild!, uid, mode as PrefsMode) as any)
+  await interaction.update(await renderPrefsDetail(interaction.guild!, uid, mode as PrefsMode, gid) as any)
 }
 
 export async function handlePrefsBack(interaction: ButtonInteraction): Promise<void> {

@@ -10,7 +10,7 @@ import {
 import { isSudo } from '../../services/voice/permissions'
 import { sep } from '../../utils/cv2'
 
-export async function handleSquishyPanelSelect(interaction: StringSelectMenuInteraction): Promise<void> {
+export async function handleHelpPanelSelect(interaction: StringSelectMenuInteraction): Promise<void> {
   const member = await interaction.guild!.members.fetch(interaction.user.id)
   const section = interaction.values[0]
 
@@ -39,7 +39,28 @@ export async function handleSquishyPanelSelect(interaction: StringSelectMenuInte
       ))
 
     const backRow = new ActionRowBuilder<ButtonBuilder>().addComponents(
-      new ButtonBuilder().setCustomId('squishy:back').setLabel('Back').setStyle(ButtonStyle.Secondary)
+      new ButtonBuilder().setCustomId('help:back').setLabel('Back').setStyle(ButtonStyle.Secondary)
+    )
+    await interaction.update({ flags: MessageFlags.IsComponentsV2, components: [container, backRow] } as any)
+
+  } else if (section === 'games') {
+    const container = new ContainerBuilder()
+      .setAccentColor(0x9b59b6)
+      .addTextDisplayComponents(new TextDisplayBuilder().setContent('## 🎮 Games & LFG'))
+      .addSeparatorComponents(sep())
+      .addTextDisplayComponents(new TextDisplayBuilder().setContent(
+        '**/games** opens a panel listing every game on this server. Each row shows ' +
+        'how many people are signed up. Pick a game from the dropdown to:\n\n' +
+        '• Toggle **View access** — gives you the game role so its channel shows up for you\n' +
+        '• Toggle **LFG pings** — gives you the ping role so /play notifies you\n\n' +
+        '**/play <game>** posts a "🎮 I want to play!" button in the game\'s channel and ' +
+        'pings whoever has LFG on. Other people click the button to join you. There\'s a ' +
+        'short cooldown so the channel doesn\'t get spammed.\n\n' +
+        '_If you already had a game role from before the bot was set up, /games will ' +
+        'show that and let you make it explicit (or remove it)._'
+      ))
+    const backRow = new ActionRowBuilder<ButtonBuilder>().addComponents(
+      new ButtonBuilder().setCustomId('help:back').setLabel('Back').setStyle(ButtonStyle.Secondary)
     )
     await interaction.update({ flags: MessageFlags.IsComponentsV2, components: [container, backRow] } as any)
 
@@ -61,7 +82,7 @@ export async function handleSquishyPanelSelect(interaction: StringSelectMenuInte
 
     const row = new ActionRowBuilder<ButtonBuilder>().addComponents(
       new ButtonBuilder().setCustomId('open_staff_request').setLabel('Submit Request').setEmoji('📝').setStyle(ButtonStyle.Primary),
-      new ButtonBuilder().setCustomId('squishy:back').setLabel('Back').setStyle(ButtonStyle.Secondary),
+      new ButtonBuilder().setCustomId('help:back').setLabel('Back').setStyle(ButtonStyle.Secondary),
     )
     await interaction.update({ flags: MessageFlags.IsComponentsV2, components: [container, row] } as any)
 
@@ -84,7 +105,7 @@ export async function handleSquishyPanelSelect(interaction: StringSelectMenuInte
       ))
 
     const backRow = new ActionRowBuilder<ButtonBuilder>().addComponents(
-      new ButtonBuilder().setCustomId('squishy:back').setLabel('Back').setStyle(ButtonStyle.Secondary)
+      new ButtonBuilder().setCustomId('help:back').setLabel('Back').setStyle(ButtonStyle.Secondary)
     )
     await interaction.update({ flags: MessageFlags.IsComponentsV2, components: [container, backRow] } as any)
 
@@ -107,7 +128,7 @@ export async function handleSquishyPanelSelect(interaction: StringSelectMenuInte
       ))
 
     const backRow = new ActionRowBuilder<ButtonBuilder>().addComponents(
-      new ButtonBuilder().setCustomId('squishy:back').setLabel('Back').setStyle(ButtonStyle.Secondary)
+      new ButtonBuilder().setCustomId('help:back').setLabel('Back').setStyle(ButtonStyle.Secondary)
     )
     await interaction.update({ flags: MessageFlags.IsComponentsV2, components: [container, backRow] } as any)
 
@@ -125,14 +146,15 @@ export async function handleSquishyPanelSelect(interaction: StringSelectMenuInte
         '📥 Pending approvals — view pending staff requests\n' +
         '🔧 Run reconciler — repair channels on restart\n' +
         '🔁 Restart instructions — terminal commands\n\n' +
-        '**Right-click any user → Apps → Manage User** to:\n' +
+        '**Right-click any user → Apps → Manage** to:\n' +
         '- View their roles, voice status, and owned channels\n' +
+        '- Edit their profile or game prefs\n' +
         '- Disconnect them from voice\n' +
         '- View their staff request history'
       ))
 
     const backRow = new ActionRowBuilder<ButtonBuilder>().addComponents(
-      new ButtonBuilder().setCustomId('squishy:back').setLabel('Back').setStyle(ButtonStyle.Secondary)
+      new ButtonBuilder().setCustomId('help:back').setLabel('Back').setStyle(ButtonStyle.Secondary)
     )
     await interaction.update({ flags: MessageFlags.IsComponentsV2, components: [container, backRow] } as any)
   }
