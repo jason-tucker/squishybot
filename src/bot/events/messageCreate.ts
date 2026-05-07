@@ -1,4 +1,4 @@
-import { ChannelType, type Client, type Message } from 'discord.js'
+import { ChannelType, PermissionFlagsBits, type Client, type Message } from 'discord.js'
 import { db } from '../../db/client'
 import { autoChannels } from '../../db/schema'
 import { eq } from 'drizzle-orm'
@@ -34,8 +34,27 @@ async function maybeAutoThread(msg: Message): Promise<void> {
   if (msg.author.bot) return
   if (msg.system) return
   if (!isAutoThreadChannel(msg.channelId)) return
-  if (msg.channel.type !== ChannelType.GuildText) return  // skip threads, voice text, etc.
+  // Only text and announcement channels support startThread on a parent message.
+  // Forums/media channels create posts-as-threads natively; voice/stage text-in-voice doesn't.
+  if (msg.channel.type !== ChannelType.GuildText && msg.channel.type !== ChannelType.GuildAnnouncement) return
   if (msg.hasThread) return  // someone already started one
+
+  const channel = msg.channel
+  const me = msg.guild?.members.me
+  if (me && 'permissionsFor' in channel) {
+    const perms = channel.permissionsFor(me)
+    const need = msg.channel.type === ChannelType.GuildAnnouncement
+      ? PermissionFlagsBits.CreatePublicThreads
+      : PermissionFlagsBits.CreatePublicThreads
+    if (!perms?.has(PermissionFlagsBits.ViewChannel) || !perms?.has(need)) {
+      logger.warn(
+        `Auto-thread skipped in #${(channel as any).name ?? msg.channelId}: bot missing ` +
+        `${!perms?.has(PermissionFlagsBits.ViewChannel) ? 'VIEW_CHANNEL ' : ''}` +
+        `${!perms?.has(need) ? 'CREATE_PUBLIC_THREADS' : ''}`.trim()
+      )
+      return
+    }
+  }
 
   const cfg = getAutoThreadConfig(msg.channelId)
   const name = formatThreadName(msg, cfg?.nameTemplate ?? null).slice(0, 100)
@@ -46,6 +65,10 @@ async function maybeAutoThread(msg: Message): Promise<void> {
   } catch (err: any) {
     if (err?.code === 429 || err?.status === 429) {
       logger.warn(`Auto-thread rate-limited in #${msg.channelId} — skipping`)
+      return
+    }
+    if (err?.code === 50013 || err?.code === 50001) {
+      logger.warn(`Auto-thread permission denied in #${(channel as any).name ?? msg.channelId} (code ${err.code}: ${err.message}) — skipping`)
       return
     }
     throw err

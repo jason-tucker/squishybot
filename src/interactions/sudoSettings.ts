@@ -27,6 +27,7 @@ import {
   ContainerBuilder,
   MessageFlags,
   ModalBuilder,
+  PermissionFlagsBits,
   StringSelectMenuBuilder,
   TextDisplayBuilder,
   TextInputBuilder,
@@ -544,10 +545,30 @@ export async function handleSettingsChannelSelect(interaction: ChannelSelectMenu
 
   if (id === 'sudo:set:autothread:add') {
     const channelId = interaction.values[0]
+    let warning: string | null = null
     if (channelId && interaction.guildId) {
+      const ch = await interaction.guild?.channels.fetch(channelId).catch(() => null)
+      const me = interaction.guild?.members.me
+      if (ch && me && 'permissionsFor' in ch) {
+        if (ch.type !== ChannelType.GuildText && ch.type !== ChannelType.GuildAnnouncement) {
+          warning = `⚠️ <#${channelId}> is not a text/announcement channel — auto-threading won't run there.`
+        } else {
+          const perms = (ch as any).permissionsFor(me)
+          const missing: string[] = []
+          if (!perms?.has(PermissionFlagsBits.ViewChannel)) missing.push('View Channel')
+          if (!perms?.has(PermissionFlagsBits.CreatePublicThreads)) missing.push('Create Public Threads')
+          if (!perms?.has(PermissionFlagsBits.SendMessagesInThreads)) missing.push('Send Messages in Threads')
+          if (missing.length > 0) {
+            warning = `⚠️ Bot lacks ${missing.join(', ')} in <#${channelId}>. Auto-threading will be skipped until you grant these permissions.`
+          }
+        }
+      }
       await addAutoThreadChannel(channelId, interaction.guildId, interaction.user.id)
     }
     await interaction.update(renderAutoThreads() as any)
+    if (warning) {
+      await interaction.followUp({ content: warning, flags: MessageFlags.Ephemeral })
+    }
     return
   }
 
