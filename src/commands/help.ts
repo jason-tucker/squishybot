@@ -62,6 +62,7 @@ export async function sendHelpPanel(
     { label: 'Auto Voice Channels', value: 'voice', emoji: '🔊', description: 'How hub and auto channels work' },
     { label: 'Voice Control Panel', value: 'panel', emoji: '🎛️', description: 'What every button on the panel does' },
     { label: 'Games & LFG', value: 'games', emoji: '🎮', description: 'How /games and /play work together' },
+    { label: 'Game Night', value: 'gamenight', emoji: '🎲', description: 'RSVP / ownership / cancel buttons explained' },
     { label: 'Staff Requests', value: 'staff', emoji: '📝', description: 'How to request a staff role' },
     { label: 'Bug & Feature Reports', value: 'report', emoji: '🐛', description: 'How /report works (owner-reviewed GitHub issues)' },
     ...(isSudoUser ? [{ label: 'Admin Tools', value: 'admin', emoji: '🛡️', description: 'Sudo commands and controls' }] : []),

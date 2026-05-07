@@ -64,6 +64,38 @@ export async function handleHelpPanelSelect(interaction: StringSelectMenuInterac
     )
     await interaction.update({ flags: MessageFlags.IsComponentsV2, components: [container, backRow] } as any)
 
+  } else if (section === 'gamenight') {
+    const container = new ContainerBuilder()
+      .setAccentColor(0xfee75c)
+      .addTextDisplayComponents(new TextDisplayBuilder().setContent('## 🎲 Game Night'))
+      .addSeparatorComponents(sep())
+      .addTextDisplayComponents(new TextDisplayBuilder().setContent(
+        'A **sudo** runs `/sudo → Game Night → Schedule` to post an announcement. ' +
+        'It pings the game\'s ping role, lists who\'s the host, and shows the date/time. ' +
+        'Below the announcement you get five buttons:'
+      ))
+      .addSeparatorComponents(sep())
+      .addTextDisplayComponents(new TextDisplayBuilder().setContent(
+        '**RSVP — pick exactly one. Click again to clear.**\n' +
+        '✅ **Joining** — count me in.\n' +
+        '🤔 **Might join** — tentative.\n' +
+        '❌ **Not joining** — opting out so the host has a clean head-count.\n\n' +
+        '**Ownership — does the game cost money? Tells the host who needs a key/copy.**\n' +
+        '👍 **I own it** — already have a copy / no help needed.\n' +
+        '🛒 **I don\'t own it** — flag yourself as needing it (the host can gift, share, or pick a different game).\n\n' +
+        '**Cancel — host or sudo only.**\n' +
+        '✖️ **Cancel** — calls the night off; everyone who RSVPed gets a notice in-thread.'
+      ))
+      .addSeparatorComponents(sep())
+      .addTextDisplayComponents(new TextDisplayBuilder().setContent(
+        '_Your RSVP and ownership choice update the announcement live, so the host always sees the current count._'
+      ))
+
+    const backRow = new ActionRowBuilder<ButtonBuilder>().addComponents(
+      new ButtonBuilder().setCustomId('help:back').setLabel('Back').setStyle(ButtonStyle.Secondary)
+    )
+    await interaction.update({ flags: MessageFlags.IsComponentsV2, components: [container, backRow] } as any)
+
   } else if (section === 'staff') {
     const container = new ContainerBuilder()
       .setAccentColor(0x57f287)

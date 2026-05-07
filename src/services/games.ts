@@ -171,8 +171,7 @@ export async function resolvePrefs(guildOrId: Guild | string, userOrMember: stri
 
   return visible.map(g => {
     const p = byGame.get(g.id)
-    const dbView = p?.wantsView ?? false
-    const dbPing = p?.wantsPing ?? false
+    const hasRow = !!p
 
     // View — explicit member-level VIEW_CHANNEL allow on game.channelId.
     let channelView = false
@@ -186,11 +185,19 @@ export async function resolvePrefs(guildOrId: Guild | string, userOrMember: stri
     const pingRoleId = guild ? matchedPingRoleId(guild, g) : g.pingRoleId
     const rolePing = !!(member && pingRoleId && member.roles.cache.has(pingRoleId))
 
+    // The DB row is authoritative once it exists. Discord's overwrite/role
+    // caches lag the API write by a gateway round-trip, so OR-ing them in
+    // would make a freshly-revoked toggle still read as "on" until the
+    // CHANNEL_UPDATE event arrives — which is exactly the "click Leave
+    // Channel and nothing happens" bug. Only fall back to inferring from
+    // current Discord state when there's no DB row at all.
+    const wantsView = hasRow ? p!.wantsView : channelView
+    const wantsPing = hasRow ? p!.wantsPing : rolePing
     return {
       game: g,
-      wantsView: dbView || channelView,
-      wantsPing: dbPing || rolePing,
-      fromRole: { view: !dbView && channelView, ping: !dbPing && rolePing },
+      wantsView,
+      wantsPing,
+      fromRole: { view: !hasRow && channelView, ping: !hasRow && rolePing },
     }
   })
 }

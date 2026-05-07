@@ -52,7 +52,7 @@ const FIELDS: FieldDef[] = [
   { field: 'birthdayMonth',      label: 'Birthday month',   hint: '1–12',                        kind: 'integer',    selfVisible: true },
   { field: 'birthdayDay',        label: 'Birthday day',     hint: '1–31',                        kind: 'integer',    selfVisible: true },
   { field: 'birthdayPingsEnabled', label: 'Birthday pings', hint: 'Receive ping on your birthday', kind: 'boolean',  selfVisible: true },
-  { field: 'birthdayYearVisible', label: 'Show year',       hint: 'Currently no year stored — reserved for future use', kind: 'boolean', selfVisible: true },
+  { field: 'birthdayYearVisible', label: 'Show year',       hint: 'Show your birth year on your profile (only matters if you set one)', kind: 'boolean', selfVisible: true },
   { field: 'staffCategory',      label: 'Staff category',   hint: 'Sudo only',                   kind: 'short-text', selfVisible: false },
   { field: 'department',         label: 'Department',       hint: 'Sudo only',                   kind: 'short-text', selfVisible: false },
   { field: 'tier',               label: 'Tier',             hint: 'Sudo only',                   kind: 'short-text', selfVisible: false },
@@ -208,17 +208,24 @@ export async function renderProfileEditor(
 
 function buildModal(mode: ProfileMode, userId: string, field: string, currentValue: string): ModalBuilder {
   if (field === 'birthday') {
+    // currentValue format: "M/D/YYYY" or "M/D" — last segment may be empty.
+    const [m, d, y] = currentValue.split('/')
     return new ModalBuilder()
       .setCustomId(`profile:save:${mode}:${userId}:birthday`)
       .setTitle('Edit birthday')
       .addComponents(
         new ActionRowBuilder<TextInputBuilder>().addComponents(
           new TextInputBuilder().setCustomId('month').setLabel('Month (1–12)')
-            .setStyle(TextInputStyle.Short).setRequired(false).setValue(currentValue.split('/')[0] ?? '')
+            .setStyle(TextInputStyle.Short).setRequired(true).setValue(m ?? '')
         ),
         new ActionRowBuilder<TextInputBuilder>().addComponents(
           new TextInputBuilder().setCustomId('day').setLabel('Day (1–31)')
-            .setStyle(TextInputStyle.Short).setRequired(false).setValue(currentValue.split('/')[1] ?? '')
+            .setStyle(TextInputStyle.Short).setRequired(true).setValue(d ?? '')
+        ),
+        new ActionRowBuilder<TextInputBuilder>().addComponents(
+          new TextInputBuilder().setCustomId('year').setLabel('Year (optional, e.g. 1995)')
+            .setStyle(TextInputStyle.Short).setRequired(false).setValue(y ?? '')
+            .setPlaceholder('Leave blank to keep your age private')
         ),
       )
   }
@@ -284,7 +291,7 @@ export async function handleProfileEditButton(interaction: ButtonInteraction): P
   const profile = await getProfile(interaction.guildId!, userId)
   let currentValue = ''
   if (field === 'birthday') {
-    currentValue = `${profile?.birthdayMonth ?? ''}/${profile?.birthdayDay ?? ''}`
+    currentValue = `${profile?.birthdayMonth ?? ''}/${profile?.birthdayDay ?? ''}/${profile?.birthdayYear ?? ''}`
   } else {
     const v = (profile as any)?.[field]
     currentValue = v == null ? '' : String(v)
@@ -322,25 +329,35 @@ export async function handleProfileModal(interaction: ModalSubmitInteraction): P
   const patch: Partial<Record<SudoEditableField, any>> = {}
 
   if (field === 'birthday') {
+    // Month and day are required by the modal; year is optional.
     const monthRaw = interaction.fields.getTextInputValue('month').trim()
     const dayRaw = interaction.fields.getTextInputValue('day').trim()
-    if (monthRaw === '' && dayRaw === '') {
-      patch.birthdayMonth = null
-      patch.birthdayDay = null
+    const yearRaw = interaction.fields.getTextInputValue('year').trim()
+
+    const m = Number(monthRaw)
+    const d = Number(dayRaw)
+    if (!Number.isInteger(m) || m < 1 || m > 12) {
+      await interaction.reply({ content: `❌ Month must be 1–12 (got \`${monthRaw}\`).`, ephemeral: true })
+      return
+    }
+    const daysInMonth = [31, 29, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31]
+    if (!Number.isInteger(d) || d < 1 || d > daysInMonth[m - 1]) {
+      await interaction.reply({ content: `❌ Day must be 1–${daysInMonth[m - 1]} for that month.`, ephemeral: true })
+      return
+    }
+    patch.birthdayMonth = m
+    patch.birthdayDay = d
+
+    if (yearRaw === '') {
+      patch.birthdayYear = null
     } else {
-      const m = Number(monthRaw)
-      const d = Number(dayRaw)
-      if (!Number.isInteger(m) || m < 1 || m > 12) {
-        await interaction.reply({ content: `❌ Month must be 1–12 (got \`${monthRaw}\`).`, ephemeral: true })
+      const y = Number(yearRaw)
+      const thisYear = new Date().getUTCFullYear()
+      if (!Number.isInteger(y) || y < 1900 || y > thisYear) {
+        await interaction.reply({ content: `❌ Year must be a 4-digit year between 1900 and ${thisYear}, or blank (got \`${yearRaw}\`).`, ephemeral: true })
         return
       }
-      const daysInMonth = [31, 29, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31]
-      if (!Number.isInteger(d) || d < 1 || d > daysInMonth[m - 1]) {
-        await interaction.reply({ content: `❌ Day must be 1–${daysInMonth[m - 1]} for that month.`, ephemeral: true })
-        return
-      }
-      patch.birthdayMonth = m
-      patch.birthdayDay = d
+      patch.birthdayYear = y
     }
   } else {
     const def = fieldDef(field)

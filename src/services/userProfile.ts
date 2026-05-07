@@ -15,17 +15,17 @@ export type UserProfile = typeof userProfiles.$inferSelect
 
 export type SudoEditableField =
   | 'realName' | 'displayName'
-  | 'birthdayMonth' | 'birthdayDay'
+  | 'birthdayMonth' | 'birthdayDay' | 'birthdayYear'
   | 'birthdayPingsEnabled' | 'birthdayYearVisible'
   | 'staffCategory' | 'department' | 'tier' | 'leadershipTitle'
 
 export type SelfEditableField =
   | 'displayName'
-  | 'birthdayMonth' | 'birthdayDay'
+  | 'birthdayMonth' | 'birthdayDay' | 'birthdayYear'
   | 'birthdayPingsEnabled' | 'birthdayYearVisible'
 
 const SELF_EDITABLE: ReadonlyArray<SelfEditableField> = [
-  'displayName', 'birthdayMonth', 'birthdayDay',
+  'displayName', 'birthdayMonth', 'birthdayDay', 'birthdayYear',
   'birthdayPingsEnabled', 'birthdayYearVisible',
 ]
 
@@ -109,5 +109,7 @@ export async function findBirthdayUsers(guildId: string, month: number, day: num
 export function formatBirthday(p: UserProfile | null): string {
   if (!p?.birthdayMonth || !p?.birthdayDay) return '_unset_'
   const months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
-  return `${months[p.birthdayMonth - 1]} ${p.birthdayDay}`
+  const md = `${months[p.birthdayMonth - 1]} ${p.birthdayDay}`
+  if (p.birthdayYear && p.birthdayYearVisible) return `${md}, ${p.birthdayYear}`
+  return md
 }
