@@ -56,6 +56,17 @@ export function canControlChannel(member: GuildMember, record: AutoChannelRecord
 }
 
 export async function addMemberToTextChannel(textChannel: TextChannel, member: GuildMember): Promise<void> {
+  // Cheap hot-path guard — voiceStateUpdate fires this on every voice join,
+  // including repeat joins where the overwrite already exists. Skip the
+  // Discord API call when the member already has the View+Send+History bits.
+  const existing = textChannel.permissionOverwrites.cache.get(member.id)
+  if (
+    existing
+    && existing.allow.has(PermissionFlagsBits.ViewChannel)
+    && existing.allow.has(PermissionFlagsBits.SendMessages)
+    && existing.allow.has(PermissionFlagsBits.ReadMessageHistory)
+  ) return
+
   await textChannel.permissionOverwrites.create(member, {
     ViewChannel: true,
     SendMessages: true,
@@ -64,6 +75,8 @@ export async function addMemberToTextChannel(textChannel: TextChannel, member: G
 }
 
 export async function removeMemberFromTextChannel(textChannel: TextChannel, member: GuildMember): Promise<void> {
+  // Skip the API call when there's nothing to remove.
+  if (!textChannel.permissionOverwrites.cache.has(member.id)) return
   await textChannel.permissionOverwrites.delete(member).catch(() => {})
 }
 

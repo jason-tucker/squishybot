@@ -37,10 +37,14 @@ export async function runReconciler(client: Client): Promise<ReconcilerResult> {
   await seedHubsFromEnv(guild)
 
   // --- Reconcile known auto channels from DB ---
+  // Process records in parallel: each record's inner work serializes (fetch
+  // → permissions sync → message sweep → sticky), but records don't depend
+  // on each other, so a server with N rooms recovers in roughly the time
+  // of one record instead of N×.
   const records = await db.select().from(autoChannels).where(eq(autoChannels.guildId, guild.id))
   const trackedVoiceIds = new Set(records.map(r => r.voiceChannelId))
 
-  for (const record of records) {
+  await Promise.all(records.map(async (record) => {
     const vc = await guild.channels.fetch(record.voiceChannelId).catch(() => null)
 
     if (!vc) {
@@ -50,7 +54,7 @@ export async function runReconciler(client: Client): Promise<ReconcilerResult> {
       untrackAutoChannelText(record.textChannelId)
       result.cleaned++
       logger.info(`Reconciler: cleaned orphan vc=${record.voiceChannelId}`)
-      continue
+      return
     }
 
     result.recovered++
@@ -76,9 +80,8 @@ export async function runReconciler(client: Client): Promise<ReconcilerResult> {
           && m.id !== record.controlPanelMsgId
           && m.id !== record.stickyMsgId
         )
-        for (const [, m] of stale) {
-          await m.delete().catch(() => {})
-        }
+        // Delete stale messages in parallel — they're independent.
+        await Promise.all([...stale.values()].map((m: any) => m.delete().catch(() => {})))
       }
 
       if (!record.controlPanelMsgId) {
@@ -96,7 +99,7 @@ export async function runReconciler(client: Client): Promise<ReconcilerResult> {
       // Always re-post the sticky on startup so it's at the bottom and current
       await postOrUpdateSticky(client, record)
     }
-  }
+  }))
 
   // --- Scan category for occupied channels not in the DB ---
   // Handles the case where the bot was offline when a user joined a hub.

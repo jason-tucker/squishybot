@@ -88,12 +88,17 @@ export async function handleHubJoin(client: Client, guild: Guild, member: GuildM
     const hubVc = await guild.channels.fetch(hubChannelId).catch(() => null) as VoiceChannel | null
     if (!hubVc?.isVoiceBased()) return
 
-    // Collect existing auto channel names to avoid collisions
-    const existingRecords = await db.select({ voiceChannelId: autoChannels.voiceChannelId }).from(autoChannels)
+    // Collect existing auto channel names to avoid collisions. Read names
+    // straight from guild.channels.cache (always populated when the bot has
+    // the Guilds intent, which it does) instead of awaiting one fetch per
+    // record — we'd otherwise serialize N microtask hops on every hub join.
+    const existingIds = new Set(
+      (await db.select({ voiceChannelId: autoChannels.voiceChannelId }).from(autoChannels))
+        .map(r => r.voiceChannelId)
+    )
     const existingNames: string[] = []
-    for (const r of existingRecords) {
-      const vc = await guild.channels.fetch(r.voiceChannelId).catch(() => null)
-      if (vc) existingNames.push(vc.name)
+    for (const ch of guild.channels.cache.values()) {
+      if (existingIds.has(ch.id) && 'name' in ch) existingNames.push(ch.name)
     }
 
     const channelName = generateChannelName(member, existingNames)
