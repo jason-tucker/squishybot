@@ -7,7 +7,7 @@ import { db } from '../db/client'
 import { autoChannels } from '../db/schema'
 import { eq } from 'drizzle-orm'
 import { canControlChannel, isSudo } from '../services/voice/permissions'
-import { buildControlPanelPayload } from '../embeds/voiceControlPanel'
+import { buildPanelPayloadForRecord } from '../services/voice/controlPanel'
 import { client } from '../bot/client'
 
 export const data = new SlashCommandBuilder()
@@ -43,15 +43,6 @@ export async function execute(interaction: ChatInputCommandInteraction): Promise
   await postOrUpdateControlPanel(client, record)
 
   // Also send an ephemeral panel so they can use controls from anywhere
-  const ownerMember = await interaction.guild!.members.fetch(record.ownerUserId).catch(() => null)
-  const ownerTag = ownerMember?.displayName ?? `<@${record.ownerUserId}>`
-  const hostTags = await Promise.all(
-    record.hostUserIds.map(async id => {
-      const m = await interaction.guild!.members.fetch(id).catch(() => null)
-      return m?.displayName ?? `<@${id}>`
-    })
-  )
-
-  const payload = buildControlPanelPayload(record, ownerTag, hostTags)
+  const payload = await buildPanelPayloadForRecord(client, record)
   await interaction.editReply({ ...payload, flags: (payload.flags | MessageFlags.Ephemeral) } as any)
 }

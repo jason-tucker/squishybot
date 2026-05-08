@@ -4,11 +4,15 @@ import { autoChannels } from '../../db/schema'
 import { eq } from 'drizzle-orm'
 import { buildControlPanelPayload } from '../../embeds/voiceControlPanel'
 import type { AutoChannelRecord } from '../../types/voice'
+import { listMembers } from './voiceMembers'
 import { logger } from '../logger'
 
 export async function buildPanelPayloadForRecord(client: Client, record: AutoChannelRecord) {
-  const { ownerTag, hostTags } = await resolveDisplayTags(client, record)
-  return buildControlPanelPayload(record, ownerTag, hostTags)
+  const [{ ownerTag, hostTags }, members] = await Promise.all([
+    resolveDisplayTags(client, record),
+    listMembers(record.voiceChannelId),
+  ])
+  return buildControlPanelPayload(record, ownerTag, hostTags, members)
 }
 
 async function resolveDisplayTags(client: Client, record: AutoChannelRecord): Promise<{ ownerTag: string; hostTags: string[] }> {
@@ -35,8 +39,11 @@ export async function postOrUpdateControlPanel(client: Client, record: AutoChann
   const textChannel = await guild.channels.fetch(record.textChannelId).catch(() => null) as TextChannel | null
   if (!textChannel?.isTextBased()) return
 
-  const { ownerTag, hostTags } = await resolveDisplayTags(client, record)
-  const payload = buildControlPanelPayload(record, ownerTag, hostTags)
+  const [{ ownerTag, hostTags }, members] = await Promise.all([
+    resolveDisplayTags(client, record),
+    listMembers(record.voiceChannelId),
+  ])
+  const payload = buildControlPanelPayload(record, ownerTag, hostTags, members)
 
   // Try to edit existing panel message
   if (record.controlPanelMsgId) {

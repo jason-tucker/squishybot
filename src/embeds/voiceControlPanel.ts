@@ -9,35 +9,49 @@ import {
 } from 'discord.js'
 import type { AutoChannelRecord } from '../types/voice'
 import { encodeVcId } from '../utils/customId'
-import { sep } from '../utils/cv2'
+import type { MemberJoin } from '../services/voice/voiceMembers'
 
-export function buildControlPanelPayload(record: AutoChannelRecord, ownerTag: string, hostTags: string[]) {
-  const lockBadge = record.isLocked ? '🔒 Locked' : '🔓 Unlocked'
-  const visibilityBadge = record.isHidden ? '🙈 Hidden' : '👁️ Visible'
-  const hostsLine = hostTags.length > 0 ? `**Hosts:** ${hostTags.join(', ')}` : '**Hosts:** none'
-  const templateLabel = record.nameTemplate === 'counter' ? '🔢 counter' : record.nameTemplate === 'auto' ? '🎮 auto' : record.manualName ? '✏️ custom' : '🎮 auto'
-  const nameLine = record.manualName ?? 'Auto-named channel'
+/**
+ * Compact first-message panel: short status header + member list with relative
+ * join timestamps + action buttons. Stays as the channel's first/top message
+ * (the sticky lives separately at the bottom). Re-rendered on voice-state
+ * changes so the member list and ownership stay current.
+ */
+export function buildControlPanelPayload(
+  record: AutoChannelRecord,
+  ownerTag: string,
+  hostTags: string[],
+  members: MemberJoin[],
+) {
+  const createdSec = Math.floor(record.createdAt.getTime() / 1000)
+  const headerLines: string[] = []
+  headerLines.push(`🔊 host <@${record.ownerUserId}> · created <t:${createdSec}:R>`)
+  if (hostTags.length > 0) {
+    headerLines.push(`👑 ${hostTags.join(', ')}`)
+  }
+  if (record.isLocked || record.isHidden) {
+    const flags: string[] = []
+    if (record.isLocked) flags.push('🔒 locked')
+    if (record.isHidden) flags.push('🙈 hidden')
+    headerLines.push(flags.join(' · '))
+  }
 
-  // Accent: red while locked, grey while hidden-but-unlocked, blue otherwise.
-  const accent = record.isLocked ? 0xed4245 : record.isHidden ? 0x808080 : 0x5865f2
+  if (members.length > 0) {
+    const sorted = [...members].sort((a, b) => a.joinedAt.getTime() - b.joinedAt.getTime())
+    headerLines.push('👥 In channel')
+    for (const m of sorted) {
+      const joinedSec = Math.floor(m.joinedAt.getTime() / 1000)
+      headerLines.push(`• <@${m.userId}> joined <t:${joinedSec}:R>`)
+    }
+  }
 
   const container = new ContainerBuilder()
-    .setAccentColor(accent)
     .addTextDisplayComponents(
-      new TextDisplayBuilder().setContent(
-        `## 🔊 ${nameLine}\n**Owner:** <@${record.ownerUserId}>  •  ${lockBadge}  •  ${visibilityBadge}  •  ${templateLabel}\n${hostsLine}`
-      )
-    )
-    .addSeparatorComponents(sep())
-    .addTextDisplayComponents(
-      new TextDisplayBuilder().setContent(
-        '_Use the buttons below to manage this voice channel.\nOnly the owner, hosts, and admins can make changes._'
-      )
+      new TextDisplayBuilder().setContent(headerLines.join('\n')),
     )
 
   const vcId = record.voiceChannelId
 
-  // Customization row — name + people + presets.
   const customizeRow = new ActionRowBuilder<MessageActionRowComponentBuilder>().addComponents(
     new ButtonBuilder()
       .setCustomId(encodeVcId(vcId, 'rename'))
@@ -56,9 +70,6 @@ export function buildControlPanelPayload(record: AutoChannelRecord, ownerTag: st
       .setStyle(ButtonStyle.Secondary),
   )
 
-  // State row — lock and hide are independent toggles, paired so they're
-  // always visible together. Discord clients used to crowd the hide button
-  // off-screen when these were mixed in with rename/hosts at 4-per-row.
   const stateRow = new ActionRowBuilder<MessageActionRowComponentBuilder>().addComponents(
     new ButtonBuilder()
       .setCustomId(encodeVcId(vcId, record.isLocked ? 'unlock' : 'lock'))
@@ -72,7 +83,6 @@ export function buildControlPanelPayload(record: AutoChannelRecord, ownerTag: st
       .setStyle(record.isHidden ? ButtonStyle.Success : ButtonStyle.Primary),
   )
 
-  // Ownership / destructive row.
   const ownerRow = new ActionRowBuilder<MessageActionRowComponentBuilder>().addComponents(
     new ButtonBuilder()
       .setCustomId(encodeVcId(vcId, 'claim'))

@@ -1,5 +1,5 @@
 import type { Client } from 'discord.js'
-import { ChannelType } from 'discord.js'
+import { ActivityType, ChannelType } from 'discord.js'
 import { db } from '../../db/client'
 import { autoChannels, hubChannels } from '../../db/schema'
 import { eq } from 'drizzle-orm'
@@ -10,6 +10,7 @@ import { postOrUpdateSticky } from './sticky'
 import { syncTextChannelPermissions } from './permissions'
 import { seedHubsFromEnv } from './hubManager'
 import { createAutoChannel } from './autoChannel'
+import { backfillMember, clearMembers } from './voiceMembers'
 import { logger } from '../logger'
 import { getSetting, unregisterHubChannel, untrackAutoChannelText, updateHubChannelId } from '../settings'
 
@@ -51,6 +52,7 @@ export async function runReconciler(client: Client): Promise<ReconcilerResult> {
       // Voice channel gone — clean up text channel and DB row
       await guild.channels.delete(record.textChannelId).catch(() => {})
       await db.delete(autoChannels).where(eq(autoChannels.voiceChannelId, record.voiceChannelId)).catch(() => {})
+      await clearMembers(record.voiceChannelId)
       untrackAutoChannelText(record.textChannelId)
       result.cleaned++
       logger.info(`Reconciler: cleaned orphan vc=${record.voiceChannelId}`)
@@ -62,6 +64,34 @@ export async function runReconciler(client: Client): Promise<ReconcilerResult> {
     // Schedule cleanup if empty
     if (vc.isVoiceBased() && vc.members.size === 0) {
       scheduleCleanup(client, record.voiceChannelId)
+    }
+
+    // Backfill member join times for anyone currently in the channel that we
+    // didn't yet have a row for. Original join times pre-restart are lost; we
+    // record `now()` and only for members not already tracked.
+    if (vc.isVoiceBased()) {
+      await Promise.all(vc.members.map(m => backfillMember(record.voiceChannelId, m.id)))
+    }
+
+    // Retroactively auto-rename if the owner is playing a game now and the
+    // channel is opted into auto-naming. Covers the gap where presenceUpdate
+    // events between bot restarts were lost.
+    if (vc.isVoiceBased() && record.autoNameEnabled
+        && (record.nameTemplate === null || record.nameTemplate === 'auto' || record.nameTemplate === 'counter')) {
+      const ownerMember = vc.members.get(record.ownerUserId)
+      const game = ownerMember?.presence?.activities.find(a => a.type === ActivityType.Playing)
+      if (game) {
+        const newName = record.nameTemplate === 'counter'
+          ? `${game.name} [${vc.members.size}/${record.userLimit > 0 ? record.userLimit : 4}]`
+          : game.name
+        if (vc.name !== newName) {
+          await vc.setName(newName).catch(() => {})
+          const textName = newName.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'voice-chat'
+          const tcRename = await guild.channels.fetch(record.textChannelId).catch(() => null)
+          if (tcRename?.isTextBased()) await (tcRename as any).setName(textName).catch(() => {})
+          logger.info(`Reconciler auto-rename: vc=${record.voiceChannelId} → ${newName}`)
+        }
+      }
     }
 
     // Sync text channel permissions for current members
@@ -93,6 +123,10 @@ export async function runReconciler(client: Client): Promise<ReconcilerResult> {
           await db.update(autoChannels).set({ controlPanelMsgId: null }).where(eq(autoChannels.voiceChannelId, record.voiceChannelId))
           await postOrUpdateControlPanel(client, { ...record, controlPanelMsgId: null })
           result.panels++
+        } else {
+          // Refresh content in place so format/layout changes from deploys
+          // (and current member list / live timestamps) take effect immediately.
+          await postOrUpdateControlPanel(client, record)
         }
       }
 

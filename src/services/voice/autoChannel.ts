@@ -10,6 +10,7 @@ import { postOrUpdateControlPanel } from './controlPanel'
 import { postOrUpdateSticky } from './sticky'
 import { scheduleCleanup, cancelCleanup } from './cleanupScheduler'
 import { cancelAllHideGracesFor } from './hideGrace'
+import { clearMembers, recordMemberJoin } from './voiceMembers'
 import { logger } from '../logger'
 
 export async function createAutoChannel(
@@ -76,6 +77,11 @@ export async function createAutoChannel(
   }
   trackAutoChannelText(record.textChannelId)
 
+  // Record the joining owner in the members table so the panel shows them
+  // immediately. voiceStateUpdate fires for them too but the order isn't
+  // guaranteed relative to the panel's first render.
+  await recordMemberJoin(record.voiceChannelId, owner.id)
+
   // 4. Post control panel + sticky
   await postOrUpdateControlPanel(client, record)
   await postOrUpdateSticky(client, record)
@@ -97,6 +103,7 @@ export async function deleteAutoChannel(client: Client, record: AutoChannelRecor
   ])
 
   await db.delete(autoChannels).where(eq(autoChannels.voiceChannelId, record.voiceChannelId)).catch(() => {})
+  await clearMembers(record.voiceChannelId)
   untrackAutoChannelText(record.textChannelId)
 
   logger.info(`Auto channel deleted: vc=${record.voiceChannelId}`)

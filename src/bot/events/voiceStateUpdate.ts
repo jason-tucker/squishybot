@@ -7,6 +7,7 @@ import { addMemberToTextChannel, isSudo, removeMemberFromTextChannel } from '../
 import { scheduleCleanup, cancelCleanup } from '../../services/voice/cleanupScheduler'
 import { postOrUpdateControlPanel } from '../../services/voice/controlPanel'
 import { cancelHideGrace, grantHideGrace } from '../../services/voice/hideGrace'
+import { recordMemberJoin, recordMemberLeave } from '../../services/voice/voiceMembers'
 import { logger } from '../../services/logger'
 import { recordActivity } from '../../services/presence'
 import { env } from '../../config/env'
@@ -45,10 +46,12 @@ export function registerVoiceStateUpdate(client: Client): void {
         if (textChannel?.isTextBased()) {
           await addMemberToTextChannel(textChannel as any, member)
         }
+        await recordMemberJoin(joinedChannelId, member.id)
         await db.update(autoChannels)
           .set({ lastActiveAt: new Date() })
           .where(eq(autoChannels.voiceChannelId, joinedChannelId))
           .catch(() => {})
+        await postOrUpdateControlPanel(client, record).catch(() => {})
         return
       }
 
@@ -63,6 +66,8 @@ export function registerVoiceStateUpdate(client: Client): void {
     if (leftChannelId && leftChannelId !== joinedChannelId) {
       const [record] = await db.select().from(autoChannels).where(eq(autoChannels.voiceChannelId, leftChannelId))
       if (!record) return
+
+      await recordMemberLeave(leftChannelId, member.id)
 
       // Remove from text channel (only if they're not a host/owner with permanent access)
       const isSpecialUser = record.ownerUserId === member.id || record.hostUserIds.includes(member.id)
@@ -85,6 +90,7 @@ export function registerVoiceStateUpdate(client: Client): void {
       }
 
       // Handle ownership transfer if owner left
+      let updatedRecord = record
       if (record.ownerUserId === member.id && vc.members.size > 0) {
         const newOwner = vc.members.first()!
         const newOwnerHosts = record.hostUserIds.filter(id => id !== newOwner.id)
@@ -93,13 +99,16 @@ export function registerVoiceStateUpdate(client: Client): void {
           .where(eq(autoChannels.voiceChannelId, leftChannelId))
           .catch(() => {})
         logger.info(`Ownership transferred to ${newOwner.displayName} in vc=${leftChannelId}`)
-        const updatedRecord = { ...record, ownerUserId: newOwner.id, hostUserIds: newOwnerHosts }
-        await postOrUpdateControlPanel(client, updatedRecord).catch(() => {})
+        updatedRecord = { ...record, ownerUserId: newOwner.id, hostUserIds: newOwnerHosts }
       }
 
-      // Schedule cleanup if channel is now empty
+      // Schedule cleanup if channel is now empty; otherwise refresh the panel
+      // (member list and possibly new owner). Skipped for the empty case — the
+      // channel is about to be cleaned up.
       if (vc.members.size === 0) {
         scheduleCleanup(client, leftChannelId)
+      } else {
+        await postOrUpdateControlPanel(client, updatedRecord).catch(() => {})
       }
     }
   })

@@ -130,6 +130,7 @@ Weekly auto-restart at Tuesday 4 AM via `squishybot-restart.timer`.
 | Table | Purpose |
 |---|---|
 | `auto_channels` | Tracks active auto voice channels and their state |
+| `auto_channel_members` | Per-channel join times (`voice_channel_id, user_id, joined_at`) — drives the panel's "In channel" list with `<t:N:R>` timestamps |
 | `hub_channels` | Registry of managed hub voice channels |
 | `bot_settings` | Runtime key/value config overrides edited via `/sudo → Settings` |
 | `sudo_users` | Members granted sudo at runtime (beyond the immutable `SUDO_USER_IDS` env list) |
