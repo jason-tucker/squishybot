@@ -8,7 +8,7 @@
  * refresh cadence (~24h) but enough granularity that "they just posted" lands
  * within an hour of the aggregator picking it up.
  */
-import type { Client, TextBasedChannel } from 'discord.js'
+import type { Client, GuildTextBasedChannel } from 'discord.js'
 import {
   ActionRowBuilder,
   ButtonBuilder,
@@ -91,7 +91,7 @@ async function pollFeed(client: Client, feed: SocialFeed): Promise<void> {
     throw new Error(`channel ${feed.channelId} unavailable or not text-based`)
   }
   for (const it of [...fresh].reverse()) {
-    await channel.send(buildSocialPostPayload(feed, it) as any).catch(err => {
+    await channel.send(buildSocialPostPayload(feed, it) as any).catch((err: unknown) => {
       logger.warn(`Failed to send social post for "${feed.label}" item=${it.guid}:`, err)
     })
   }
@@ -108,11 +108,11 @@ export async function fetchAndParse(url: string): Promise<RssItem[]> {
   return parseFeed(xml)
 }
 
-async function resolveChannel(client: Client, channelId: string): Promise<TextBasedChannel | null> {
+async function resolveChannel(client: Client, channelId: string): Promise<GuildTextBasedChannel | null> {
   const cached = client.channels.cache.get(channelId)
   const ch = cached ?? await client.channels.fetch(channelId).catch(() => null)
   if (!ch || !ch.isTextBased() || ch.isDMBased()) return null
-  return ch
+  return ch as GuildTextBasedChannel
 }
 
 /**
