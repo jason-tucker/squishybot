@@ -17,6 +17,10 @@ export const autoChannels = pgTable('auto_channels', {
   manualName: text('manual_name'),
   // Template tracking: null=manual, 'auto'=presence-based, 'counter'=show [x/y] member count
   nameTemplate: text('name_template'),
+  // Name to revert to when no member is playing anything that auto-rename can
+  // pull from. Updated on creation, manual rename, and the Tryhard/Chill
+  // templates. Stays null for legacy rows; rename fallback is skipped if so.
+  fallbackName: text('fallback_name'),
   controlPanelMsgId: text('control_panel_msg_id'),
   stickyMsgId: text('sticky_msg_id'),
   scheduledCleanupAt: timestamp('scheduled_cleanup_at'),

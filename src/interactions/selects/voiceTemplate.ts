@@ -99,6 +99,11 @@ export async function handleVoiceTemplateSelect(interaction: StringSelectMenuInt
     await (tc as any).setName(textName).catch(() => {})
   }
 
+  // tryhard/chill produce stable manual names — adopt as the fallback so
+  // the channel reverts to them when nobody is playing anything.
+  const stableTemplates = template === 'tryhard' || template === 'chill'
+  const fallbackName = stableTemplates ? newName : record.fallbackName
+
   // Persist to DB
   const updated = {
     ...record,
@@ -106,9 +111,10 @@ export async function handleVoiceTemplateSelect(interaction: StringSelectMenuInt
     autoNameEnabled,
     nameTemplate,
     userLimit,
+    fallbackName,
   }
   await db.update(autoChannels)
-    .set({ manualName, autoNameEnabled, nameTemplate, userLimit })
+    .set({ manualName, autoNameEnabled, nameTemplate, userLimit, fallbackName })
     .where(eq(autoChannels.voiceChannelId, voiceChannelId))
     .catch(() => {})
 

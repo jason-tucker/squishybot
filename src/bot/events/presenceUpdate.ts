@@ -43,8 +43,13 @@ export function registerPresenceUpdate(client: Client): void {
     const vc = await guild.channels.fetch(record.voiceChannelId).catch(() => null)
     if (!vc?.isVoiceBased()) return
 
-    const newName = computeAutoName(vc, record.ownerUserId, record.nameTemplate, record.userLimit)
-    if (!newName) return // nobody playing anything we can name from
+    // When nobody is playing anything we can derive a name from, fall back to
+    // the channel's stored fallbackName (initial random name OR last manual
+    // rename / Tryhard / Chill template). Skip if there's no fallback recorded
+    // (legacy rows pre-migration).
+    const computed = computeAutoName(vc, record.ownerUserId, record.nameTemplate, record.userLimit)
+    const newName = computed ?? record.fallbackName
+    if (!newName) return
 
     // Don't rename if the name didn't actually change
     if (vc.name === newName) return

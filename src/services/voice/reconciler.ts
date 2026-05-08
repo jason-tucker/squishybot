@@ -79,7 +79,8 @@ export async function runReconciler(client: Client): Promise<ReconcilerResult> {
     // presenceUpdate events between bot restarts were lost.
     if (vc.isVoiceBased() && record.autoNameEnabled
         && (record.nameTemplate === null || record.nameTemplate === 'auto' || record.nameTemplate === 'counter')) {
-      const newName = computeAutoName(vc, record.ownerUserId, record.nameTemplate, record.userLimit)
+      const computed = computeAutoName(vc, record.ownerUserId, record.nameTemplate, record.userLimit)
+      const newName = computed ?? record.fallbackName
       if (newName && vc.name !== newName) {
         await vc.setName(newName).catch(() => {})
         const textName = newName.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'voice-chat'

@@ -19,6 +19,9 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - **Auto-rename now picks the most-played game across all VC members and prefixes a count when more than one is playing it** (e.g. 3 of 4 members playing Overwatch → `(3) Overwatch`). Shared helper `services/voice/autoNaming.ts` used by `presenceUpdate`, the `Auto`/`Counter` template buttons, and the reconciler. `presenceUpdate` now keys off the changed user's voice channel rather than ownership, so a non-owner's game can flip the channel name.
 - **`/sudo → Manage user → View Staff Record`** now has a Back button returning to the manage panel.
 
+### Added
+- **Auto-rename now reverts to a fallback name when nobody is playing anything.** New `auto_channels.fallback_name` column captures the channel's stable name: set on creation (initial random tech name) and on manual rename or Tryhard/Chill templates. Once everyone stops playing the auto-derived game, the channel renames back. Legacy rows without a fallback skip the revert until next manual rename.
+
 ### Fixed
 - **New auto channels weren't getting a control panel posted.** `postOrUpdateControlPanel` was relying on `guild.channels.fetch()` immediately after `guild.channels.create()` — the bot's channel cache hadn't caught up, so the fetch returned a value that failed `.isTextBased()` and the function silently returned. Fixed by passing the freshly-created `TextChannel` object straight through from `createAutoChannel`. Added clearer warn-level logging on every silent-return path.
 

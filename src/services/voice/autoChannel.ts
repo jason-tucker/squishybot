@@ -65,6 +65,7 @@ export async function createAutoChannel(
       textChannelId: textChannel.id,
       ownerUserId: owner.id,
       sourceHubId,
+      fallbackName: channelName,
     }).returning()
     record = row
   } catch (err: any) {

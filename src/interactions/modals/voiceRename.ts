@@ -53,10 +53,10 @@ export async function handleVoiceRenameModal(interaction: ModalSubmitInteraction
   ])
 
   await db.update(autoChannels)
-    .set({ manualName: newName, autoNameEnabled: false })
+    .set({ manualName: newName, autoNameEnabled: false, fallbackName: newName })
     .where(eq(autoChannels.voiceChannelId, voiceChannelId))
 
-  const updated = { ...record, manualName: newName, autoNameEnabled: false }
+  const updated = { ...record, manualName: newName, autoNameEnabled: false, fallbackName: newName }
   await postOrUpdateControlPanel(interaction.client, updated)
 
   if (interaction.isFromMessage()) {
