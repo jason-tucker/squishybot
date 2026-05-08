@@ -712,9 +712,49 @@ export async function handleSettingsButton(interaction: ButtonInteraction): Prom
   if (!await requireSudo(interaction)) return
   const id = interaction.customId
 
+  // ── Modal-showing branches FIRST. `showModal()` IS the interaction
+  // response and cannot be combined with deferUpdate. Anything below this
+  // block runs after we ack the interaction with deferUpdate, so it's
+  // immune to the 3-second timeout (we get 15 min to actually edit).
+  if (id === 'sudo:set:social:add') {
+    await interaction.showModal(buildSocialAddModal())
+    return
+  }
+  if (id.startsWith('sudo:set:edit_modal:')) {
+    const key = id.slice('sudo:set:edit_modal:'.length)
+    const numDef = NUMERIC_SETTINGS.find(d => d.key === key)
+    if (!numDef) {
+      await interaction.reply({ content: `Unknown setting: ${key}`, ephemeral: true })
+      return
+    }
+    const { value } = effectiveNumericValue(numDef)
+    const modal = new ModalBuilder()
+      .setCustomId(`sudo:set:save:${key}`)
+      .setTitle(`Edit ${numDef.label}`)
+      .addComponents(
+        new ActionRowBuilder<TextInputBuilder>().addComponents(
+          new TextInputBuilder()
+            .setCustomId('value')
+            .setLabel(numDef.label)
+            .setStyle(TextInputStyle.Short)
+            .setRequired(true)
+            .setValue(String(value))
+            .setPlaceholder(numDef.description)
+        )
+      )
+    await interaction.showModal(modal)
+    return
+  }
+
+  // Ack the interaction immediately so Discord's 3-second response window
+  // never bites us — the staff_roles branch was hitting 10062 because
+  // member.fetch + render + interaction.update was racing the 3 s deadline.
+  // Once deferred, we can take up to 15 min to actually editReply.
+  await interaction.deferUpdate()
+
   // sudo:set:home
   if (id === 'sudo:set:home') {
-    await interaction.update(renderHome() as any)
+    await interaction.editReply(renderHome() as any)
     return
   }
 
@@ -722,34 +762,33 @@ export async function handleSettingsButton(interaction: ButtonInteraction): Prom
   if (id.startsWith('sudo:set:nav:')) {
     const category = id.slice('sudo:set:nav:'.length)
     if (category === 'sudo_users') {
-      await interaction.update((await renderSudoUsers()) as any)
+      await interaction.editReply((await renderSudoUsers()) as any)
     } else if (category === 'channels') {
-      await interaction.update(renderChannels() as any)
+      await interaction.editReply(renderChannels() as any)
     } else if (category === 'channels_reset') {
-      await interaction.update(renderChannelsReset() as any)
+      await interaction.editReply(renderChannelsReset() as any)
     } else if (category === 'voice') {
-      await interaction.update(renderVoice() as any)
+      await interaction.editReply(renderVoice() as any)
     } else if (category === 'hubs') {
-      await interaction.update(renderHubs() as any)
+      await interaction.editReply(renderHubs() as any)
     } else if (category === 'auto_threads') {
-      await interaction.update(renderAutoThreads() as any)
+      await interaction.editReply(renderAutoThreads() as any)
     } else if (category === 'staff_roles') {
-      await interaction.update(renderStaffRoles(interaction.guild!) as any)
+      await interaction.editReply(renderStaffRoles(interaction.guild!) as any)
     } else if (category === 'socials') {
-      await interaction.update((await renderSocials()) as any)
+      await interaction.editReply((await renderSocials()) as any)
     } else if (category === 'games') {
-      await interaction.update((await renderGames(interaction.guildId!)) as any)
+      await interaction.editReply((await renderGames(interaction.guildId!)) as any)
     } else if (category === 'profiles') {
-      await interaction.update((await renderProfiles(interaction.guildId!)) as any)
+      await interaction.editReply((await renderProfiles(interaction.guildId!)) as any)
     } else {
-      await interaction.reply({ content: `Unknown category: ${category}`, ephemeral: true })
+      await interaction.followUp({ content: `Unknown category: ${category}`, flags: MessageFlags.Ephemeral })
     }
     return
   }
 
   // sudo:set:staff_roles:provision — create-if-missing + link-by-name + reposition
   if (id === 'sudo:set:staff_roles:provision') {
-    await interaction.deferUpdate()
     const result = await provisionStaffRoles(interaction.guild!, interaction.user.id)
     await interaction.editReply(renderStaffRoles(interaction.guild!) as any)
     const summary: string[] = []
@@ -764,13 +803,7 @@ export async function handleSettingsButton(interaction: ButtonInteraction): Prom
   // sudo:set:staff_roles:clear — clears the linked IDs (Discord roles untouched)
   if (id === 'sudo:set:staff_roles:clear') {
     for (const def of STAFF_ROLE_DEFS) await clearSetting(def.key)
-    await interaction.update(renderStaffRoles(interaction.guild!) as any)
-    return
-  }
-
-  // sudo:set:social:add — open the add-feed modal
-  if (id === 'sudo:set:social:add') {
-    await interaction.showModal(buildSocialAddModal())
+    await interaction.editReply(renderStaffRoles(interaction.guild!) as any)
     return
   }
 
@@ -780,14 +813,14 @@ export async function handleSettingsButton(interaction: ButtonInteraction): Prom
     const { getSocialFeed, setSocialFeedEnabled } = await import('../services/socialFeeds')
     const feed = getSocialFeed(feedId)
     if (feed) await setSocialFeedEnabled(feedId, !feed.enabled)
-    await interaction.update((await renderSocialDetail(feedId)) as any)
+    await interaction.editReply((await renderSocialDetail(feedId)) as any)
     return
   }
 
-  // sudo:set:social:test:{id} — fetch + post latest item without marking seen
+  // sudo:set:social:test:{id} — fetch + post latest item without marking seen.
+  // Already deferred at the top, so we can take the time the fetch needs.
   if (id.startsWith('sudo:set:social:test:')) {
     const feedId = id.slice('sudo:set:social:test:'.length)
-    await interaction.deferUpdate()
     const { getSocialFeed } = await import('../services/socialFeeds')
     const { fetchAndParse, buildSocialPostPayload } = await import('../services/social/poller')
     const feed = getSocialFeed(feedId)
@@ -822,7 +855,7 @@ export async function handleSettingsButton(interaction: ButtonInteraction): Prom
     const feedId = id.slice('sudo:set:social:remove:'.length)
     const { removeSocialFeed } = await import('../services/socialFeeds')
     await removeSocialFeed(feedId)
-    await interaction.update((await renderSocials()) as any)
+    await interaction.editReply((await renderSocials()) as any)
     return
   }
 
@@ -832,37 +865,10 @@ export async function handleSettingsButton(interaction: ButtonInteraction): Prom
     await clearSetting(key)
     // Heuristic: numeric + voice-category settings live in the Voice panel.
     if (NUMERIC_SETTINGS.some(d => d.key === key) || key === VOICE_CATEGORY_SETTING.key) {
-      await interaction.update(renderVoice() as any)
+      await interaction.editReply(renderVoice() as any)
     } else {
-      await interaction.update(renderHome() as any)
+      await interaction.editReply(renderHome() as any)
     }
-    return
-  }
-
-  // sudo:set:edit_modal:{key}
-  if (id.startsWith('sudo:set:edit_modal:')) {
-    const key = id.slice('sudo:set:edit_modal:'.length)
-    const numDef = NUMERIC_SETTINGS.find(d => d.key === key)
-    if (!numDef) {
-      await interaction.reply({ content: `Unknown setting: ${key}`, ephemeral: true })
-      return
-    }
-    const { value } = effectiveNumericValue(numDef)
-    const modal = new ModalBuilder()
-      .setCustomId(`sudo:set:save:${key}`)
-      .setTitle(`Edit ${numDef.label}`)
-      .addComponents(
-        new ActionRowBuilder<TextInputBuilder>().addComponents(
-          new TextInputBuilder()
-            .setCustomId('value')
-            .setLabel(numDef.label)
-            .setStyle(TextInputStyle.Short)
-            .setRequired(true)
-            .setValue(String(value))
-            .setPlaceholder(numDef.description)
-        )
-      )
-    await interaction.showModal(modal)
     return
   }
 }
