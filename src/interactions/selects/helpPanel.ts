@@ -125,12 +125,17 @@ export async function handleHelpPanelSelect(interaction: StringSelectMenuInterac
       .addTextDisplayComponents(new TextDisplayBuilder().setContent('## 🎛️ Voice Control Panel'))
       .addSeparatorComponents(sep())
       .addTextDisplayComponents(new TextDisplayBuilder().setContent(
-        'The control panel appears automatically in your private text channel when you create a voice channel.\n\n' +
+        'The control panel posts **silently** in your private text channel as soon as the channel is ' +
+        'created — no notification fires. It stays the top message in the channel and re-renders on ' +
+        'every voice-state change so the **In channel** member list (with each person\'s join time and ' +
+        'current rich-presence game) is always current. The channel name follows the most-played game ' +
+        'across all members and prefixes a count when more than one is playing it (e.g. `(3) Overwatch`).\n\n' +
         '**Panel buttons:**\n' +
         '✏️ **Rename** — set a custom channel name via a popup form\n' +
-        '🔒 **Lock / Unlock** — prevent new people from joining\n' +
         '👑 **Hosts** — one panel to add or remove hosts. Each option shows their current rank: 👑 host · 🛡️ sudo · 👤 member.\n' +
         '📋 **Templates** — Auto (follows your game) / Counter ([x/y]) / Comp 5-stack / Tryhard / Chill\n' +
+        '🔒/🔓 **Locked / Unlocked** — toggle. Label shows the current state — green when Unlocked, red when Locked.\n' +
+        '🙈/👁️ **Hidden / Visible** — toggle. Same status-flip convention.\n' +
         '👤 **Claim** — become the owner if the previous owner left\n' +
         '🗑️ **Delete** — immediately delete the channel and text channel\n\n' +
         'A silent **📋 Open Panel** sticky stays at the bottom of the text channel so the panel ' +
