@@ -130,20 +130,26 @@ export function buildSocialPostPayload(feed: SocialFeed, item: RssItem) {
     .setAccentColor(platformAccent(platform))
     .addTextDisplayComponents(new TextDisplayBuilder().setContent(headerLine + titleLine + body))
 
-  if (item.imageUrl) {
+  // RSS items come from third-party aggregators we don't control. Defensively
+  // gate every URL we emit to http/https only, so a malicious feed can't slip
+  // a `javascript:` / `data:` link into a Link button or media preview even
+  // if Discord's own validation ever drifted.
+  const safeImageUrl = isSafeHttpUrl(item.imageUrl) ? item.imageUrl! : null
+  if (safeImageUrl) {
     container.addSeparatorComponents(sep())
     container.addMediaGalleryComponents(
-      new MediaGalleryBuilder().addItems([{ media: { url: item.imageUrl } }])
+      new MediaGalleryBuilder().addItems([{ media: { url: safeImageUrl } }])
     )
   }
 
   const components: any[] = [container]
-  if (item.link) {
+  const safeLink = isSafeHttpUrl(item.link) ? item.link! : null
+  if (safeLink) {
     const linkRow = new ActionRowBuilder<MessageActionRowComponentBuilder>().addComponents(
       new ButtonBuilder()
         .setLabel(`View on ${platform}`)
         .setStyle(ButtonStyle.Link)
-        .setURL(item.link)
+        .setURL(safeLink)
     )
     components.push(linkRow)
   }
@@ -153,6 +159,16 @@ export function buildSocialPostPayload(feed: SocialFeed, item: RssItem) {
     components,
     // Belt-and-braces — feed text could contain @mentions or @everyone tokens.
     allowedMentions: { parse: [] },
+  }
+}
+
+function isSafeHttpUrl(u: string | null | undefined): boolean {
+  if (!u) return false
+  try {
+    const parsed = new URL(u)
+    return parsed.protocol === 'http:' || parsed.protocol === 'https:'
+  } catch {
+    return false
   }
 }
 

@@ -35,15 +35,20 @@ import {
 } from 'discord.js'
 import { randomBytes } from 'node:crypto'
 import { sep } from '../utils/cv2'
-import { findGameByNameOrAlias, getGame, type Game } from '../services/games'
 import { isSudo } from '../services/voice/permissions'
 import { logger } from '../services/logger'
 
 type Rsvp = 'in' | 'maybe' | 'out'
 type Ownership = 'has' | 'needs'
 
+/**
+ * Game Night state. `gameName` is a display string — it is **not** required to
+ * match the games catalog; sudo can schedule a one-off game that doesn't have
+ * its own channel/role yet (e.g. "TBD", "Some Itch.io demo"). Catalog lookups
+ * were dropped because the announcement doesn't depend on them.
+ */
 interface GameNightState {
-  gameId: string
+  gameName: string
   hostId: string
   when: string
   notes: string
@@ -59,10 +64,10 @@ const sessions = new Map<string, GameNightState>()
 interface PendingSession {
   sudoUserId: string
   channelId: string
-  /** Raw text the sudo typed for the game lookup — preserved so the Edit
-   *  modal can pre-fill exactly what they typed. */
+  /** Raw text the sudo typed in the Game field — preserved verbatim so the
+   *  Edit modal can pre-fill exactly what they typed. Free-form: doesn't have
+   *  to match the catalog. */
   gameQuery: string
-  resolvedGameId: string
   when: string
   notes: string
   createdAt: number
@@ -85,8 +90,8 @@ function gcPending(): void {
 
 export function buildSetupModal(opts?: { sessionKey?: string; defaults?: { gameQuery: string; when: string; notes: string } }): ModalBuilder {
   const customId = opts?.sessionKey ? `gn:setup_submit:${opts.sessionKey}` : 'gn:setup_submit'
-  const game = new TextInputBuilder().setCustomId('game').setLabel('Game (name or alias from catalog)')
-    .setStyle(TextInputStyle.Short).setRequired(true).setPlaceholder('e.g. Overwatch')
+  const game = new TextInputBuilder().setCustomId('game').setLabel('Game name (free-form — does not need catalog)')
+    .setStyle(TextInputStyle.Short).setRequired(true).setPlaceholder('e.g. Overwatch · TBD · Some Itch.io demo')
   const when = new TextInputBuilder().setCustomId('when').setLabel('When (free-form)')
     .setStyle(TextInputStyle.Short).setRequired(true).setPlaceholder('e.g. Saturday 9pm EST')
   const notes = new TextInputBuilder().setCustomId('notes').setLabel('Notes (optional)')
@@ -124,12 +129,8 @@ export async function handleSetupSubmit(interaction: ModalSubmitInteraction): Pr
   const gameQuery = interaction.fields.getTextInputValue('game').trim()
   const when      = interaction.fields.getTextInputValue('when').trim()
   const notes     = interaction.fields.getTextInputValue('notes').trim()
-
-  const game = findGameByNameOrAlias(gameQuery)
-  if (!game) {
-    await interaction.reply({ content: `❌ No game matches \`${gameQuery}\`. Add it to the catalog first via /sudo → Settings → Games.`, ephemeral: true })
-    return
-  }
+  // (No empty-gameQuery guard: the modal field is .setRequired(true), so
+  // Discord rejects empty submissions before they reach this handler.)
 
   // Edit submissions reuse the existing sessionKey (so the same preview
   // message can be edited in place). Fresh submissions get a new key.
@@ -148,7 +149,6 @@ export async function handleSetupSubmit(interaction: ModalSubmitInteraction): Pr
     sudoUserId: member.id,
     channelId,
     gameQuery,
-    resolvedGameId: game.id,
     when,
     notes,
     createdAt: Date.now(),
@@ -158,9 +158,9 @@ export async function handleSetupSubmit(interaction: ModalSubmitInteraction): Pr
 
   if (isEdit && interaction.isFromMessage()) {
     // Replace the existing preview message in place.
-    await interaction.update(buildPreviewPayload(game, pending, sessionKey, true) as any)
+    await interaction.update(buildPreviewPayload(pending, sessionKey, true) as any)
   } else {
-    await interaction.reply({ ...buildPreviewPayload(game, pending, sessionKey, false), ephemeral: true } as any)
+    await interaction.reply({ ...buildPreviewPayload(pending, sessionKey, false), ephemeral: true } as any)
   }
 }
 
@@ -168,19 +168,19 @@ export async function handleSetupSubmit(interaction: ModalSubmitInteraction): Pr
 // Preview rendering + button handlers
 // ---------------------------------------------------------------------------
 
-function buildPreviewPayload(game: Game, pending: PendingSession, sessionKey: string, _editing: boolean) {
+function buildPreviewPayload(pending: PendingSession, sessionKey: string, _editing: boolean) {
   // Use the same buildPanel renderer for the body so the preview matches the
   // public post 1:1. Pings are off everywhere now, so no role/user mentions
   // resolve regardless.
   const stub: GameNightState = {
-    gameId: game.id,
+    gameName: pending.gameQuery,
     hostId: pending.sudoUserId,
     when: pending.when,
     notes: pending.notes,
     rsvps: new Map(),
     ownership: new Map(),
   }
-  const inner = buildPanel(game, stub)
+  const inner = buildPanel(stub)
 
   const header = new ContainerBuilder()
     .setAccentColor(0x5865f2)
@@ -231,12 +231,6 @@ export async function handlePreviewButton(interaction: ButtonInteraction): Promi
     }
   }
 
-  const game = getGame(pending.resolvedGameId)
-  if (!game) {
-    await interaction.update({ content: '❌ The game in this preview was removed from the catalog. Cancel and start over.', components: [], flags: undefined } as any).catch(() => {})
-    return
-  }
-
   if (action === 'send') {
     const channel = await interaction.client.channels.fetch(pending.channelId).catch(() => null)
     if (!channel || channel.type !== ChannelType.GuildText) {
@@ -244,17 +238,17 @@ export async function handlePreviewButton(interaction: ButtonInteraction): Promi
       return
     }
     const state: GameNightState = {
-      gameId: game.id,
+      gameName: pending.gameQuery,
       hostId: pending.sudoUserId,
       when: pending.when,
       notes: pending.notes,
       rsvps: new Map(),
       ownership: new Map(),
     }
-    const sent = await (channel as TextChannel).send(buildPanel(game, state) as any)
+    const sent = await (channel as TextChannel).send(buildPanel(state) as any)
     sessions.set(sent.id, state)
     pendingSessions.delete(sessionKey)
-    logger.info(`gamenight sent game=${game.name} host=${pending.sudoUserId} channel=${channel.id} message=${sent.id}`)
+    logger.info(`gamenight sent game=${state.gameName} host=${pending.sudoUserId} channel=${channel.id} message=${sent.id}`)
 
     const ack = new ContainerBuilder().setAccentColor(0x57f287)
       .addTextDisplayComponents(new TextDisplayBuilder().setContent(`✅ Posted in <#${pending.channelId}>.`))
@@ -298,13 +292,13 @@ function listForOwnership(state: GameNightState, want: Ownership): string[] {
   return Array.from(state.ownership.entries()).filter(([, o]) => o === want).map(([id]) => `<@${id}>`)
 }
 
-function buildPanel(game: Game, state: GameNightState): {
+function buildPanel(state: GameNightState): {
   flags: number
   components: any[]
   allowedMentions: { parse: never[] }
 } {
   const lines: string[] = []
-  lines.push(`🎲 **Game Night — ${game.name}**`)
+  lines.push(`🎲 **Game Night — ${state.gameName}**`)
   lines.push(`📅 ${state.when}`)
   if (state.notes) lines.push('')
   if (state.notes) lines.push(state.notes)
@@ -374,16 +368,11 @@ export async function handleRsvpButton(interaction: ButtonInteraction): Promise<
     await interaction.reply({ content: '❌ This Game Night is no longer active.', ephemeral: true })
     return
   }
-  const game = getGame(state.gameId)
-  if (!game) {
-    await interaction.reply({ content: '❌ This game has been removed from the catalog.', ephemeral: true })
-    return
-  }
   const want = interaction.customId.split(':')[2] as Rsvp
   const userId = interaction.user.id
   if (state.rsvps.get(userId) === want) state.rsvps.delete(userId)
   else state.rsvps.set(userId, want)
-  await interaction.update(buildPanel(game, state) as any)
+  await interaction.update(buildPanel(state) as any)
 }
 
 export async function handleOwnershipButton(interaction: ButtonInteraction): Promise<void> {
@@ -393,16 +382,11 @@ export async function handleOwnershipButton(interaction: ButtonInteraction): Pro
     await interaction.reply({ content: '❌ This Game Night is no longer active.', ephemeral: true })
     return
   }
-  const game = getGame(state.gameId)
-  if (!game) {
-    await interaction.reply({ content: '❌ This game has been removed from the catalog.', ephemeral: true })
-    return
-  }
   const want = interaction.customId.split(':')[2] as Ownership
   const userId = interaction.user.id
   if (state.ownership.get(userId) === want) state.ownership.delete(userId)
   else state.ownership.set(userId, want)
-  await interaction.update(buildPanel(game, state) as any)
+  await interaction.update(buildPanel(state) as any)
 }
 
 export async function handleCancelButton(interaction: ButtonInteraction): Promise<void> {
@@ -438,8 +422,7 @@ function recoverFromMessage(interaction: ButtonInteraction): GameNightState | nu
 
   const gameMatch = /Game Night — ([^\\n*]+?)\*\*/.exec(allText)
   if (!gameMatch) return null
-  const game = findGameByNameOrAlias(gameMatch[1].trim())
-  if (!game) return null
+  const gameName = gameMatch[1].trim()
 
   const hostMatch = /Host: <@(\d{15,25})>/.exec(allText)
   if (!hostMatch) return null
@@ -467,5 +450,5 @@ function recoverFromMessage(interaction: ButtonInteraction): GameNightState | nu
     }
   }
 
-  return { gameId: game.id, hostId, when, notes: '', rsvps, ownership }
+  return { gameName, hostId, when, notes: '', rsvps, ownership }
 }

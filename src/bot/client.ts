@@ -10,4 +10,11 @@ export const client = new Client({
     GatewayIntentBits.GuildPresences, // privileged — enable in Dev Portal → Bot → Presence Intent
   ],
   partials: [Partials.GuildMember],
+  // Default every reply / send / followUp to "no mentions resolve". Individual
+  // call sites that legitimately need to ping (e.g. /play LFG ping role,
+  // birthday channel ping) override this explicitly with `allowedMentions:
+  // { roles: [...] }` / `{ users: [...] }`. Defending against a stray
+  // @everyone in any user-supplied text (Game Night notes, voice rename,
+  // staff-request reason, /report description, social-feed item body, etc.).
+  allowedMentions: { parse: [] },
 })
