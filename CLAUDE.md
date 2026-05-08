@@ -136,6 +136,13 @@ Weekly auto-restart at Tuesday 4 AM via `squishybot-restart.timer`.
 | `auto_thread_channels` | Channels where every non-bot message gets an auto-thread (managed via `/sudo → Settings → Auto Threads`) |
 | `user_profiles` | User display names, birthdays (with opt-out flags), staff fields (sudo-edits any field; `/profile` self-edits a subset) |
 | `staff_approvals` | Pending staff role approval queue (future) |
+
+### Staff role mapping
+
+The 7 staff roles (Tier 1 / Tier 2 / Tier 3 / Help Desk / Onsites / Security / Leadership) are stored as `bot_settings` keys (`staff.role.tier_1`, …, `staff.role.leadership`) mapping role name → Discord role ID. Manage via `/sudo → Settings → Staff Roles`:
+
+- **Provision & link** — idempotent: creates any missing Discord role (hoisted, no color, no perms), links by name into `bot_settings`, then bumps the 7 roles' positions to one above the highest game role's position.
+- **Clear links** — removes the linked IDs from `bot_settings` (Discord roles untouched).
 | `games` | Game definitions for role/channel management (future) |
 | `user_game_prefs` | Per-user game view/ping preferences (future) |
 

@@ -16,6 +16,7 @@
 import {
   type ButtonInteraction,
   type ChannelSelectMenuInteraction,
+  type Guild,
   type ModalSubmitInteraction,
   type StringSelectMenuInteraction,
   type UserSelectMenuInteraction,
@@ -35,8 +36,12 @@ import {
   UserSelectMenuBuilder,
   type MessageActionRowComponentBuilder,
 } from 'discord.js'
+import { isNotNull, or } from 'drizzle-orm'
+import { db } from '../db/client'
+import { games } from '../db/schema'
 import { env } from '../config/env'
 import { sep } from '../utils/cv2'
+import { logger } from '../services/logger'
 import { requireSudo } from '../services/voice/permissions'
 import {
   addAutoThreadChannel,
@@ -96,6 +101,26 @@ const NUMERIC_SETTINGS: NumericSettingDef[] = [
   { key: 'voice.cleanup_delay_ms', label: 'Cleanup delay (ms)', description: 'Empty auto channels are deleted after this many ms', envFallback: env.VOICE_CLEANUP_DELAY_MS, min: 0, max: 600000 },
 ]
 
+// Staff roles — granted on /staff request approval. Order in this list is the
+// hierarchy order: first entry sits just above the highest game role; last entry
+// (Leadership) ends up on top.
+interface StaffRoleDef {
+  key: string
+  label: string
+  /** Discord role name to match by / create with. */
+  name: string
+}
+
+const STAFF_ROLE_DEFS: StaffRoleDef[] = [
+  { key: 'staff.role.tier_1',     label: 'Tier 1',     name: 'Tier 1' },
+  { key: 'staff.role.tier_2',     label: 'Tier 2',     name: 'Tier 2' },
+  { key: 'staff.role.tier_3',     label: 'Tier 3',     name: 'Tier 3' },
+  { key: 'staff.role.help_desk',  label: 'Help Desk',  name: 'Help Desk' },
+  { key: 'staff.role.onsites',    label: 'Onsites',    name: 'Onsites' },
+  { key: 'staff.role.security',   label: 'Security',   name: 'Security' },
+  { key: 'staff.role.leadership', label: 'Leadership', name: 'Leadership' },
+]
+
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
@@ -144,6 +169,7 @@ function renderHome() {
   )
   const row2 = new ActionRowBuilder<MessageActionRowComponentBuilder>().addComponents(
     new ButtonBuilder().setCustomId('sudo:set:nav:auto_threads').setLabel('Auto Threads').setEmoji('🧵').setStyle(ButtonStyle.Primary),
+    new ButtonBuilder().setCustomId('sudo:set:nav:staff_roles').setLabel('Staff Roles').setEmoji('🛡️').setStyle(ButtonStyle.Primary),
     new ButtonBuilder().setCustomId('sudo:set:nav:games').setLabel('Games').setEmoji('🎮').setStyle(ButtonStyle.Secondary),
     new ButtonBuilder().setCustomId('sudo:set:nav:profiles').setLabel('User Profiles').setEmoji('👤').setStyle(ButtonStyle.Secondary),
   )
@@ -435,6 +461,123 @@ function renderAutoThreads() {
   return { flags: MessageFlags.IsComponentsV2 as number, components }
 }
 
+/**
+ * Render the Staff Roles sub-panel. For each of the 7 slots, show:
+ *   ✅ linked + present in Discord
+ *   ⚠️ linked but the role no longer exists in Discord (stale)
+ *   🔗 unlinked, but a Discord role with the matching name exists
+ *   ❌ unlinked + no matching role in Discord
+ */
+function renderStaffRoles(guild: Guild) {
+  const lines: string[] = ['### 🛡️ Staff Roles']
+  lines.push('_Granted on `/staff request` approval. **Provision** auto-creates anything missing,_')
+  lines.push('_links by name, and bumps the 7 roles above the highest game role._\n')
+
+  for (const def of STAFF_ROLE_DEFS) {
+    const id = getSetting(def.key)
+    if (id) {
+      const role = guild.roles.cache.get(id)
+      if (role) lines.push(`✅ **${def.label}** — <@&${role.id}>`)
+      else      lines.push(`⚠️ **${def.label}** — id \`${id}\` no longer exists in Discord`)
+    } else {
+      const byName = guild.roles.cache.find(r => r.name === def.name && !r.managed)
+      if (byName) lines.push(`🔗 **${def.label}** — exists as <@&${byName.id}> but **not linked**`)
+      else        lines.push(`❌ **${def.label}** — missing in Discord`)
+    }
+  }
+
+  const container = new ContainerBuilder()
+    .setAccentColor(0xed4245)
+    .addTextDisplayComponents(new TextDisplayBuilder().setContent(lines.join('\n')))
+
+  const components: any[] = [container]
+  components.push(
+    new ActionRowBuilder<MessageActionRowComponentBuilder>().addComponents(
+      new ButtonBuilder().setCustomId('sudo:set:staff_roles:provision').setLabel('Provision & link').setEmoji('🛠').setStyle(ButtonStyle.Primary),
+      new ButtonBuilder().setCustomId('sudo:set:staff_roles:clear').setLabel('Clear links').setEmoji('♻️').setStyle(ButtonStyle.Secondary),
+      new ButtonBuilder().setCustomId('sudo:set:home').setLabel('Back').setStyle(ButtonStyle.Secondary),
+    )
+  )
+  return { flags: MessageFlags.IsComponentsV2 as number, components }
+}
+
+interface ProvisionResult {
+  created: string[]
+  linked: string[]
+  alreadyOk: string[]
+  errors: string[]
+}
+
+async function provisionStaffRoles(guild: Guild, byUserId: string): Promise<ProvisionResult> {
+  const result: ProvisionResult = { created: [], linked: [], alreadyOk: [], errors: [] }
+
+  // 1. Resolve the highest existing game role position so we know where to bump to.
+  const gameRoleRows = await db.select({ roleId: games.roleId, pingRoleId: games.pingRoleId })
+    .from(games)
+    .where(or(isNotNull(games.roleId), isNotNull(games.pingRoleId)))
+  const gameRoleIds = new Set<string>()
+  for (const r of gameRoleRows) {
+    if (r.roleId) gameRoleIds.add(r.roleId)
+    if (r.pingRoleId) gameRoleIds.add(r.pingRoleId)
+  }
+  let basePosition = 0
+  for (const id of gameRoleIds) {
+    const role = guild.roles.cache.get(id)
+    if (role && role.position > basePosition) basePosition = role.position
+  }
+
+  // 2. For each slot: prefer the already-linked role, then a name match, else create.
+  const resolvedIds: Record<string, string> = {}
+  for (const def of STAFF_ROLE_DEFS) {
+    const linkedId = getSetting(def.key)
+    if (linkedId && guild.roles.cache.has(linkedId)) {
+      resolvedIds[def.key] = linkedId
+      result.alreadyOk.push(def.label)
+      continue
+    }
+    const byName = guild.roles.cache.find(r => r.name === def.name && !r.managed)
+    if (byName) {
+      await setSetting(def.key, byName.id, byUserId)
+      resolvedIds[def.key] = byName.id
+      result.linked.push(def.label)
+      continue
+    }
+    try {
+      const created = await guild.roles.create({
+        name: def.name,
+        hoist: true,
+        mentionable: false,
+        permissions: [],
+        reason: `staff role provisioning by ${byUserId}`,
+      })
+      await setSetting(def.key, created.id, byUserId)
+      resolvedIds[def.key] = created.id
+      result.created.push(def.label)
+    } catch (err) {
+      logger.warn(`Failed to create staff role ${def.name}:`, err)
+      result.errors.push(`${def.label}: ${(err as Error).message}`)
+    }
+  }
+
+  // 3. Bulk-set positions: each slot one above the previous, starting at base+1.
+  const positions = STAFF_ROLE_DEFS
+    .map((def, idx) => {
+      const id = resolvedIds[def.key]
+      return id ? { role: id, position: basePosition + 1 + idx } : null
+    })
+    .filter((p): p is { role: string; position: number } => p !== null)
+  if (positions.length > 0) {
+    try {
+      await guild.roles.setPositions(positions)
+    } catch (err) {
+      logger.warn('Failed to setPositions for staff roles:', err)
+      result.errors.push(`reposition: ${(err as Error).message}`)
+    }
+  }
+
+  return result
+}
+
 async function renderGames(guildId: string) {
   const { renderCatalogList } = await import('./gamesEditor')
   return renderCatalogList(guildId)
@@ -488,6 +631,8 @@ export async function handleSettingsButton(interaction: ButtonInteraction): Prom
       await interaction.update(renderHubs() as any)
     } else if (category === 'auto_threads') {
       await interaction.update(renderAutoThreads() as any)
+    } else if (category === 'staff_roles') {
+      await interaction.update(renderStaffRoles(interaction.guild!) as any)
     } else if (category === 'games') {
       await interaction.update((await renderGames(interaction.guildId!)) as any)
     } else if (category === 'profiles') {
@@ -495,6 +640,27 @@ export async function handleSettingsButton(interaction: ButtonInteraction): Prom
     } else {
       await interaction.reply({ content: `Unknown category: ${category}`, ephemeral: true })
     }
+    return
+  }
+
+  // sudo:set:staff_roles:provision — create-if-missing + link-by-name + reposition
+  if (id === 'sudo:set:staff_roles:provision') {
+    await interaction.deferUpdate()
+    const result = await provisionStaffRoles(interaction.guild!, interaction.user.id)
+    await interaction.editReply(renderStaffRoles(interaction.guild!) as any)
+    const summary: string[] = []
+    if (result.created.length)   summary.push(`Created: ${result.created.join(', ')}`)
+    if (result.linked.length)    summary.push(`Linked existing: ${result.linked.join(', ')}`)
+    if (result.alreadyOk.length) summary.push(`Already OK: ${result.alreadyOk.join(', ')}`)
+    if (result.errors.length)    summary.push(`⚠️ Errors: ${result.errors.join('; ')}`)
+    await interaction.followUp({ content: summary.length ? summary.join('\n') : '_Nothing to do._', flags: MessageFlags.Ephemeral })
+    return
+  }
+
+  // sudo:set:staff_roles:clear — clears the linked IDs (Discord roles untouched)
+  if (id === 'sudo:set:staff_roles:clear') {
+    for (const def of STAFF_ROLE_DEFS) await clearSetting(def.key)
+    await interaction.update(renderStaffRoles(interaction.guild!) as any)
     return
   }
 
