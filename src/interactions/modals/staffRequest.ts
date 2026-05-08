@@ -14,9 +14,17 @@ import { eq } from 'drizzle-orm'
 import { env } from '../../config/env'
 import { logger } from '../../services/logger'
 import { sep } from '../../utils/cv2'
+import { findStaffRoleDefBySlug } from '../../services/staffRoles'
 
 export async function handleStaffRequestModal(interaction: ModalSubmitInteraction): Promise<void> {
-  if (interaction.customId !== 'staff:request') return
+  // customId: staff:request:{slug}
+  if (!interaction.customId.startsWith('staff:request:')) return
+  const slug = interaction.customId.slice('staff:request:'.length)
+  const roleDef = findStaffRoleDefBySlug(slug)
+  if (!roleDef) {
+    await interaction.reply({ content: `❌ Unknown staff role: \`${slug}\``, ephemeral: true })
+    return
+  }
 
   await interaction.deferReply({ ephemeral: true })
 
@@ -28,25 +36,22 @@ export async function handleStaffRequestModal(interaction: ModalSubmitInteractio
   }
 
   const data = {
-    category: interaction.fields.getTextInputValue('category'),
-    department: interaction.fields.getTextInputValue('department') || null,
-    tier: interaction.fields.getTextInputValue('tier') || null,
+    role_key: roleDef.key,
+    role_label: roleDef.label,
     real_name: interaction.fields.getTextInputValue('real_name') || null,
     reason: interaction.fields.getTextInputValue('reason') || null,
   }
 
-  // Insert pending approval row
   const [row] = await db.insert(staffApprovals).values({
     guildId: env.GUILD_ID,
     userId: interaction.user.id,
     requestedData: data,
   }).returning()
 
-  // Build the approval message
-  const fields = Object.entries(data)
-    .filter(([, v]) => v !== null && v !== '')
-    .map(([k, v]) => `**${formatLabel(k)}:** ${v}`)
-    .join('\n')
+  // Build the approval card. role_key is internal — show role_label instead.
+  const detailLines: string[] = [`**Role:** ${data.role_label}`]
+  if (data.real_name) detailLines.push(`**Real / preferred name:** ${data.real_name}`)
+  if (data.reason)    detailLines.push(`**Reason:** ${data.reason}`)
 
   const container = new ContainerBuilder()
     .setAccentColor(0xfee75c)
@@ -55,7 +60,7 @@ export async function handleStaffRequestModal(interaction: ModalSubmitInteractio
     )
     .addSeparatorComponents(sep())
     .addTextDisplayComponents(
-      new TextDisplayBuilder().setContent(fields || '_No details provided._')
+      new TextDisplayBuilder().setContent(detailLines.join('\n'))
     )
 
   const buttons = new ActionRowBuilder<ButtonBuilder>().addComponents(
@@ -71,7 +76,6 @@ export async function handleStaffRequestModal(interaction: ModalSubmitInteractio
       .setStyle(ButtonStyle.Danger),
   )
 
-  // Post to the approval thread, pinging the reviewer
   try {
     const thread = await interaction.client.channels.fetch(env.STAFF_APPROVAL_THREAD_ID) as ThreadChannel | null
     if (!thread || !thread.isThread()) {
@@ -79,11 +83,14 @@ export async function handleStaffRequestModal(interaction: ModalSubmitInteractio
     }
 
     const pingContent = env.STAFF_APPROVAL_PING_USER_ID
-      ? `<@${env.STAFF_APPROVAL_PING_USER_ID}> new staff request`
-      : 'New staff request'
+      ? `<@${env.STAFF_APPROVAL_PING_USER_ID}> new staff request — **${data.role_label}**`
+      : `New staff request — **${data.role_label}**`
 
-    // Components V2 doesn't allow content; send the ping as a separate message
-    await thread.send({ content: pingContent, allowedMentions: { users: env.STAFF_APPROVAL_PING_USER_ID ? [env.STAFF_APPROVAL_PING_USER_ID] : [] } })
+    // Components V2 doesn't allow content; send the ping as a separate message.
+    await thread.send({
+      content: pingContent,
+      allowedMentions: { users: env.STAFF_APPROVAL_PING_USER_ID ? [env.STAFF_APPROVAL_PING_USER_ID] : [] },
+    })
 
     const msg = await thread.send({
       flags: MessageFlags.IsComponentsV2,
@@ -95,17 +102,13 @@ export async function handleStaffRequestModal(interaction: ModalSubmitInteractio
       .where(eq(staffApprovals.id, row.id))
 
     await interaction.editReply({
-      content: '✅ Your staff request has been submitted. An admin will review it shortly.',
+      content: `✅ Your request for **${data.role_label}** has been submitted. An admin will review it shortly.`,
     })
-    logger.info(`Staff request submitted by ${interaction.user.tag} (id=${row.id})`)
+    logger.info(`Staff request submitted by ${interaction.user.tag} (id=${row.id}, role=${roleDef.key})`)
   } catch (err) {
     logger.error('Failed to post staff request:', err)
     await interaction.editReply({
       content: '⚠️ Your request was saved, but I could not post it to the approval thread. An admin will need to check.',
     })
   }
-}
-
-function formatLabel(key: string): string {
-  return key.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase())
 }

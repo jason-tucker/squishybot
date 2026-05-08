@@ -140,10 +140,21 @@ Weekly auto-restart at Tuesday 4 AM via `squishybot-restart.timer`.
 
 ### Staff role mapping
 
-The 7 staff roles (Tier 1 / Tier 2 / Tier 3 / Help Desk / Onsites / Security / Leadership) are stored as `bot_settings` keys (`staff.role.tier_1`, …, `staff.role.leadership`) mapping role name → Discord role ID. Manage via `/sudo → Settings → Staff Roles`:
+The 7 staff roles (Tier 1 / Tier 2 / Tier 3 / Help Desk / Onsites / Security / Leadership) are stored as `bot_settings` keys (`staff.role.tier_1`, …, `staff.role.leadership`) mapping role name → Discord role ID. The canonical registry (key, customId slug, label, Discord role name) lives in `src/services/staffRoles.ts` — both `sudoSettings.ts` and `commands/staff.ts` import from there. Manage via `/sudo → Settings → Staff Roles`:
 
 - **Provision & link** — idempotent: creates any missing Discord role (hoisted, no color, no perms), links by name into `bot_settings`, then bumps the 7 roles' positions to one above the highest game role's position.
 - **Clear links** — removes the linked IDs from `bot_settings` (Discord roles untouched).
+
+### Staff request flow
+
+The "Request Staff Role" button (on `/help` and the Staff Requests help section) goes through:
+
+1. **`open_staff_request`** button → ephemeral CV2 message with a `staff:role_pick` string-select listing the 7 roles by label.
+2. **`staff:role_pick`** select → opens a modal `staff:request:{slug}` with two optional fields (`real_name`, `reason`). Slug is the suffix of the bot_settings key (e.g. `tier_1`, `help_desk`).
+3. **`staff:request:{slug}`** modal submit → inserts a `staff_approvals` row whose `requested_data` JSON is `{ role_key, role_label, real_name, reason }`, then posts the approval card in the staff approvals thread.
+4. **`staff:approve:{id}`** button → updates status, looks up `role_key` → `getSetting()` → role ID, fetches the requester as a member, calls `member.roles.add()`. The grant outcome (granted / already had / unlinked / Discord error) is appended to the approval card and DM'd to the requester.
+
+Legacy approval rows (with the old free-text `category` / `department` / `tier` fields and no `role_key`) still render and DM correctly, but the role grant is skipped — the reviewer adds the role manually.
 | `games` | Game definitions for role/channel management (future) |
 | `user_game_prefs` | Per-user game view/ping preferences (future) |
 
@@ -159,6 +170,12 @@ Actions: `delete`, `delete_confirm`, `rename`, `rename_submit`, `lock`, `unlock`
 - `report:submit` — modal submission
 - `report_approve_notice:{sessionKey}` / `report_approve_silent:{sessionKey}` — file the issue (with/without DMing reporter)
 - `report_reject_notice:{sessionKey}` / `report_reject_silent:{sessionKey}` — drop the session (with/without DMing reporter)
+
+Staff requests use:
+- `open_staff_request` — entry-point button (on `/help`, `/squishy`, etc.)
+- `staff:role_pick` — string-select menu listing the 7 roles
+- `staff:request:{slug}` — modal submission carrying the picked role's slug
+- `staff:approve:{approvalId}` / `staff:deny:{approvalId}` — review buttons in the approval thread
 
 ---
 

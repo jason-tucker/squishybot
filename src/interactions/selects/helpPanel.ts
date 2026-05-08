@@ -103,13 +103,14 @@ export async function handleHelpPanelSelect(interaction: StringSelectMenuInterac
       .addSeparatorComponents(sep())
       .addTextDisplayComponents(new TextDisplayBuilder().setContent(
         'Want to join the server staff team? Submit a request and an admin will review it.\n\n' +
-        '**What you\'ll fill out:**\n' +
-        '- Category (ITSRI Staff, Friend of ITSRI, etc.)\n' +
-        '- Department (Help Desk, Sales, Leadership, etc.)\n' +
-        '- Tier (Tier 1 / 2 / 3 / N/A)\n' +
-        '- Your real or preferred name\n' +
-        '- A short reason for your request\n\n' +
-        'Your request goes to an admin for approval. You\'ll get a DM when it\'s reviewed.'
+        '**How it works:**\n' +
+        '1. Click **Submit Request** below — you get an ephemeral picker listing the 7 staff roles ' +
+        '(Tier 1 / Tier 2 / Tier 3 / Help Desk / Onsites / Security / Leadership).\n' +
+        '2. Pick the role you want — a small form pops up for your real / preferred name and a ' +
+        'short reason. Both are optional.\n' +
+        '3. Submit — an admin gets pinged in the staff approvals thread.\n' +
+        '4. On **Approve**, the bot adds the role to you automatically and DMs you. On **Deny**, ' +
+        'you also get a DM.'
       ))
 
     const row = new ActionRowBuilder<ButtonBuilder>().addComponents(

@@ -57,6 +57,7 @@ import {
   setSetting,
   unregisterHubChannel,
 } from '../services/settings'
+import { STAFF_ROLE_DEFS } from '../services/staffRoles'
 
 // ---------------------------------------------------------------------------
 // Setting key registry — adding a new setting is mostly just adding a row here
@@ -99,26 +100,6 @@ interface NumericSettingDef {
 
 const NUMERIC_SETTINGS: NumericSettingDef[] = [
   { key: 'voice.cleanup_delay_ms', label: 'Cleanup delay (ms)', description: 'Empty auto channels are deleted after this many ms', envFallback: env.VOICE_CLEANUP_DELAY_MS, min: 0, max: 600000 },
-]
-
-// Staff roles — granted on /staff request approval. Order in this list is the
-// hierarchy order: first entry sits just above the highest game role; last entry
-// (Leadership) ends up on top.
-interface StaffRoleDef {
-  key: string
-  label: string
-  /** Discord role name to match by / create with. */
-  name: string
-}
-
-const STAFF_ROLE_DEFS: StaffRoleDef[] = [
-  { key: 'staff.role.tier_1',     label: 'Tier 1',     name: 'Tier 1' },
-  { key: 'staff.role.tier_2',     label: 'Tier 2',     name: 'Tier 2' },
-  { key: 'staff.role.tier_3',     label: 'Tier 3',     name: 'Tier 3' },
-  { key: 'staff.role.help_desk',  label: 'Help Desk',  name: 'Help Desk' },
-  { key: 'staff.role.onsites',    label: 'Onsites',    name: 'Onsites' },
-  { key: 'staff.role.security',   label: 'Security',   name: 'Security' },
-  { key: 'staff.role.leadership', label: 'Leadership', name: 'Leadership' },
 ]
 
 // ---------------------------------------------------------------------------

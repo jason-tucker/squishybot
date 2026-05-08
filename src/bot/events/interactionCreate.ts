@@ -67,9 +67,9 @@ export function registerInteractionCreate(client: Client) {
           const { handleSettingsGamesButton } = await import('../../commands/settings')
           await handleSettingsGamesButton(interaction as ButtonInteraction)
         } else if (id === 'open_staff_request') {
-          const { showStaffRequestModal } = await import('../../commands/staff')
-          await showStaffRequestModal(interaction as ButtonInteraction)
-        } else if (id.startsWith('staff:')) {
+          const { showStaffRolePicker } = await import('../../commands/staff')
+          await showStaffRolePicker(interaction as ButtonInteraction)
+        } else if (id.startsWith('staff:approve:') || id.startsWith('staff:deny:')) {
           const { handleStaffApprovalButton } = await import('../../interactions/buttons/staffApproval')
           await handleStaffApprovalButton(interaction as ButtonInteraction)
         } else if (id.startsWith('sudo_user:')) {
@@ -169,6 +169,9 @@ export function registerInteractionCreate(client: Client) {
         } else if (id === 'help:section') {
           const { handleHelpPanelSelect } = await import('../../interactions/selects/helpPanel')
           await handleHelpPanelSelect(interaction as StringSelectMenuInteraction)
+        } else if (id === 'staff:role_pick') {
+          const { handleStaffRolePickSelect } = await import('../../commands/staff')
+          await handleStaffRolePickSelect(interaction as StringSelectMenuInteraction)
         } else if (id === 'sudo:set:removeuser' || id === 'sudo:set:reset_channel' || id === 'sudo:set:autothread:remove' || id === 'sudo:set:hub:remove') {
           const { handleSettingsStringSelect } = await import('../../interactions/sudoSettings')
           await handleSettingsStringSelect(interaction as StringSelectMenuInteraction)
@@ -185,7 +188,7 @@ export function registerInteractionCreate(client: Client) {
         if (isVcCustomId(id)) {
           const { handleVoiceRenameModal } = await import('../../interactions/modals/voiceRename')
           await handleVoiceRenameModal(interaction as ModalSubmitInteraction)
-        } else if (id === 'staff:request') {
+        } else if (id.startsWith('staff:request:')) {
           const { handleStaffRequestModal } = await import('../../interactions/modals/staffRequest')
           await handleStaffRequestModal(interaction as ModalSubmitInteraction)
         } else if (id === 'report:submit') {
