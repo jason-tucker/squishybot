@@ -6,6 +6,8 @@ import { initPresence } from '../../services/presence'
 import { env } from '../../config/env'
 import { loadSettings } from '../../services/settings'
 import { loadGames } from '../../services/games'
+import { loadSocialFeeds } from '../../services/socialFeeds'
+import { startSocialPoller } from '../../services/social/poller'
 import { startBirthdayScheduler } from '../../services/birthdayScheduler'
 
 export function registerReadyEvent(client: Client) {
@@ -14,12 +16,14 @@ export function registerReadyEvent(client: Client) {
     initPresence(c)
     logger.info(`Logged in as ${c.user.tag}`)
     startHealthPush()
-    // Load runtime settings + sudo-user overrides + game catalog into caches.
+    // Load runtime settings + sudo-user overrides + game catalog + social feeds into caches.
     await Promise.all([
       loadSettings().catch(err => logger.error('Failed to load settings on startup', err)),
       loadGames().catch(err => logger.error('Failed to load games on startup', err)),
+      loadSocialFeeds().catch(err => logger.error('Failed to load social feeds on startup', err)),
     ])
     startBirthdayScheduler(c)
+    startSocialPoller(c)
 
     const guild = c.guilds.cache.get(env.GUILD_ID)
     const guildName = guild?.name ?? '(not a member)'

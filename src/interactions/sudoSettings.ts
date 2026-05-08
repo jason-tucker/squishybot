@@ -151,6 +151,7 @@ function renderHome() {
   const row2 = new ActionRowBuilder<MessageActionRowComponentBuilder>().addComponents(
     new ButtonBuilder().setCustomId('sudo:set:nav:auto_threads').setLabel('Auto Threads').setEmoji('🧵').setStyle(ButtonStyle.Primary),
     new ButtonBuilder().setCustomId('sudo:set:nav:staff_roles').setLabel('Staff Roles').setEmoji('🛡️').setStyle(ButtonStyle.Primary),
+    new ButtonBuilder().setCustomId('sudo:set:nav:socials').setLabel('Socials').setEmoji('📡').setStyle(ButtonStyle.Primary),
     new ButtonBuilder().setCustomId('sudo:set:nav:games').setLabel('Games').setEmoji('🎮').setStyle(ButtonStyle.Secondary),
     new ButtonBuilder().setCustomId('sudo:set:nav:profiles').setLabel('User Profiles').setEmoji('👤').setStyle(ButtonStyle.Secondary),
   )
@@ -564,6 +565,126 @@ async function renderGames(guildId: string) {
   return renderCatalogList(guildId)
 }
 
+// ---------------------------------------------------------------------------
+// Socials — RSS-driven feed → channel auto-poster
+// ---------------------------------------------------------------------------
+
+const SOCIAL_DEFAULT_CHANNEL_ID = '1121170598417154110'
+
+async function renderSocials() {
+  const { listSocialFeeds } = await import('../services/socialFeeds')
+  const feeds = listSocialFeeds()
+
+  const lines: string[] = ['### 📡 Socials']
+  lines.push('_Polls each enabled RSS feed every 30 min and reposts new items into the configured channel._')
+  lines.push('_Use a free aggregator like rss.app to generate RSS URLs for Instagram / X / YouTube / etc. profiles._\n')
+  if (feeds.length === 0) {
+    lines.push(`_No feeds yet. Click **Add Feed** to wire one up. Default post channel is <#${SOCIAL_DEFAULT_CHANNEL_ID}>._`)
+  } else {
+    for (const f of feeds) {
+      const enabled = f.enabled ? '✅' : '⏸️'
+      const errMark = f.lastError ? ' · ⚠️' : ''
+      const polled = f.lastPolledAt ? ` · last polled <t:${Math.floor(f.lastPolledAt.getTime() / 1000)}:R>` : ''
+      lines.push(`${enabled} **${f.label}** → <#${f.channelId}>${polled}${errMark}`)
+    }
+  }
+
+  const container = new ContainerBuilder()
+    .setAccentColor(0x5865f2)
+    .addTextDisplayComponents(new TextDisplayBuilder().setContent(lines.join('\n')))
+
+  const components: any[] = [container]
+
+  components.push(
+    new ActionRowBuilder<MessageActionRowComponentBuilder>().addComponents(
+      new ButtonBuilder().setCustomId('sudo:set:social:add').setLabel('Add Feed').setEmoji('➕').setStyle(ButtonStyle.Success),
+      new ButtonBuilder().setCustomId('sudo:set:home').setLabel('Back').setStyle(ButtonStyle.Secondary),
+    )
+  )
+
+  if (feeds.length > 0) {
+    const opts = feeds.slice(0, 25).map(f => ({
+      label: f.label.slice(0, 100),
+      value: f.id,
+      description: f.sourceUrl.slice(0, 100),
+    }))
+    components.push(
+      new ActionRowBuilder<MessageActionRowComponentBuilder>().addComponents(
+        new StringSelectMenuBuilder()
+          .setCustomId('sudo:set:social:pick')
+          .setPlaceholder('Pick a feed to manage…')
+          .addOptions(opts)
+      )
+    )
+  }
+
+  return { flags: MessageFlags.IsComponentsV2 as number, components }
+}
+
+async function renderSocialDetail(feedId: string) {
+  const { getSocialFeed } = await import('../services/socialFeeds')
+  const feed = getSocialFeed(feedId)
+  if (!feed) return renderSocials()
+
+  const lines: string[] = [`### 📡 ${feed.label}`]
+  lines.push(`**RSS URL:** \`${feed.sourceUrl}\``)
+  lines.push(`**Channel:** <#${feed.channelId}>`)
+  lines.push(`**Status:** ${feed.enabled ? '✅ Enabled' : '⏸️ Disabled'}`)
+  if (feed.lastPolledAt) lines.push(`**Last polled:** <t:${Math.floor(feed.lastPolledAt.getTime() / 1000)}:R>`)
+  if (feed.lastSeenId)   lines.push(`**Last item GUID seen:** \`${feed.lastSeenId.slice(0, 60)}${feed.lastSeenId.length > 60 ? '…' : ''}\``)
+  if (feed.lastError)    lines.push(`**Last error:** \`${feed.lastError.slice(0, 200)}\``)
+
+  const container = new ContainerBuilder()
+    .setAccentColor(feed.lastError ? 0xed4245 : 0x57f287)
+    .addTextDisplayComponents(new TextDisplayBuilder().setContent(lines.join('\n')))
+
+  const actionRow = new ActionRowBuilder<MessageActionRowComponentBuilder>().addComponents(
+    new ButtonBuilder()
+      .setCustomId(`sudo:set:social:toggle:${feed.id}`)
+      .setLabel(feed.enabled ? 'Enabled' : 'Disabled')
+      .setEmoji(feed.enabled ? '✅' : '⏸️')
+      .setStyle(feed.enabled ? ButtonStyle.Success : ButtonStyle.Secondary),
+    new ButtonBuilder()
+      .setCustomId(`sudo:set:social:test:${feed.id}`)
+      .setLabel('Test (post latest now)')
+      .setEmoji('🧪')
+      .setStyle(ButtonStyle.Primary),
+    new ButtonBuilder()
+      .setCustomId(`sudo:set:social:remove:${feed.id}`)
+      .setLabel('Remove')
+      .setEmoji('🗑️')
+      .setStyle(ButtonStyle.Danger),
+  )
+  const navRow = new ActionRowBuilder<MessageActionRowComponentBuilder>().addComponents(
+    new ButtonBuilder().setCustomId('sudo:set:nav:socials').setLabel('Back to Socials').setStyle(ButtonStyle.Secondary),
+  )
+
+  return { flags: MessageFlags.IsComponentsV2 as number, components: [container, actionRow, navRow] }
+}
+
+function buildSocialAddModal(): ModalBuilder {
+  return new ModalBuilder()
+    .setCustomId('sudo:set:social:add_submit')
+    .setTitle('Add Social Feed')
+    .addComponents(
+      new ActionRowBuilder<TextInputBuilder>().addComponents(
+        new TextInputBuilder().setCustomId('label').setLabel('Label')
+          .setStyle(TextInputStyle.Short).setRequired(true).setMaxLength(80)
+          .setPlaceholder('e.g. ITSupportRI Instagram')
+      ),
+      new ActionRowBuilder<TextInputBuilder>().addComponents(
+        new TextInputBuilder().setCustomId('url').setLabel('RSS URL')
+          .setStyle(TextInputStyle.Short).setRequired(true).setMaxLength(500)
+          .setPlaceholder('https://rss.app/feeds/...')
+      ),
+      new ActionRowBuilder<TextInputBuilder>().addComponents(
+        new TextInputBuilder().setCustomId('channel_id').setLabel('Channel ID (override default)')
+          .setStyle(TextInputStyle.Short).setRequired(false).setMaxLength(30)
+          .setValue(SOCIAL_DEFAULT_CHANNEL_ID)
+      ),
+    )
+}
+
 async function renderProfiles(guildId: string) {
   const { renderSudoUserPicker } = await import('./profileEditor')
   return renderSudoUserPicker(guildId)
@@ -614,6 +735,8 @@ export async function handleSettingsButton(interaction: ButtonInteraction): Prom
       await interaction.update(renderAutoThreads() as any)
     } else if (category === 'staff_roles') {
       await interaction.update(renderStaffRoles(interaction.guild!) as any)
+    } else if (category === 'socials') {
+      await interaction.update((await renderSocials()) as any)
     } else if (category === 'games') {
       await interaction.update((await renderGames(interaction.guildId!)) as any)
     } else if (category === 'profiles') {
@@ -642,6 +765,64 @@ export async function handleSettingsButton(interaction: ButtonInteraction): Prom
   if (id === 'sudo:set:staff_roles:clear') {
     for (const def of STAFF_ROLE_DEFS) await clearSetting(def.key)
     await interaction.update(renderStaffRoles(interaction.guild!) as any)
+    return
+  }
+
+  // sudo:set:social:add — open the add-feed modal
+  if (id === 'sudo:set:social:add') {
+    await interaction.showModal(buildSocialAddModal())
+    return
+  }
+
+  // sudo:set:social:toggle:{id} — flip enabled
+  if (id.startsWith('sudo:set:social:toggle:')) {
+    const feedId = id.slice('sudo:set:social:toggle:'.length)
+    const { getSocialFeed, setSocialFeedEnabled } = await import('../services/socialFeeds')
+    const feed = getSocialFeed(feedId)
+    if (feed) await setSocialFeedEnabled(feedId, !feed.enabled)
+    await interaction.update((await renderSocialDetail(feedId)) as any)
+    return
+  }
+
+  // sudo:set:social:test:{id} — fetch + post latest item without marking seen
+  if (id.startsWith('sudo:set:social:test:')) {
+    const feedId = id.slice('sudo:set:social:test:'.length)
+    await interaction.deferUpdate()
+    const { getSocialFeed } = await import('../services/socialFeeds')
+    const { fetchAndParse, buildSocialPostPayload } = await import('../services/social/poller')
+    const feed = getSocialFeed(feedId)
+    let note = ''
+    if (!feed) {
+      note = '⚠️ Feed not found.'
+    } else {
+      try {
+        const items = await fetchAndParse(feed.sourceUrl)
+        if (items.length === 0) {
+          note = '⚠️ Feed parsed but contained no items.'
+        } else {
+          const channel = await interaction.client.channels.fetch(feed.channelId).catch(() => null)
+          if (!channel || !channel.isTextBased() || channel.isDMBased()) {
+            note = `⚠️ Channel <#${feed.channelId}> unavailable.`
+          } else {
+            await channel.send(buildSocialPostPayload(feed, items[0]) as any)
+            note = `✅ Posted latest item to <#${feed.channelId}>.`
+          }
+        }
+      } catch (err) {
+        note = `⚠️ ${(err as Error).message}`
+      }
+    }
+    await interaction.editReply((await renderSocialDetail(feedId)) as any)
+    await interaction.followUp({ content: note, flags: MessageFlags.Ephemeral }).catch(() => {})
+    return
+  }
+
+  // sudo:set:social:remove:{id}
+  if (id.startsWith('sudo:set:social:remove:')) {
+    const feedId = id.slice('sudo:set:social:remove:'.length)
+    const { removeSocialFeed } = await import('../services/socialFeeds')
+    await removeSocialFeed(feedId)
+    await interaction.update((await renderSocials()) as any)
     return
   }
 
@@ -794,10 +975,65 @@ export async function handleSettingsStringSelect(interaction: StringSelectMenuIn
     await interaction.update(renderHubs() as any)
     return
   }
+  if (id === 'sudo:set:social:pick') {
+    const feedId = interaction.values[0]
+    if (feedId) await interaction.update((await renderSocialDetail(feedId)) as any)
+    return
+  }
 }
 
 export async function handleSettingsModalSubmit(interaction: ModalSubmitInteraction): Promise<void> {
   if (!await requireSudo(interaction)) return
+
+  // Social feed Add Feed modal — separate code path (not a generic key/value setting).
+  if (interaction.customId === 'sudo:set:social:add_submit') {
+    const label = interaction.fields.getTextInputValue('label').trim()
+    const url   = interaction.fields.getTextInputValue('url').trim()
+    const channelInput = interaction.fields.getTextInputValue('channel_id').trim()
+    const channelId = channelInput || SOCIAL_DEFAULT_CHANNEL_ID
+
+    if (!/^https?:\/\//i.test(url)) {
+      await interaction.reply({ content: '❌ URL must start with http:// or https://', ephemeral: true })
+      return
+    }
+    if (!/^\d{15,25}$/.test(channelId)) {
+      await interaction.reply({ content: `❌ Channel ID must be a Discord snowflake (numeric). Got: \`${channelId}\``, ephemeral: true })
+      return
+    }
+
+    const { addSocialFeed, markSocialFeedSeen } = await import('../services/socialFeeds')
+    const { fetchAndParse } = await import('../services/social/poller')
+
+    let seedGuid: string | null = null
+    let seedNote = '_(no items yet — first poll will seed the dedupe key)_'
+    try {
+      const items = await fetchAndParse(url)
+      if (items.length > 0) {
+        seedGuid = items[0].guid
+        seedNote = `_(seeded from \`${seedGuid.slice(0, 40)}${seedGuid.length > 40 ? '…' : ''}\` — backlog won't be replayed)_`
+      }
+    } catch (err) {
+      seedNote = `_(initial fetch failed: ${(err as Error).message} — feed saved anyway, will retry on next poll)_`
+    }
+
+    const feed = await addSocialFeed({
+      guildId: interaction.guildId!,
+      label,
+      sourceUrl: url,
+      channelId,
+      createdByDiscordId: interaction.user.id,
+      seedLastSeenId: seedGuid,
+    })
+    if (seedGuid) await markSocialFeedSeen(feed.id, seedGuid).catch(() => {})
+
+    if (interaction.isFromMessage()) {
+      await interaction.update((await renderSocials()) as any)
+    } else {
+      await interaction.reply({ content: `✅ Added **${label}** → <#${channelId}>. ${seedNote}`, ephemeral: true })
+    }
+    return
+  }
+
   const key = interaction.customId.slice('sudo:set:save:'.length)
   const raw = interaction.fields.getTextInputValue('value').trim()
   const numDef = NUMERIC_SETTINGS.find(d => d.key === key)

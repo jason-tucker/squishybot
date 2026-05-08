@@ -135,6 +135,7 @@ Weekly auto-restart at Tuesday 4 AM via `squishybot-restart.timer`.
 | `bot_settings` | Runtime key/value config overrides edited via `/sudo → Settings` |
 | `sudo_users` | Members granted sudo at runtime (beyond the immutable `SUDO_USER_IDS` env list) |
 | `auto_thread_channels` | Channels where every non-bot message gets an auto-thread (managed via `/sudo → Settings → Auto Threads`) |
+| `social_feeds` | RSS-driven social feeds the poller reposts into a Discord channel. Managed via `/sudo → Settings → Socials`. Polled every 30 min (override via `bot_settings.social.poll_interval_ms`). Dedup keyed by RSS `<guid>` stored in `last_seen_id`; first poll seeds without posting so backlog isn't replayed. |
 | `user_profiles` | User display names, birthdays (with opt-out flags), staff fields (sudo-edits any field; `/profile` self-edits a subset) |
 | `staff_approvals` | Pending staff role approval queue (future) |
 
