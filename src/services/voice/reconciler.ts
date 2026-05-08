@@ -74,6 +74,11 @@ export async function runReconciler(client: Client): Promise<ReconcilerResult> {
       await Promise.all(vc.members.map(m => backfillMember(record.voiceChannelId, m.id)))
     }
 
+    // Hoist the text-channel fetch — both the auto-rename retry below AND
+    // the permission sync need it, and fetching twice was wasted work on
+    // every reconcile pass (one fetch per record × 2 = 2N HTTP calls).
+    const tc = await guild.channels.fetch(record.textChannelId).catch(() => null)
+
     // Retroactively auto-rename when the channel is opted into auto-naming
     // and any current member is playing something. Covers the gap where
     // presenceUpdate events between bot restarts were lost.
@@ -84,14 +89,12 @@ export async function runReconciler(client: Client): Promise<ReconcilerResult> {
       if (newName && vc.name !== newName) {
         await vc.setName(newName).catch(() => {})
         const textName = newName.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'voice-chat'
-        const tcRename = await guild.channels.fetch(record.textChannelId).catch(() => null)
-        if (tcRename?.isTextBased()) await (tcRename as any).setName(textName).catch(() => {})
+        if (tc?.isTextBased()) await (tc as any).setName(textName).catch(() => {})
         logger.info(`Reconciler auto-rename: vc=${record.voiceChannelId} → ${newName}`)
       }
     }
 
     // Sync text channel permissions for current members
-    const tc = await guild.channels.fetch(record.textChannelId).catch(() => null)
     if (tc?.isTextBased() && vc.isVoiceBased()) {
       await syncTextChannelPermissions(tc as any, vc as any, record, client.user!.id).catch(() => {})
     }

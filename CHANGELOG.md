@@ -7,6 +7,9 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### Refactor
+- **Reconciler fetches each tracked auto channel's text channel once per pass instead of twice.** The auto-rename retry and the permission sync each did their own `guild.channels.fetch(record.textChannelId)`. Hoisted to one fetch shared between both, halving channel-fetch HTTP calls during reconciler runs (1 per record instead of 2). N records × 1 fetch saved per boot / restart.
+
 ### Changed
 - **Game Night accepts free-form game names — no catalog match required.** The setup modal no longer rejects a game query that doesn't resolve in the catalog (typical for one-off / TBD / itch.io games that don't have their own role+channel). The announcement renders the typed name verbatim. RSVP / ownership / cancel / preview-edit handlers no longer perform a catalog lookup at all. Modal field label updated to make the free-form behavior obvious. Recovered `recoverFromMessage` no longer needs `findGameByNameOrAlias` either.
 - **Bot presence now shows "last used X ago" — refreshed every 5 min, idles after 60 min.** Status text is now `Watching auto voice channels · last used 12m ago`. Updates are throttled to 5-minute intervals (well above Discord's PRESENCE_UPDATE rate limit floor) and coalesce — back-to-back interactions don't spam Discord. Idle threshold bumped from 15 min to 60 min, and the idle status keeps the same "last used X ago" string visible (was empty before).
