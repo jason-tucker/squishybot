@@ -38,9 +38,10 @@ export function setIdle(): void {
   _currentStatus = 'idle'
   // Idle status keeps the "last used X ago" stamp visible so anyone glancing
   // at the bot's profile sees the freshness even when it's gone idle.
+  const name = buildActivityName()
   _client.user.setPresence({
     status: 'idle',
-    activities: [{ name: buildActivityName(), type: ActivityType.Watching }],
+    activities: name ? [{ name, type: ActivityType.Watching }] : [],
   })
   _lastPresenceUpdateAt = Date.now()
 }
@@ -93,16 +94,16 @@ function scheduleOnlineRefresh(): void {
 function pushPresenceNow(status: 'online'): void {
   if (!_client?.user) return
   _lastPresenceUpdateAt = Date.now()
+  const name = buildActivityName()
   _client.user.setPresence({
     status,
-    activities: [{ name: buildActivityName(), type: ActivityType.Watching }],
+    activities: name ? [{ name, type: ActivityType.Watching }] : [],
   })
 }
 
 function buildActivityName(): string {
-  const base = 'auto voice channels'
-  if (!_lastUsedAt) return base
-  return `${base} · last used ${formatRelative(_lastUsedAt)}`
+  if (!_lastUsedAt) return ''
+  return `last used ${formatRelative(_lastUsedAt)}`
 }
 
 function formatRelative(d: Date): string {
