@@ -709,18 +709,22 @@ export async function showSettingsPanel(interaction: StringSelectMenuInteraction
 // ---------------------------------------------------------------------------
 
 export async function handleSettingsButton(interaction: ButtonInteraction): Promise<void> {
-  if (!await requireSudo(interaction)) return
   const id = interaction.customId
 
-  // ── Modal-showing branches FIRST. `showModal()` IS the interaction
-  // response and cannot be combined with deferUpdate. Anything below this
-  // block runs after we ack the interaction with deferUpdate, so it's
-  // immune to the 3-second timeout (we get 15 min to actually edit).
+  // ── Modal-showing branches FIRST and FAST. `showModal()` IS the
+  // interaction response — can't be combined with deferUpdate. We do the
+  // sudo check BEFORE showModal here because there's no defer to back us
+  // up; the gamble is that requireSudo's member.fetch is fast enough on a
+  // cached member, which it is for any sudo who's clicked any other button
+  // recently. Worst-case (cold cache), the modal fails to open and the
+  // user clicks again.
   if (id === 'sudo:set:social:add') {
+    if (!await requireSudo(interaction)) return
     await interaction.showModal(buildSocialAddModal())
     return
   }
   if (id.startsWith('sudo:set:edit_modal:')) {
+    if (!await requireSudo(interaction)) return
     const key = id.slice('sudo:set:edit_modal:'.length)
     const numDef = NUMERIC_SETTINGS.find(d => d.key === key)
     if (!numDef) {
@@ -746,11 +750,16 @@ export async function handleSettingsButton(interaction: ButtonInteraction): Prom
     return
   }
 
-  // Ack the interaction immediately so Discord's 3-second response window
-  // never bites us — the staff_roles branch was hitting 10062 because
-  // member.fetch + render + interaction.update was racing the 3 s deadline.
-  // Once deferred, we can take up to 15 min to actually editReply.
+  // Defer FIRST — before requireSudo. The sudo check does a
+  // `guild.members.fetch()` which can hit the network on a cold cache
+  // (common right after a deploy). If that took >3 s before we acked the
+  // interaction, Discord killed the interaction with 10062 and the bot
+  // looked broken. Now we ack within milliseconds, then take however long
+  // requireSudo + render needs (we have 15 min). On sudo failure, the
+  // helper falls through to followUp instead of reply (it already handles
+  // both branches).
   await interaction.deferUpdate()
+  if (!await requireSudo(interaction)) return
 
   // sudo:set:home
   if (id === 'sudo:set:home') {
