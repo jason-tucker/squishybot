@@ -29,8 +29,8 @@ export async function handleVoiceTemplateSelect(interaction: StringSelectMenuInt
 
   await interaction.deferUpdate()
 
-  const vc = await interaction.guild!.channels.fetch(record.voiceChannelId).catch(() => null)
-  const isVc = vc?.isVoiceBased() ?? false
+  const fetched = await interaction.guild!.channels.fetch(record.voiceChannelId).catch(() => null)
+  const vc = fetched?.isVoiceBased() ? fetched : null
 
   let newName: string
   let autoNameEnabled = true
@@ -50,7 +50,7 @@ export async function handleVoiceTemplateSelect(interaction: StringSelectMenuInt
   } else if ((ALL_TEMPLATES as string[]).includes(choice)) {
     nameTemplate = choice as NameTemplate
     autoNameEnabled = true
-    const computed = isVc ? computeAutoName(vc!, record.ownerUserId, nameTemplate) : null
+    const computed = vc ? computeAutoName(vc, record.ownerUserId, nameTemplate) : null
     // If nobody is playing anything, fall back to the existing fallback_name
     // (or a fresh random name if the row was created before fallback existed).
     newName = computed ?? record.fallbackName ?? randomTechName()
@@ -63,8 +63,8 @@ export async function handleVoiceTemplateSelect(interaction: StringSelectMenuInt
   // Apply name only — never touch userLimit. The user is the only authority on
   // the per-channel user limit; if they want one, they set it via Discord's
   // channel settings UI.
-  if (isVc) {
-    await vc!.edit({ name: newName }).catch(() => {})
+  if (vc) {
+    await vc.edit({ name: newName }).catch(() => {})
   }
   const tc = await interaction.guild!.channels.fetch(record.textChannelId).catch(() => null)
   const textName = newName.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'voice-chat'
