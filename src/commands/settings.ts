@@ -67,6 +67,11 @@ export async function renderSettingsHome(
       .setLabel('Game Prefs')
       .setEmoji('🎮')
       .setStyle(ButtonStyle.Primary),
+    new ButtonBuilder()
+      .setCustomId('settings:staff_role')
+      .setLabel('Staff Role')
+      .setEmoji('🛡️')
+      .setStyle(ButtonStyle.Primary),
   )
 
   return {

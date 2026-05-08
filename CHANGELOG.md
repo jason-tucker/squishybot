@@ -7,6 +7,13 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### Added
+- **`/settings → Staff Role` — self-service staff Discord role management.** New panel listing all 7 staff roles with per-role status (✅ holds / ➕ doesn't hold / 🚫 not linked / ⚠️ linked id missing in Discord). Behavior is gated by sudo:
+  - **Sudo** can grant or remove ANY of the 7 roles on themselves directly — they already have authority, so the request/approval gate is just ceremony for them.
+  - **Non-sudo** can REMOVE any staff role they currently hold (always safe — no privilege gain). To **add** a role they don't have, the panel includes a **Request a Staff Role** button that routes to the existing approval flow (`open_staff_request`).
+
+  customIds: `settings:staff_role` (open panel), `settings:staff_role:add:{slug}` (sudo grant), `settings:staff_role:remove:{slug}` (anyone remove from self).
+
 ## [0.8.2] — 2026-05-08
 
 Cumulative since 0.7.0 — picker-driven staff request flow, naming-only voice templates, social feeds (RSS-driven channel auto-poster), Game Night preview/edit/send + free-form game names, /games sudo "missing setup" warnings, presence "last used X ago", and a sweep of mention / URL / cv2 / dedup hardening across the bot. Held back from 1.0 — that's a deliberate deferred milestone — but this is the most stable release we've cut.

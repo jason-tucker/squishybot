@@ -66,6 +66,15 @@ export function registerInteractionCreate(client: Client) {
         } else if (id === 'settings:games') {
           const { handleSettingsGamesButton } = await import('../../commands/settings')
           await handleSettingsGamesButton(interaction as ButtonInteraction)
+        } else if (id === 'settings:staff_role') {
+          const { handleStaffRoleSelfButton } = await import('../../interactions/staffRoleSelf')
+          await handleStaffRoleSelfButton(interaction as ButtonInteraction)
+        } else if (id.startsWith('settings:staff_role:add:')) {
+          const { handleStaffRoleSelfAdd } = await import('../../interactions/staffRoleSelf')
+          await handleStaffRoleSelfAdd(interaction as ButtonInteraction)
+        } else if (id.startsWith('settings:staff_role:remove:')) {
+          const { handleStaffRoleSelfRemove } = await import('../../interactions/staffRoleSelf')
+          await handleStaffRoleSelfRemove(interaction as ButtonInteraction)
         } else if (id === 'open_staff_request') {
           const { showStaffRolePicker } = await import('../../commands/staff')
           await showStaffRolePicker(interaction as ButtonInteraction)
