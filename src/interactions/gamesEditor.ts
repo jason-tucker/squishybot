@@ -188,12 +188,32 @@ function statusInline(p: ResolvedPref): string {
   return `${view} • ${ping}`
 }
 
-/** Top-level entry — renders the LIST view. Detail is renderPrefsDetail. */
-export async function renderPrefsEditor(guild: Guild, targetUserId: string, mode: PrefsMode) {
-  return renderPrefsList(guild, targetUserId, mode)
+/**
+ * Returns a short "⚠️ missing X, Y" warning when a game's catalog row is
+ * missing one or more of the fields needed for it to actually function:
+ * a view role, a chat channel, or a ping role. Shown to sudo viewers only
+ * (regular members shouldn't be told to ask sudo "to fix" a game inline —
+ * that lives on the dedicated games-catalog screen).
+ */
+function setupWarning(g: Game): string | null {
+  const missing: string[] = []
+  if (!g.roleId)     missing.push('view-role')
+  if (!g.channelId)  missing.push('channel')
+  if (!g.pingRoleId) missing.push('ping-role')
+  return missing.length > 0 ? `⚠️ missing ${missing.join(', ')}` : null
 }
 
-export async function renderPrefsList(guild: Guild, targetUserId: string, mode: PrefsMode) {
+/** Top-level entry — renders the LIST view. Detail is renderPrefsDetail.
+ *  `viewerIsSudo` controls the inline "needs setup" warnings; defaults to
+ *  `mode === 'sudo'` (the sudo-acting-on-behalf path) but can be overridden
+ *  by /games (mode='self' on a sudo user) so a sudo running /games on
+ *  themselves still sees the warnings. */
+export async function renderPrefsEditor(guild: Guild, targetUserId: string, mode: PrefsMode, viewerIsSudo?: boolean) {
+  return renderPrefsList(guild, targetUserId, mode, viewerIsSudo)
+}
+
+export async function renderPrefsList(guild: Guild, targetUserId: string, mode: PrefsMode, viewerIsSudo?: boolean) {
+  const showWarnings = viewerIsSudo ?? (mode === 'sudo')
   const member = await guild.members.fetch(targetUserId).catch(() => null)
   const targetName = member?.displayName ?? `<@${targetUserId}>`
   const prefs = await resolvePrefs(guild, member ?? targetUserId)
@@ -212,7 +232,9 @@ export async function renderPrefsList(guild: Guild, targetUserId: string, mode: 
       const v = p.wantsView ? (p.fromRole.view ? '🟢ᴿ' : '🟢') : '⚪'
       const r = p.wantsPing ? (p.fromRole.ping ? '🔔ᴿ' : '🔔') : '⚪'
       const active = p.wantsView || p.wantsPing
-      return `${v} ${r}  ${active ? `**${p.game.name}**` : p.game.name}`
+      const name = active ? `**${p.game.name}**` : p.game.name
+      const warn = showWarnings ? setupWarning(p.game) : null
+      return `${v} ${r}  ${name}${warn ? `  · _${warn}_` : ''}`
     }
     const active = prefs.filter(p => p.wantsView || p.wantsPing)
     const inactive = prefs.filter(p => !p.wantsView && !p.wantsPing)

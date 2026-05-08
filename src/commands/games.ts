@@ -4,6 +4,7 @@ import {
   MessageFlags,
 } from 'discord.js'
 import { renderPrefsEditor } from '../interactions/gamesEditor'
+import { isSudo } from '../services/voice/permissions'
 
 export const data = new SlashCommandBuilder()
   .setName('games')
@@ -12,6 +13,7 @@ export const data = new SlashCommandBuilder()
 
 export async function execute(interaction: ChatInputCommandInteraction): Promise<void> {
   await interaction.deferReply({ ephemeral: true })
-  const payload = await renderPrefsEditor(interaction.guild!, interaction.user.id, 'self')
+  const member = await interaction.guild!.members.fetch(interaction.user.id)
+  const payload = await renderPrefsEditor(interaction.guild!, interaction.user.id, 'self', isSudo(member))
   await interaction.editReply({ ...payload, flags: MessageFlags.IsComponentsV2 } as any)
 }
