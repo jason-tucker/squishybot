@@ -1,10 +1,10 @@
 import type { Client, Presence } from 'discord.js'
-import { ActivityType } from 'discord.js'
 import { db } from '../../db/client'
 import { autoChannels } from '../../db/schema'
 import { eq } from 'drizzle-orm'
 import { env } from '../../config/env'
 import { logger } from '../../services/logger'
+import { computeAutoName } from '../../services/voice/autoNaming'
 
 // Debounce: don't rename more than once per 10 minutes per channel (Discord rate limit)
 const lastRename = new Map<string, number>()
@@ -15,9 +15,14 @@ export function registerPresenceUpdate(client: Client): void {
     if (newPresence.guild?.id !== env.GUILD_ID) return
     if (!newPresence.userId) return
 
-    // Find any auto channel owned by this user
+    // Look up the auto channel the user is currently sitting in (if any).
+    // Tracking by voice-channel rather than ownership lets a non-owner's
+    // game activity influence the name, which is needed for the "(N) Game"
+    // counted-name feature when multiple members are playing the same thing.
+    const memberVcId = newPresence.member?.voice.channelId
+    if (!memberVcId) return
     const [record] = await db.select().from(autoChannels)
-      .where(eq(autoChannels.ownerUserId, newPresence.userId))
+      .where(eq(autoChannels.voiceChannelId, memberVcId))
 
     if (!record) return
     if (!record.autoNameEnabled) return
@@ -32,22 +37,14 @@ export function registerPresenceUpdate(client: Client): void {
     const lastTime = lastRename.get(record.voiceChannelId) ?? 0
     if (Date.now() - lastTime < RENAME_COOLDOWN_MS) return
 
-    const game = newPresence.activities.find(a => a.type === ActivityType.Playing)
-    if (!game) return // only update when a game starts, not when one ends
-
     const guild = client.guilds.cache.get(env.GUILD_ID)
     if (!guild) return
 
     const vc = await guild.channels.fetch(record.voiceChannelId).catch(() => null)
     if (!vc?.isVoiceBased()) return
 
-    let newName: string
-    if (record.nameTemplate === 'counter') {
-      const limit = record.userLimit > 0 ? record.userLimit : 4
-      newName = `${game.name} [${vc.members.size}/${limit}]`
-    } else {
-      newName = game.name
-    }
+    const newName = computeAutoName(vc, record.ownerUserId, record.nameTemplate, record.userLimit)
+    if (!newName) return // nobody playing anything we can name from
 
     // Don't rename if the name didn't actually change
     if (vc.name === newName) return

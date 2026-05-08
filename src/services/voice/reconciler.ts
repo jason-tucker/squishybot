@@ -1,5 +1,5 @@
 import type { Client } from 'discord.js'
-import { ActivityType, ChannelType } from 'discord.js'
+import { ChannelType } from 'discord.js'
 import { db } from '../../db/client'
 import { autoChannels, hubChannels } from '../../db/schema'
 import { eq } from 'drizzle-orm'
@@ -10,6 +10,7 @@ import { postOrUpdateSticky } from './sticky'
 import { syncTextChannelPermissions } from './permissions'
 import { seedHubsFromEnv } from './hubManager'
 import { createAutoChannel } from './autoChannel'
+import { computeAutoName } from './autoNaming'
 import { backfillMember, clearMembers } from './voiceMembers'
 import { logger } from '../logger'
 import { getSetting, unregisterHubChannel, untrackAutoChannelText, updateHubChannelId } from '../settings'
@@ -73,24 +74,18 @@ export async function runReconciler(client: Client): Promise<ReconcilerResult> {
       await Promise.all(vc.members.map(m => backfillMember(record.voiceChannelId, m.id)))
     }
 
-    // Retroactively auto-rename if the owner is playing a game now and the
-    // channel is opted into auto-naming. Covers the gap where presenceUpdate
-    // events between bot restarts were lost.
+    // Retroactively auto-rename when the channel is opted into auto-naming
+    // and any current member is playing something. Covers the gap where
+    // presenceUpdate events between bot restarts were lost.
     if (vc.isVoiceBased() && record.autoNameEnabled
         && (record.nameTemplate === null || record.nameTemplate === 'auto' || record.nameTemplate === 'counter')) {
-      const ownerMember = vc.members.get(record.ownerUserId)
-      const game = ownerMember?.presence?.activities.find(a => a.type === ActivityType.Playing)
-      if (game) {
-        const newName = record.nameTemplate === 'counter'
-          ? `${game.name} [${vc.members.size}/${record.userLimit > 0 ? record.userLimit : 4}]`
-          : game.name
-        if (vc.name !== newName) {
-          await vc.setName(newName).catch(() => {})
-          const textName = newName.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'voice-chat'
-          const tcRename = await guild.channels.fetch(record.textChannelId).catch(() => null)
-          if (tcRename?.isTextBased()) await (tcRename as any).setName(textName).catch(() => {})
-          logger.info(`Reconciler auto-rename: vc=${record.voiceChannelId} → ${newName}`)
-        }
+      const newName = computeAutoName(vc, record.ownerUserId, record.nameTemplate, record.userLimit)
+      if (newName && vc.name !== newName) {
+        await vc.setName(newName).catch(() => {})
+        const textName = newName.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'voice-chat'
+        const tcRename = await guild.channels.fetch(record.textChannelId).catch(() => null)
+        if (tcRename?.isTextBased()) await (tcRename as any).setName(textName).catch(() => {})
+        logger.info(`Reconciler auto-rename: vc=${record.voiceChannelId} → ${newName}`)
       }
     }
 

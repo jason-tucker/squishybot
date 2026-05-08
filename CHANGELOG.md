@@ -12,6 +12,17 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - **`/sudo → Game Night`** — sudo schedules a Game Night via a modal (game name from the catalog, when, optional notes). Bot posts a Components V2 announcement **in the channel `/sudo` was run from** with three RSVP buttons (✅ Joining / 🤔 Might join / ❌ Not joining), two ownership buttons (👍 I own it / 🛒 I don't own it), and a ✖️ Cancel button (host or sudo). Body shows live counts + mention lists per category, including a 🛒 "Need a copy" list. State in-memory keyed by message ID with parse-from-message recovery so live announcements survive restarts.
 
 ### Changed
+- **Toggle buttons now show current state, not the pending action.** Profile birthday-pings / year-visible toggles, voice channel Lock/Hide, and per-game View/Pings buttons now display the *current* state (e.g. `Birthday Pings: Enabled` green / `Birthday Pings: Disabled` red, `Locked` red / `Unlocked` green, `Pings: On` green / `Pings: Off` red). Clicking still toggles. Same convention should be applied to otterbot's portal toggles.
+- **Voice sticky stripped down.** Drops the CV2 container + warning text; just a single non-CV2 silent message with an "Open Panel" button. Channel-deletion warning lives in the control-panel header instead.
+- **Voice panel posted silently** — adds `SuppressNotifications` to the flag set so no notification fires when it's first posted to a fresh auto-channel.
+- **Voice panel "In channel" list now includes each member's current rich-presence game** (e.g. `• @user joined <t:N:R> · 🎮 Overwatch`).
+- **Auto-rename now picks the most-played game across all VC members and prefixes a count when more than one is playing it** (e.g. 3 of 4 members playing Overwatch → `(3) Overwatch`). Shared helper `services/voice/autoNaming.ts` used by `presenceUpdate`, the `Auto`/`Counter` template buttons, and the reconciler. `presenceUpdate` now keys off the changed user's voice channel rather than ownership, so a non-owner's game can flip the channel name.
+- **`/sudo → Manage user → View Staff Record`** now has a Back button returning to the manage panel.
+
+### Fixed
+- **New auto channels weren't getting a control panel posted.** `postOrUpdateControlPanel` was relying on `guild.channels.fetch()` immediately after `guild.channels.create()` — the bot's channel cache hadn't caught up, so the fetch returned a value that failed `.isTextBased()` and the function silently returned. Fixed by passing the freshly-created `TextChannel` object straight through from `createAutoChannel`. Added clearer warn-level logging on every silent-return path.
+
+### Changed
 - **Voice control panel rewritten to be compact + member-aware.** Drops the title block, accent-color sidebar, and instruction text. New layout: `🔊 host @owner · created <t:N:R>` plus an "👥 In channel" list with each member's relative join timestamp (`• @user joined <t:N:R>`). Stays the channel's first/top message; re-renders on every voice-state change so the member list and timestamps stay current. Sticky at the bottom is unchanged.
 
 ### Added

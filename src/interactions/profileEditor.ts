@@ -174,9 +174,9 @@ export async function renderProfileEditor(
     const enabled = (profile as any)[f.field] === true
     toggleRow.addComponents(
       new ButtonBuilder().setCustomId(`profile:toggle:${mode}:${targetUserId}:${f.field}`)
-        .setLabel(`${enabled ? 'Disable' : 'Enable'} — ${f.label}`)
-        .setEmoji(enabled ? '🔴' : '🟢')
-        .setStyle(enabled ? ButtonStyle.Danger : ButtonStyle.Success),
+        .setLabel(`${f.label}: ${enabled ? 'Enabled' : 'Disabled'}`)
+        .setEmoji(enabled ? '🟢' : '🔴')
+        .setStyle(enabled ? ButtonStyle.Success : ButtonStyle.Danger),
     )
   }
   if (toggleRow.components.length) components.push(toggleRow)

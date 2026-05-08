@@ -4,6 +4,7 @@ import { autoChannels } from '../../db/schema'
 import { eq } from 'drizzle-orm'
 import { canControlChannel, isSudo } from '../../services/voice/permissions'
 import { postOrUpdateControlPanel } from '../../services/voice/controlPanel'
+import { computeAutoName } from '../../services/voice/autoNaming'
 import { decodeVcId } from '../../utils/customId'
 import { randomTechName } from '../../utils/randomName'
 
@@ -39,16 +40,21 @@ export async function handleVoiceTemplateSelect(interaction: StringSelectMenuInt
   let manualName: string | null = null
 
   switch (template) {
-    case 'auto':
-      newName = currentGame ?? randomTechName()
+    case 'auto': {
+      // Use the count-aware helper if anyone in the VC is playing something,
+      // else fall back to the clicker's own game or a random tech name.
+      const computed = vc?.isVoiceBased() ? computeAutoName(vc, record.ownerUserId, 'auto', userLimit) : null
+      newName = computed ?? currentGame ?? randomTechName()
       autoNameEnabled = true
       nameTemplate = 'auto'
       break
+    }
 
     case 'counter': {
-      const base = currentGame ?? randomTechName()
       const limit = userLimit > 0 ? userLimit : 4
-      newName = `${base} [${memberCount}/${limit}]`
+      const computed = vc?.isVoiceBased() ? computeAutoName(vc, record.ownerUserId, 'counter', limit) : null
+      const base = currentGame ?? randomTechName()
+      newName = computed ?? `${base} [${memberCount}/${limit}]`
       if (userLimit === 0) userLimit = limit
       nameTemplate = 'counter'
       manualName = base

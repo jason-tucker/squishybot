@@ -1,5 +1,8 @@
 import {
   type ButtonInteraction,
+  ActionRowBuilder,
+  ButtonBuilder,
+  ButtonStyle,
   ContainerBuilder,
   TextDisplayBuilder,
   MessageFlags,
@@ -87,10 +90,21 @@ export async function handleSudoUserButton(interaction: ButtonInteraction): Prom
       .addSeparatorComponents(sep())
       .addTextDisplayComponents(new TextDisplayBuilder().setContent(body))
 
+    const backRow = new ActionRowBuilder<ButtonBuilder>().addComponents(
+      new ButtonBuilder().setCustomId(`sudo_user:back:${targetId}`).setLabel('Back').setEmoji('⬅️').setStyle(ButtonStyle.Secondary),
+    )
     await interaction.editReply({
       flags: MessageFlags.IsComponentsV2,
-      components: [container],
+      components: [container, backRow],
     } as any)
+    return
+  }
+
+  if (action === 'back') {
+    await interaction.deferUpdate()
+    const { renderManagePanel } = await import('../../commands/manageUser')
+    const payload = await renderManagePanel(interaction.guild!, targetId)
+    await interaction.editReply(payload as any)
     return
   }
 }

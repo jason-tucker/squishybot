@@ -330,18 +330,19 @@ export async function renderPrefsDetail(
     .setAccentColor(mode === 'sudo' ? 0xed4245 : 0x5865f2)
     .addTextDisplayComponents(new TextDisplayBuilder().setContent(lines.join('\n')))
 
+  // Buttons show current state (label + color); clicking toggles.
   const viewBtn = new ButtonBuilder()
     .setCustomId(`games:prefs:set:${mode}:${targetUserId}:${gameId}:view:${p.wantsView ? '0' : '1'}`)
-    .setLabel(p.wantsView ? 'Leave Channel' : 'Join Channel')
-    .setEmoji(p.wantsView ? '🚪' : '👁️')
-    .setStyle(p.wantsView ? ButtonStyle.Danger : ButtonStyle.Success)
+    .setLabel(p.wantsView ? 'Channel: Joined' : 'Channel: Not joined')
+    .setEmoji(p.wantsView ? '👁️' : '🚪')
+    .setStyle(p.wantsView ? ButtonStyle.Success : ButtonStyle.Danger)
     .setDisabled(!viewChannel)
 
   const pingBtn = new ButtonBuilder()
     .setCustomId(`games:prefs:set:${mode}:${targetUserId}:${gameId}:ping:${p.wantsPing ? '0' : '1'}`)
-    .setLabel(p.wantsPing ? 'Remove Pings' : 'Add Pings')
-    .setEmoji(p.wantsPing ? '🔕' : '🔔')
-    .setStyle(p.wantsPing ? ButtonStyle.Danger : ButtonStyle.Success)
+    .setLabel(p.wantsPing ? 'Pings: On' : 'Pings: Off')
+    .setEmoji(p.wantsPing ? '🔔' : '🔕')
+    .setStyle(p.wantsPing ? ButtonStyle.Success : ButtonStyle.Danger)
     .setDisabled(!pingRoleId)
 
   const components: any[] = [

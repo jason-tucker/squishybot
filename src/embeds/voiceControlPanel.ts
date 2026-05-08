@@ -11,6 +11,15 @@ import type { AutoChannelRecord } from '../types/voice'
 import { encodeVcId } from '../utils/customId'
 import type { MemberJoin } from '../services/voice/voiceMembers'
 
+const SUPPRESS_NOTIFICATIONS = 1 << 12
+
+export interface MemberPresenceInfo {
+  userId: string
+  joinedAt: Date
+  /** Discord rich-presence "Playing X" activity name, if any. */
+  game: string | null
+}
+
 /**
  * Compact first-message panel: short status header + member list with relative
  * join timestamps + action buttons. Stays as the channel's first/top message
@@ -21,7 +30,7 @@ export function buildControlPanelPayload(
   record: AutoChannelRecord,
   ownerTag: string,
   hostTags: string[],
-  members: MemberJoin[],
+  members: MemberPresenceInfo[],
 ) {
   const createdSec = Math.floor(record.createdAt.getTime() / 1000)
   const headerLines: string[] = []
@@ -41,7 +50,8 @@ export function buildControlPanelPayload(
     headerLines.push('👥 In channel')
     for (const m of sorted) {
       const joinedSec = Math.floor(m.joinedAt.getTime() / 1000)
-      headerLines.push(`• <@${m.userId}> joined <t:${joinedSec}:R>`)
+      const playing = m.game ? ` · 🎮 ${m.game}` : ''
+      headerLines.push(`• <@${m.userId}> joined <t:${joinedSec}:R>${playing}`)
     }
   }
 
@@ -70,17 +80,18 @@ export function buildControlPanelPayload(
       .setStyle(ButtonStyle.Secondary),
   )
 
+  // Buttons show current state (label + color); clicking toggles.
   const stateRow = new ActionRowBuilder<MessageActionRowComponentBuilder>().addComponents(
     new ButtonBuilder()
       .setCustomId(encodeVcId(vcId, record.isLocked ? 'unlock' : 'lock'))
-      .setLabel(record.isLocked ? 'Unlock' : 'Lock')
-      .setEmoji(record.isLocked ? '🔓' : '🔒')
-      .setStyle(record.isLocked ? ButtonStyle.Success : ButtonStyle.Primary),
+      .setLabel(record.isLocked ? 'Locked' : 'Unlocked')
+      .setEmoji(record.isLocked ? '🔒' : '🔓')
+      .setStyle(record.isLocked ? ButtonStyle.Danger : ButtonStyle.Success),
     new ButtonBuilder()
       .setCustomId(encodeVcId(vcId, record.isHidden ? 'show' : 'hide'))
-      .setLabel(record.isHidden ? 'Show' : 'Hide')
-      .setEmoji(record.isHidden ? '👁️' : '🙈')
-      .setStyle(record.isHidden ? ButtonStyle.Success : ButtonStyle.Primary),
+      .setLabel(record.isHidden ? 'Hidden' : 'Visible')
+      .setEmoji(record.isHidden ? '🙈' : '👁️')
+      .setStyle(record.isHidden ? ButtonStyle.Danger : ButtonStyle.Success),
   )
 
   const ownerRow = new ActionRowBuilder<MessageActionRowComponentBuilder>().addComponents(
@@ -97,7 +108,10 @@ export function buildControlPanelPayload(
   )
 
   return {
-    flags: MessageFlags.IsComponentsV2 as number,
+    flags: ((MessageFlags.IsComponentsV2 as number) | SUPPRESS_NOTIFICATIONS),
     components: [container, customizeRow, stateRow, ownerRow],
   }
 }
+
+// Re-export the underlying join-row type for callers that don't need presence.
+export type { MemberJoin } from '../services/voice/voiceMembers'

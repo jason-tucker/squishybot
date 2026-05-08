@@ -1,8 +1,12 @@
-import type { Client, TextChannel } from 'discord.js'
+import type { Client, TextChannel, VoiceBasedChannel } from 'discord.js'
+import { ActivityType } from 'discord.js'
 import { db } from '../../db/client'
 import { autoChannels } from '../../db/schema'
 import { eq } from 'drizzle-orm'
-import { buildControlPanelPayload } from '../../embeds/voiceControlPanel'
+import {
+  buildControlPanelPayload,
+  type MemberPresenceInfo,
+} from '../../embeds/voiceControlPanel'
 import type { AutoChannelRecord } from '../../types/voice'
 import { listMembers } from './voiceMembers'
 import { logger } from '../logger'
@@ -10,7 +14,7 @@ import { logger } from '../logger'
 export async function buildPanelPayloadForRecord(client: Client, record: AutoChannelRecord) {
   const [{ ownerTag, hostTags }, members] = await Promise.all([
     resolveDisplayTags(client, record),
-    listMembers(record.voiceChannelId),
+    resolveMembersWithPresence(client, record.voiceChannelId),
   ])
   return buildControlPanelPayload(record, ownerTag, hostTags, members)
 }
@@ -32,20 +36,50 @@ async function resolveDisplayTags(client: Client, record: AutoChannelRecord): Pr
   return { ownerTag, hostTags }
 }
 
-export async function postOrUpdateControlPanel(client: Client, record: AutoChannelRecord): Promise<void> {
+/** Pull the DB join rows and overlay each user's current "Playing X" activity. */
+async function resolveMembersWithPresence(client: Client, voiceChannelId: string): Promise<MemberPresenceInfo[]> {
+  const rows = await listMembers(voiceChannelId)
   const guild = client.guilds.cache.first()
-  if (!guild) return
+  return rows.map(r => {
+    const member = guild?.members.cache.get(r.userId)
+    const game = member?.presence?.activities.find(a => a.type === ActivityType.Playing)?.name ?? null
+    return { userId: r.userId, joinedAt: r.joinedAt, game }
+  })
+}
 
-  const textChannel = await guild.channels.fetch(record.textChannelId).catch(() => null) as TextChannel | null
-  if (!textChannel?.isTextBased()) return
+/**
+ * Post the panel for a fresh channel, or edit-in-place if a tracked panel
+ * already exists. `prefetchedTextChannel` lets callers (createAutoChannel)
+ * skip the channels.fetch round-trip — important right after creation when
+ * the bot's channel cache may not yet contain the new ID.
+ */
+export async function postOrUpdateControlPanel(
+  client: Client,
+  record: AutoChannelRecord,
+  prefetchedTextChannel?: TextChannel,
+): Promise<void> {
+  const guild = client.guilds.cache.first()
+  if (!guild) {
+    logger.warn(`postOrUpdateControlPanel: no guild in cache for vc=${record.voiceChannelId}`)
+    return
+  }
+
+  let textChannel: TextChannel | null = prefetchedTextChannel ?? null
+  if (!textChannel) {
+    const fetched = await guild.channels.fetch(record.textChannelId).catch(() => null)
+    if (!fetched || !fetched.isTextBased()) {
+      logger.warn(`postOrUpdateControlPanel: text channel ${record.textChannelId} unavailable (vc=${record.voiceChannelId})`)
+      return
+    }
+    textChannel = fetched as TextChannel
+  }
 
   const [{ ownerTag, hostTags }, members] = await Promise.all([
     resolveDisplayTags(client, record),
-    listMembers(record.voiceChannelId),
+    resolveMembersWithPresence(client, record.voiceChannelId),
   ])
   const payload = buildControlPanelPayload(record, ownerTag, hostTags, members)
 
-  // Try to edit existing panel message
   if (record.controlPanelMsgId) {
     const existing = await textChannel.messages.fetch(record.controlPanelMsgId).catch(() => null)
     if (existing) {
@@ -55,9 +89,8 @@ export async function postOrUpdateControlPanel(client: Client, record: AutoChann
     }
   }
 
-  // Post a new panel message — omit content entirely (null is invalid for channel.send)
   const msg = await textChannel.send(payload as any).catch(err => {
-    logger.warn('Failed to post control panel:', err)
+    logger.warn(`Failed to post control panel (vc=${record.voiceChannelId}):`, err)
     return null
   })
   if (!msg) return
@@ -65,5 +98,8 @@ export async function postOrUpdateControlPanel(client: Client, record: AutoChann
   await db.update(autoChannels)
     .set({ controlPanelMsgId: msg.id })
     .where(eq(autoChannels.voiceChannelId, record.voiceChannelId))
-    .catch(() => {})
+    .catch(err => logger.warn(`Failed to persist control_panel_msg_id (vc=${record.voiceChannelId}):`, err))
 }
+
+/** Re-export so VoiceBasedChannel is accessible to callers wiring up the prefetch path. */
+export type { VoiceBasedChannel }

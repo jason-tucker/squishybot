@@ -82,8 +82,9 @@ export async function createAutoChannel(
   // guaranteed relative to the panel's first render.
   await recordMemberJoin(record.voiceChannelId, owner.id)
 
-  // 4. Post control panel + sticky
-  await postOrUpdateControlPanel(client, record)
+  // 4. Post control panel + sticky. Pass the freshly-created textChannel so
+  // we don't depend on the bot's channel cache having caught up to the create.
+  await postOrUpdateControlPanel(client, record, textChannel)
   await postOrUpdateSticky(client, record)
 
   logger.info(`Auto channel created: ${channelName} (vc=${existingVoiceChannel.id}, tc=${textChannel.id})`)
