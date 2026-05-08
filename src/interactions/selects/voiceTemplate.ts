@@ -4,7 +4,7 @@ import { autoChannels } from '../../db/schema'
 import { eq } from 'drizzle-orm'
 import { canControlChannel, isSudo } from '../../services/voice/permissions'
 import { postOrUpdateControlPanel } from '../../services/voice/controlPanel'
-import { computeAutoName } from '../../services/voice/autoNaming'
+import { computeAutoName, ALL_TEMPLATES, TEMPLATE_LABELS, type NameTemplate } from '../../services/voice/autoNaming'
 import { decodeVcId } from '../../utils/customId'
 import { randomTechName } from '../../utils/randomName'
 
@@ -13,7 +13,7 @@ export async function handleVoiceTemplateSelect(interaction: StringSelectMenuInt
   if (!decoded) return
 
   const { voiceChannelId } = decoded
-  const template = interaction.values[0]
+  const choice = interaction.values[0]
 
   const [record] = await db.select().from(autoChannels).where(eq(autoChannels.voiceChannelId, voiceChannelId))
   if (!record) {
@@ -30,98 +30,70 @@ export async function handleVoiceTemplateSelect(interaction: StringSelectMenuInt
   await interaction.deferUpdate()
 
   const vc = await interaction.guild!.channels.fetch(record.voiceChannelId).catch(() => null)
-  const currentGame = member.presence?.activities.find(a => a.type === ActivityType.Playing)?.name ?? null
-  const memberCount = vc?.isVoiceBased() ? vc.members.size : 1
+  const isVc = vc?.isVoiceBased() ?? false
 
   let newName: string
-  let userLimit = record.userLimit
-  let autoNameEnabled = false
-  let nameTemplate: string | null = null
+  let autoNameEnabled = true
+  let nameTemplate: NameTemplate | null = null
   let manualName: string | null = null
+  let fallbackName = record.fallbackName
 
-  switch (template) {
-    case 'auto': {
-      // Use the count-aware helper if anyone in the VC is playing something,
-      // else fall back to the clicker's own game or a random tech name.
-      const computed = vc?.isVoiceBased() ? computeAutoName(vc, record.ownerUserId, 'auto', userLimit) : null
-      newName = computed ?? currentGame ?? randomTechName()
-      autoNameEnabled = true
-      nameTemplate = 'auto'
-      break
-    }
-
-    case 'counter': {
-      const limit = userLimit > 0 ? userLimit : 4
-      const computed = vc?.isVoiceBased() ? computeAutoName(vc, record.ownerUserId, 'counter', limit) : null
-      const base = currentGame ?? randomTechName()
-      newName = computed ?? `${base} [${memberCount}/${limit}]`
-      if (userLimit === 0) userLimit = limit
-      nameTemplate = 'counter'
-      manualName = base
-      break
-    }
-
-    case 'comp5':
-      newName = currentGame ? `${currentGame} [${memberCount}/5]` : `Competitive [${memberCount}/5]`
-      userLimit = 5
-      nameTemplate = 'counter'
-      manualName = currentGame ?? 'Competitive'
-      break
-
-    case 'tryhard':
-      newName = currentGame ? `${currentGame} — Tryhard Mode` : 'Tryhard Mode'
-      userLimit = 5
-      nameTemplate = null
-      manualName = newName
-      break
-
-    case 'chill':
-      newName = `${member.displayName}'s Chill Session`
-      userLimit = 0
-      nameTemplate = null
-      manualName = newName
-      break
-
-    default:
-      await interaction.editReply({ content: '❌ Unknown template.', components: [] })
-      return
+  // ── Chill (and any future fixed-name template) — set a stable name and turn
+  // off auto-rename until the user picks a presence-driven template again.
+  if (choice === 'chill') {
+    const chillName = `${member.displayName}'s Chill Session`
+    newName = chillName
+    autoNameEnabled = false
+    nameTemplate = null
+    manualName = chillName
+    fallbackName = chillName
+  } else if ((ALL_TEMPLATES as string[]).includes(choice)) {
+    nameTemplate = choice as NameTemplate
+    autoNameEnabled = true
+    const computed = isVc ? computeAutoName(vc!, record.ownerUserId, nameTemplate) : null
+    // If nobody is playing anything, fall back to the existing fallback_name
+    // (or a fresh random name if the row was created before fallback existed).
+    newName = computed ?? record.fallbackName ?? randomTechName()
+    manualName = null
+  } else {
+    await interaction.editReply({ content: `❌ Unknown template: \`${choice}\``, components: [] })
+    return
   }
 
-  // Apply to Discord channel
-  if (vc?.isVoiceBased()) {
-    await vc.edit({ name: newName, userLimit }).catch(() => {})
+  // Apply name only — never touch userLimit. The user is the only authority on
+  // the per-channel user limit; if they want one, they set it via Discord's
+  // channel settings UI.
+  if (isVc) {
+    await vc!.edit({ name: newName }).catch(() => {})
   }
-
-  // Update text channel name too
   const tc = await interaction.guild!.channels.fetch(record.textChannelId).catch(() => null)
   const textName = newName.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'voice-chat'
   if (tc?.isTextBased()) {
     await (tc as any).setName(textName).catch(() => {})
   }
 
-  // tryhard/chill produce stable manual names — adopt as the fallback so
-  // the channel reverts to them when nobody is playing anything.
-  const stableTemplates = template === 'tryhard' || template === 'chill'
-  const fallbackName = stableTemplates ? newName : record.fallbackName
-
-  // Persist to DB
   const updated = {
     ...record,
     manualName,
     autoNameEnabled,
     nameTemplate,
-    userLimit,
     fallbackName,
   }
   await db.update(autoChannels)
-    .set({ manualName, autoNameEnabled, nameTemplate, userLimit, fallbackName })
+    .set({ manualName, autoNameEnabled, nameTemplate, fallbackName })
     .where(eq(autoChannels.voiceChannelId, voiceChannelId))
     .catch(() => {})
 
   await postOrUpdateControlPanel(interaction.client, updated)
 
+  const label = nameTemplate ? `${TEMPLATE_LABELS[nameTemplate].emoji} ${TEMPLATE_LABELS[nameTemplate].label}` : '💬 Chill'
   await interaction.editReply({
-    content: `✅ Template applied: **${newName}**`,
+    content: `✅ Naming template: **${label}**\nChannel name: **${newName}**\n_(User limit unchanged — set it yourself in Discord channel settings if you want one.)_`,
     components: [],
   })
 }
+
+// `ActivityType` import is intentionally retained for compatibility with
+// callers that may import it from this module — keeps the export surface
+// stable while the implementation moves to autoNaming.ts.
+void ActivityType

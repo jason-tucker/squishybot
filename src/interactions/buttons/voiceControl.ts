@@ -239,27 +239,31 @@ export async function handleVoiceControlButton(interaction: ButtonInteraction): 
 
   if (action === 'templates') {
     if (!await requireControl(interaction, member, record)) return
-    const vc = await interaction.guild!.channels.fetch(record.voiceChannelId).catch(() => null)
-    const memberCount = vc?.isVoiceBased() ? vc.members.size : 1
+
+    const { ALL_TEMPLATES, TEMPLATE_LABELS } = await import('../../services/voice/autoNaming')
 
     const header = new ContainerBuilder()
       .addTextDisplayComponents(
         new TextDisplayBuilder().setContent(
-          '### 📋 Templates\n_Auto detects what you\'re playing from your rich presence._'
+          '### 📋 Naming Templates\n_All templates are **naming only** — none of them touch the channel\'s user limit. ' +
+          'Set a user limit yourself via Discord\'s channel settings if you want one._'
         )
       )
       .addSeparatorComponents(sep())
 
+    const presenceOptions = ALL_TEMPLATES.map(t => ({
+      label: `${TEMPLATE_LABELS[t].emoji} ${TEMPLATE_LABELS[t].label}`,
+      value: t,
+      description: TEMPLATE_LABELS[t].description.slice(0, 100),
+    }))
+
     const row = new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(
       new StringSelectMenuBuilder()
         .setCustomId(`vc:${voiceChannelId}:template_apply`)
-        .setPlaceholder('Choose a template...')
+        .setPlaceholder('Choose a naming template…')
         .addOptions([
-          { label: '🎮 Auto — follows your game', value: 'auto', description: 'Detects game + OW/RL mode from rich presence' },
-          { label: `🔢 Counter — [${memberCount}/4]`, value: 'counter', description: 'Live member count in name' },
-          { label: '🎯 Competitive 5-stack', value: 'comp5', description: 'Limit 5' },
-          { label: '🏆 Tryhard Mode', value: 'tryhard', description: 'Limit 5' },
-          { label: '💬 Chill Session', value: 'chill', description: 'No limit' },
+          ...presenceOptions,
+          { label: '💬 Chill', value: 'chill', description: 'Fixed name "{member}\'s Chill Session" — turns auto-rename off' },
         ])
     )
 

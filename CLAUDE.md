@@ -72,7 +72,7 @@ chat scrolls; clicking it gives you an ephemeral copy of the panel.
 | ✏️ **Rename** | Modal to set a custom name |
 | 🔒 **Lock** / 🔓 **Unlock** | Toggle Connect permission on `@everyone` |
 | 👑 **Hosts** | One panel listing each member with their current rank emoji (👑 host · 🛡️ sudo · 👤 member). Clicking toggles host status. |
-| 📋 **Templates** | Auto / Counter / Comp 5-stack / Tryhard / Chill — sets name + user limit in one click |
+| 📋 **Templates** | Naming-only. Auto (default `(N) Game`) / Counter `Game [N]` / Squad `Game · N squad` / Detail `Game — {details}` / State `Game — {state}` / Party `Game (X/Y party)` / Stealth (bare) / Chill (fixed `{member}'s Chill Session`, disables auto-rename). **No template ever touches user limit** — set it in Discord's channel settings if you want one. |
 | 👤 **Claim** | Take ownership when the owner has left |
 | 🗑️ **Delete** | Delete the voice + text channels right away |
 
