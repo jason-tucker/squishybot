@@ -21,10 +21,12 @@ export function registerPresenceUpdate(client: Client): void {
 
     if (!record) return
     if (!record.autoNameEnabled) return
-    if (record.nameTemplate !== 'auto' && record.nameTemplate !== 'counter' && record.autoNameEnabled) {
-      // Only auto-rename if explicitly using an auto template
-      if (record.nameTemplate !== 'auto') return
-    }
+    // nameTemplate semantics:
+    //   null   → default auto (just the game name) — fresh channels land here
+    //   'auto' → same: just the game name
+    //   'counter' → "<game> [N/limit]"
+    //   anything else → manual mode (e.g. tryhard / chill / custom rename); skip
+    if (record.nameTemplate !== null && record.nameTemplate !== 'auto' && record.nameTemplate !== 'counter') return
 
     // Rate limit check
     const lastTime = lastRename.get(record.voiceChannelId) ?? 0
