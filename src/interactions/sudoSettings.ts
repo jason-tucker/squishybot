@@ -142,15 +142,22 @@ function renderHome() {
       'Pick a category to manage:'
     ))
 
+  // Three rows of 3 each, then a 4th secondary row, then nav. Splitting
+  // off the 5-button row2 because Discord was silently dropping the 2nd
+  // and 3rd buttons (Staff Roles + Socials) when row2 had 5 entries —
+  // best guess is a CV2 layout constraint we don't see documented. With
+  // ≤3 per row, every button consistently renders.
   const row1 = new ActionRowBuilder<MessageActionRowComponentBuilder>().addComponents(
     new ButtonBuilder().setCustomId('sudo:set:nav:sudo_users').setLabel('Sudo Users').setEmoji('🛡️').setStyle(ButtonStyle.Primary),
     new ButtonBuilder().setCustomId('sudo:set:nav:channels').setLabel('Channels').setEmoji('📺').setStyle(ButtonStyle.Primary),
     new ButtonBuilder().setCustomId('sudo:set:nav:voice').setLabel('Voice').setEmoji('🔊').setStyle(ButtonStyle.Primary),
-    new ButtonBuilder().setCustomId('sudo:set:nav:hubs').setLabel('Hub Channels').setEmoji('🪐').setStyle(ButtonStyle.Primary),
   )
   const row2 = new ActionRowBuilder<MessageActionRowComponentBuilder>().addComponents(
+    new ButtonBuilder().setCustomId('sudo:set:nav:hubs').setLabel('Hub Channels').setEmoji('🪐').setStyle(ButtonStyle.Primary),
     new ButtonBuilder().setCustomId('sudo:set:nav:auto_threads').setLabel('Auto Threads').setEmoji('🧵').setStyle(ButtonStyle.Primary),
     new ButtonBuilder().setCustomId('sudo:set:nav:staff_roles').setLabel('Staff Roles').setEmoji('🛡️').setStyle(ButtonStyle.Primary),
+  )
+  const row3 = new ActionRowBuilder<MessageActionRowComponentBuilder>().addComponents(
     new ButtonBuilder().setCustomId('sudo:set:nav:socials').setLabel('Socials').setEmoji('📡').setStyle(ButtonStyle.Primary),
     new ButtonBuilder().setCustomId('sudo:set:nav:games').setLabel('Games').setEmoji('🎮').setStyle(ButtonStyle.Secondary),
     new ButtonBuilder().setCustomId('sudo:set:nav:profiles').setLabel('User Profiles').setEmoji('👤').setStyle(ButtonStyle.Secondary),
@@ -159,7 +166,7 @@ function renderHome() {
     new ButtonBuilder().setCustomId('sudo:home').setLabel('Back to /sudo').setEmoji('🏠').setStyle(ButtonStyle.Secondary),
   )
 
-  return { flags: MessageFlags.IsComponentsV2 as number, components: [container, row1, row2, navRow] }
+  return { flags: MessageFlags.IsComponentsV2 as number, components: [container, row1, row2, row3, navRow] }
 }
 
 async function renderSudoUsers() {
