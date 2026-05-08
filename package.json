@@ -1,6 +1,6 @@
 {
   "name": "squishybot",
-  "version": "0.1.0",
+  "version": "0.8.2",
   "description": "SquishyBot Discord bot",
   "main": "index.js",
   "scripts": {

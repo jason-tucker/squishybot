@@ -7,6 +7,10 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+## [0.8.2] — 2026-05-08
+
+Cumulative since 0.7.0 — picker-driven staff request flow, naming-only voice templates, social feeds (RSS-driven channel auto-poster), Game Night preview/edit/send + free-form game names, /games sudo "missing setup" warnings, presence "last used X ago", and a sweep of mention / URL / cv2 / dedup hardening across the bot. Held back from 1.0 — that's a deliberate deferred milestone — but this is the most stable release we've cut.
+
 ### Refactor
 - **Reconciler fetches each tracked auto channel's text channel once per pass instead of twice.** The auto-rename retry and the permission sync each did their own `guild.channels.fetch(record.textChannelId)`. Hoisted to one fetch shared between both, halving channel-fetch HTTP calls during reconciler runs (1 per record instead of 2). N records × 1 fetch saved per boot / restart.
 
