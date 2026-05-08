@@ -99,6 +99,9 @@ export function registerInteractionCreate(client: Client) {
         } else if (id.startsWith('play:cancel:')) {
           const { handleCancelButton } = await import('../../commands/play')
           await handleCancelButton(interaction as ButtonInteraction)
+        } else if (id.startsWith('gn:preview:')) {
+          const { handlePreviewButton } = await import('../../commands/gamenight')
+          await handlePreviewButton(interaction as ButtonInteraction)
         } else if (id.startsWith('gn:rsvp:')) {
           const { handleRsvpButton } = await import('../../commands/gamenight')
           await handleRsvpButton(interaction as ButtonInteraction)
@@ -203,7 +206,7 @@ export function registerInteractionCreate(client: Client) {
         } else if (id === 'games:cat:add_submit' || id.startsWith('games:cat:save:')) {
           const { handleCatalogModal } = await import('../../interactions/gamesEditor')
           await handleCatalogModal(interaction as ModalSubmitInteraction)
-        } else if (id === 'gn:setup_submit') {
+        } else if (id.startsWith('gn:setup_submit')) {
           const { handleSetupSubmit } = await import('../../commands/gamenight')
           await handleSetupSubmit(interaction as ModalSubmitInteraction)
         }

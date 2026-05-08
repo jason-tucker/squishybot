@@ -1,29 +1,39 @@
 /**
  * Game Night setup — accessible from `/sudo → Game Night`.
  *
- * Sudo enters a game (resolved via the games catalog), date/time, and
- * optional notes via a modal. The bot posts a Components V2 announcement
- * in the channel set by `channel.gamenight` (configurable in /sudo →
- * Settings → Channels). The announcement carries three RSVP buttons
- * (Joining / Might join / Not joining) plus two ownership buttons
- * (I own it / I don't own it) so the host knows who needs the game.
+ * Flow:
+ *   1. Sudo runs /sudo → Game Night → modal (gn:setup_submit) opens.
+ *   2. On submit, the bot validates and shows an EPHEMERAL preview of the
+ *      announcement with three buttons:
+ *        ▸ Send   (gn:preview:send:{sessionKey})   — posts publicly
+ *        ▸ Edit   (gn:preview:edit:{sessionKey})   — re-opens the modal
+ *                  pre-filled with the previous values
+ *        ▸ Cancel (gn:preview:cancel:{sessionKey}) — discards the session
+ *   3. The public post never pings any role — game ping roles are
+ *      explicitly suppressed by allowedMentions.
  *
- * State per announcement is held in-memory keyed by message ID, with
- * parse-from-message recovery so live announcements survive restarts.
+ * The pending preview lives in `pendingSessions`, keyed by a short random
+ * sessionKey, with a 30-minute TTL.
+ *
+ * State for live announcements (RSVPs, ownership) is held in `sessions`,
+ * keyed by message ID, with parse-from-message recovery on cache miss.
  *
  * customId families:
- *   gn:setup_submit          modal — sudo submitted the setup form
- *   gn:rsvp:{state}          button — RSVP toggle (in | maybe | out)
- *   gn:own:{state}           button — ownership toggle (has | needs)
- *   gn:cancel:{hostId}       button — cancel (host or sudo)
+ *   gn:setup_submit                      modal — fresh submission
+ *   gn:setup_submit:{sessionKey}         modal — re-submission from Edit
+ *   gn:preview:{send|edit|cancel}:{key}  preview buttons
+ *   gn:rsvp:{state}                      RSVP toggle (in | maybe | out)
+ *   gn:own:{state}                       ownership toggle (has | needs)
+ *   gn:cancel:{hostId}                   cancel a posted Game Night (host or sudo)
  */
 import {
   ActionRowBuilder, ButtonBuilder, ButtonInteraction, ButtonStyle, ChannelType,
   ContainerBuilder, MessageFlags, ModalBuilder, ModalSubmitInteraction,
-  type Guild, type MessageActionRowComponentBuilder,
+  type MessageActionRowComponentBuilder,
   type StringSelectMenuInteraction, type TextChannel,
   TextDisplayBuilder, TextInputBuilder, TextInputStyle,
 } from 'discord.js'
+import { randomBytes } from 'node:crypto'
 import { sep } from '../utils/cv2'
 import { findGameByNameOrAlias, getGame, type Game } from '../services/games'
 import { isSudo } from '../services/voice/permissions'
@@ -43,27 +53,56 @@ interface GameNightState {
 
 const sessions = new Map<string, GameNightState>()
 
+// ── Pending previews ───────────────────────────────────────────────────────
+// Each one represents a sudo who submitted the setup modal but hasn't yet
+// clicked Send. Keyed by a short random sessionKey. 30-min TTL.
+interface PendingSession {
+  sudoUserId: string
+  channelId: string
+  /** Raw text the sudo typed for the game lookup — preserved so the Edit
+   *  modal can pre-fill exactly what they typed. */
+  gameQuery: string
+  resolvedGameId: string
+  when: string
+  notes: string
+  createdAt: number
+}
+const pendingSessions = new Map<string, PendingSession>()
+const PENDING_TTL_MS = 30 * 60 * 1000
+
+function newSessionKey(): string {
+  return randomBytes(8).toString('hex')
+}
+
+function gcPending(): void {
+  const now = Date.now()
+  for (const [k, p] of pendingSessions) if (now - p.createdAt > PENDING_TTL_MS) pendingSessions.delete(k)
+}
+
 // ---------------------------------------------------------------------------
-// Setup — modal triggered from /sudo top-level select
+// Setup modal — used for both fresh submissions and Edit re-opens.
 // ---------------------------------------------------------------------------
 
-export function buildSetupModal(): ModalBuilder {
+export function buildSetupModal(opts?: { sessionKey?: string; defaults?: { gameQuery: string; when: string; notes: string } }): ModalBuilder {
+  const customId = opts?.sessionKey ? `gn:setup_submit:${opts.sessionKey}` : 'gn:setup_submit'
+  const game = new TextInputBuilder().setCustomId('game').setLabel('Game (name or alias from catalog)')
+    .setStyle(TextInputStyle.Short).setRequired(true).setPlaceholder('e.g. Overwatch')
+  const when = new TextInputBuilder().setCustomId('when').setLabel('When (free-form)')
+    .setStyle(TextInputStyle.Short).setRequired(true).setPlaceholder('e.g. Saturday 9pm EST')
+  const notes = new TextInputBuilder().setCustomId('notes').setLabel('Notes (optional)')
+    .setStyle(TextInputStyle.Paragraph).setRequired(false).setMaxLength(800)
+  if (opts?.defaults) {
+    if (opts.defaults.gameQuery) game.setValue(opts.defaults.gameQuery)
+    if (opts.defaults.when)      when.setValue(opts.defaults.when)
+    if (opts.defaults.notes)     notes.setValue(opts.defaults.notes)
+  }
   return new ModalBuilder()
-    .setCustomId('gn:setup_submit')
+    .setCustomId(customId)
     .setTitle('Schedule Game Night')
     .addComponents(
-      new ActionRowBuilder<TextInputBuilder>().addComponents(
-        new TextInputBuilder().setCustomId('game').setLabel('Game (name or alias from catalog)')
-          .setStyle(TextInputStyle.Short).setRequired(true).setPlaceholder('e.g. Overwatch'),
-      ),
-      new ActionRowBuilder<TextInputBuilder>().addComponents(
-        new TextInputBuilder().setCustomId('when').setLabel('When (free-form)')
-          .setStyle(TextInputStyle.Short).setRequired(true).setPlaceholder('e.g. Saturday 9pm EST'),
-      ),
-      new ActionRowBuilder<TextInputBuilder>().addComponents(
-        new TextInputBuilder().setCustomId('notes').setLabel('Notes (optional)')
-          .setStyle(TextInputStyle.Paragraph).setRequired(false).setMaxLength(800),
-      ),
+      new ActionRowBuilder<TextInputBuilder>().addComponents(game),
+      new ActionRowBuilder<TextInputBuilder>().addComponents(when),
+      new ActionRowBuilder<TextInputBuilder>().addComponents(notes),
     )
 }
 
@@ -83,8 +122,8 @@ export async function handleSetupSubmit(interaction: ModalSubmitInteraction): Pr
   }
 
   const gameQuery = interaction.fields.getTextInputValue('game').trim()
-  const when = interaction.fields.getTextInputValue('when').trim()
-  const notes = interaction.fields.getTextInputValue('notes').trim()
+  const when      = interaction.fields.getTextInputValue('when').trim()
+  const notes     = interaction.fields.getTextInputValue('notes').trim()
 
   const game = findGameByNameOrAlias(gameQuery)
   if (!game) {
@@ -92,33 +131,164 @@ export async function handleSetupSubmit(interaction: ModalSubmitInteraction): Pr
     return
   }
 
-  // Post in whichever channel sudo ran /sudo from.
-  const channel = interaction.channel
-  if (!channel || channel.type !== ChannelType.GuildText) {
-    await interaction.reply({ content: '❌ Run `/sudo` from a regular text channel — Game Night is posted there.', ephemeral: true })
+  // Edit submissions reuse the existing sessionKey (so the same preview
+  // message can be edited in place). Fresh submissions get a new key.
+  const parts = interaction.customId.split(':')
+  const isEdit = parts.length >= 3 && parts[2].length > 0
+  const sessionKey = isEdit ? parts[2] : newSessionKey()
+
+  const existing = isEdit ? pendingSessions.get(sessionKey) : null
+  const channelId = existing?.channelId ?? interaction.channelId
+  if (!channelId) {
+    await interaction.reply({ content: '❌ Run `/sudo` from a regular text channel.', ephemeral: true })
     return
   }
 
-  await interaction.deferReply({ ephemeral: true })
-
-  const state: GameNightState = {
-    gameId: game.id,
-    hostId: member.id,
+  const pending: PendingSession = {
+    sudoUserId: member.id,
+    channelId,
+    gameQuery,
+    resolvedGameId: game.id,
     when,
     notes,
-    rsvps: new Map(),
-    ownership: new Map(),
+    createdAt: Date.now(),
   }
+  pendingSessions.set(sessionKey, pending)
+  gcPending()
 
-  const sent = await (channel as TextChannel).send(buildPanel(game, state, { initialPing: true }) as any)
-  sessions.set(sent.id, state)
-
-  logger.info(`gamenight created game=${game.name} host=${member.id} channel=${channel.id} message=${sent.id}`)
-  await interaction.editReply({ content: `✅ Game Night posted in <#${channel.id}>.` })
+  if (isEdit && interaction.isFromMessage()) {
+    // Replace the existing preview message in place.
+    await interaction.update(buildPreviewPayload(game, pending, sessionKey, true) as any)
+  } else {
+    await interaction.reply({ ...buildPreviewPayload(game, pending, sessionKey, false), ephemeral: true } as any)
+  }
 }
 
 // ---------------------------------------------------------------------------
-// Panel rendering
+// Preview rendering + button handlers
+// ---------------------------------------------------------------------------
+
+function buildPreviewPayload(game: Game, pending: PendingSession, sessionKey: string, _editing: boolean) {
+  // Use the same buildPanel renderer for the body so the preview matches the
+  // public post 1:1. Pings are off everywhere now, so no role/user mentions
+  // resolve regardless.
+  const stub: GameNightState = {
+    gameId: game.id,
+    hostId: pending.sudoUserId,
+    when: pending.when,
+    notes: pending.notes,
+    rsvps: new Map(),
+    ownership: new Map(),
+  }
+  const inner = buildPanel(game, stub)
+
+  const header = new ContainerBuilder()
+    .setAccentColor(0x5865f2)
+    .addTextDisplayComponents(
+      new TextDisplayBuilder().setContent(
+        `### 👀 Preview — Game Night\n_Posting to <#${pending.channelId}>. Nothing has been sent yet._`
+      )
+    )
+    .addSeparatorComponents(sep())
+
+  const previewRow = new ActionRowBuilder<MessageActionRowComponentBuilder>().addComponents(
+    new ButtonBuilder().setCustomId(`gn:preview:send:${sessionKey}`).setLabel('Send').setEmoji('📨').setStyle(ButtonStyle.Success),
+    new ButtonBuilder().setCustomId(`gn:preview:edit:${sessionKey}`).setLabel('Edit').setEmoji('✏️').setStyle(ButtonStyle.Primary),
+    new ButtonBuilder().setCustomId(`gn:preview:cancel:${sessionKey}`).setLabel('Cancel').setEmoji('✖️').setStyle(ButtonStyle.Secondary),
+  )
+
+  // The previewed announcement uses the real buildPanel components, but we
+  // skip the live RSVP/ownership/cancel buttons — we don't want sudo to
+  // accidentally RSVP on a preview, and the buttons would noop anyway.
+  const announcementContainer = inner.components[0]
+  return {
+    flags: MessageFlags.IsComponentsV2 as number,
+    components: [header, announcementContainer, previewRow],
+    allowedMentions: { parse: [] as never[] },
+  }
+}
+
+export async function handlePreviewButton(interaction: ButtonInteraction): Promise<void> {
+  // gn:preview:{action}:{sessionKey}
+  const parts = interaction.customId.split(':')
+  if (parts.length !== 4) return
+  const action = parts[2]
+  const sessionKey = parts[3]
+  const pending = pendingSessions.get(sessionKey)
+
+  if (!pending) {
+    await interaction.update({ content: '⌛ This preview expired — run `/sudo → Game Night` again to redo it.', components: [], flags: undefined } as any).catch(async () => {
+      await interaction.reply({ content: '⌛ This preview expired.', ephemeral: true }).catch(() => {})
+    })
+    return
+  }
+
+  if (interaction.user.id !== pending.sudoUserId) {
+    const member = await interaction.guild?.members.fetch(interaction.user.id).catch(() => null)
+    if (!member || !isSudo(member)) {
+      await interaction.reply({ content: '❌ Only the sudo who built this preview can act on it.', ephemeral: true })
+      return
+    }
+  }
+
+  const game = getGame(pending.resolvedGameId)
+  if (!game) {
+    await interaction.update({ content: '❌ The game in this preview was removed from the catalog. Cancel and start over.', components: [], flags: undefined } as any).catch(() => {})
+    return
+  }
+
+  if (action === 'send') {
+    const channel = await interaction.client.channels.fetch(pending.channelId).catch(() => null)
+    if (!channel || channel.type !== ChannelType.GuildText) {
+      await interaction.reply({ content: `❌ Could not post to <#${pending.channelId}> — channel unavailable.`, ephemeral: true })
+      return
+    }
+    const state: GameNightState = {
+      gameId: game.id,
+      hostId: pending.sudoUserId,
+      when: pending.when,
+      notes: pending.notes,
+      rsvps: new Map(),
+      ownership: new Map(),
+    }
+    const sent = await (channel as TextChannel).send(buildPanel(game, state) as any)
+    sessions.set(sent.id, state)
+    pendingSessions.delete(sessionKey)
+    logger.info(`gamenight sent game=${game.name} host=${pending.sudoUserId} channel=${channel.id} message=${sent.id}`)
+
+    const ack = new ContainerBuilder().setAccentColor(0x57f287)
+      .addTextDisplayComponents(new TextDisplayBuilder().setContent(`✅ Posted in <#${pending.channelId}>.`))
+    await interaction.update({
+      flags: MessageFlags.IsComponentsV2 as number,
+      components: [ack],
+      allowedMentions: { parse: [] as never[] },
+    } as any)
+    return
+  }
+
+  if (action === 'edit') {
+    await interaction.showModal(buildSetupModal({
+      sessionKey,
+      defaults: { gameQuery: pending.gameQuery, when: pending.when, notes: pending.notes },
+    }))
+    return
+  }
+
+  if (action === 'cancel') {
+    pendingSessions.delete(sessionKey)
+    const ack = new ContainerBuilder().setAccentColor(0xed4245)
+      .addTextDisplayComponents(new TextDisplayBuilder().setContent('🗑️ Preview discarded.'))
+    await interaction.update({
+      flags: MessageFlags.IsComponentsV2 as number,
+      components: [ack],
+      allowedMentions: { parse: [] as never[] },
+    } as any)
+    return
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Live announcement panel (no pings — never pings the game role)
 // ---------------------------------------------------------------------------
 
 function listForRsvp(state: GameNightState, want: Rsvp): string[] {
@@ -128,15 +298,13 @@ function listForOwnership(state: GameNightState, want: Ownership): string[] {
   return Array.from(state.ownership.entries()).filter(([, o]) => o === want).map(([id]) => `<@${id}>`)
 }
 
-function buildPanel(game: Game, state: GameNightState, options?: { initialPing?: boolean }): {
+function buildPanel(game: Game, state: GameNightState): {
   flags: number
   components: any[]
-  allowedMentions: { roles: string[]; users: string[]; parse: never[] }
+  allowedMentions: { parse: never[] }
 } {
-  const ping = options?.initialPing && game.pingRoleId ? `<@&${game.pingRoleId}> ` : ''
-
   const lines: string[] = []
-  lines.push(`${ping}🎲 **Game Night — ${game.name}**`)
+  lines.push(`🎲 **Game Night — ${game.name}**`)
   lines.push(`📅 ${state.when}`)
   if (state.notes) lines.push('')
   if (state.notes) lines.push(state.notes)
@@ -176,20 +344,17 @@ function buildPanel(game: Game, state: GameNightState, options?: { initialPing?:
     new ButtonBuilder().setCustomId(`gn:cancel:${state.hostId}`).setLabel('Cancel').setEmoji('✖️').setStyle(ButtonStyle.Danger),
   )
 
-  // Mentions: ping role only on initial post; never resolve @everyone/@here.
-  const allowedRoles = options?.initialPing && game.pingRoleId ? [game.pingRoleId] : []
-  // Ensure mentions for host + every user in the lists are allowed (so the
-  // updates don't accidentally fail to render the mention text).
-  const userMentionSet = new Set<string>([state.hostId, ...joining.concat(might, out, needs).map(s => s.replace(/[^\d]/g, ''))])
+  // No mention of any kind resolves — nobody gets a notification, regardless
+  // of what's typed into game/notes/etc.
   return {
     flags: MessageFlags.IsComponentsV2,
     components: [container, rsvpRow, ownRow, cancelRow],
-    allowedMentions: { roles: allowedRoles, users: Array.from(userMentionSet), parse: [] },
+    allowedMentions: { parse: [] },
   }
 }
 
 // ---------------------------------------------------------------------------
-// Button handlers
+// Live button handlers
 // ---------------------------------------------------------------------------
 
 function getOrRecover(interaction: ButtonInteraction): GameNightState | null {
@@ -216,11 +381,8 @@ export async function handleRsvpButton(interaction: ButtonInteraction): Promise<
   }
   const want = interaction.customId.split(':')[2] as Rsvp
   const userId = interaction.user.id
-
-  // Toggle: clicking the current state again clears it.
   if (state.rsvps.get(userId) === want) state.rsvps.delete(userId)
   else state.rsvps.set(userId, want)
-
   await interaction.update(buildPanel(game, state) as any)
 }
 
@@ -238,10 +400,8 @@ export async function handleOwnershipButton(interaction: ButtonInteraction): Pro
   }
   const want = interaction.customId.split(':')[2] as Ownership
   const userId = interaction.user.id
-
   if (state.ownership.get(userId) === want) state.ownership.delete(userId)
   else state.ownership.set(userId, want)
-
   await interaction.update(buildPanel(game, state) as any)
 }
 
@@ -271,8 +431,6 @@ export async function handleCancelButton(interaction: ButtonInteraction): Promis
 
 // ---------------------------------------------------------------------------
 // Recovery — rebuild a session from an existing message after restart.
-// We can't recover the gameId from the message text (the game is just a
-// title), so on a cache miss we look up the game by parsing the title.
 // ---------------------------------------------------------------------------
 
 function recoverFromMessage(interaction: ButtonInteraction): GameNightState | null {
@@ -290,15 +448,13 @@ function recoverFromMessage(interaction: ButtonInteraction): GameNightState | nu
   const whenMatch = /📅 ([^\\n*]+)/.exec(allText)
   const when = whenMatch ? whenMatch[1].trim() : ''
 
-  // RSVPs & ownership: parse mentions out of each labelled section.
   const rsvps = new Map<string, Rsvp>()
   for (const [label, status] of [['Joining', 'in'], ['Might join', 'maybe'], ['Not joining', 'out']] as Array<[string, Rsvp]>) {
     const sectionRe = new RegExp(`${label} \\(\\d+\\):\\*\\* ([^\\n]*)`)
     const m = sectionRe.exec(allText)
     if (!m) continue
     for (const id of (m[1].match(/<@(\d{15,25})>/g) ?? [])) {
-      const userId = id.replace(/[^\d]/g, '')
-      rsvps.set(userId, status)
+      rsvps.set(id.replace(/[^\d]/g, ''), status)
     }
   }
 
