@@ -1,16 +1,16 @@
 import { ActivityType, type Client } from 'discord.js'
-import { readFileSync, writeFileSync } from 'node:fs'
-import { resolve } from 'node:path'
+import { getSetting, setSetting } from './settings'
+import { logger } from './logger'
 
 /** After 60 min of no user-initiated activity, the bot flips to idle. */
 const IDLE_AFTER_MS = 60 * 60 * 1000
 
 /**
- * Persist `_lastUsedAt` to disk so the relative-time stamp survives the
- * weekly auto-restart, deploys, and crashes. Read once on init, written
- * each time we push a new presence.
+ * `bot_settings` key for the persisted "last used" timestamp. Stored as an
+ * ISO string. Survives container recreation (DB has its own docker volume),
+ * unlike a file in cwd, which a `docker compose up -d` deploy would wipe.
  */
-const STATE_FILE = resolve(process.cwd(), '.presence-state.json')
+const LAST_USED_SETTING_KEY = 'presence.last_used_at'
 
 /**
  * Throttle the presence-update push to once every 5 minutes. The status text
@@ -32,6 +32,8 @@ let _pendingRefresh: ReturnType<typeof setTimeout> | null = null
 
 export function initPresence(client: Client): void {
   _client = client
+  // Reads from settings cache — caller must `await loadSettings()` before
+  // `initPresence` so the persisted stamp is available on first push.
   _lastUsedAt = readPersistedLastUsedAt()
   setOnline()
 }
@@ -126,24 +128,20 @@ function buildActivityName(): string {
 }
 
 function readPersistedLastUsedAt(): Date | null {
-  try {
-    const raw = readFileSync(STATE_FILE, 'utf8')
-    const parsed = JSON.parse(raw) as { lastUsedAt?: string }
-    if (!parsed.lastUsedAt) return null
-    const d = new Date(parsed.lastUsedAt)
-    return Number.isNaN(d.getTime()) ? null : d
-  } catch {
-    return null
-  }
+  const raw = getSetting(LAST_USED_SETTING_KEY)
+  if (!raw) return null
+  const d = new Date(raw)
+  return Number.isNaN(d.getTime()) ? null : d
 }
 
 function persistLastUsedAt(): void {
   if (!_lastUsedAt) return
-  try {
-    writeFileSync(STATE_FILE, JSON.stringify({ lastUsedAt: _lastUsedAt.toISOString() }))
-  } catch {
-    // Non-fatal — presence still works in-memory; we just won't survive a restart.
-  }
+  // Fire-and-forget — presence still works in-memory if the write fails;
+  // we just won't survive a restart cleanly.
+  const value = _lastUsedAt.toISOString()
+  setSetting(LAST_USED_SETTING_KEY, value).catch(err => {
+    logger.warn('Failed to persist presence.last_used_at', err)
+  })
 }
 
 function formatRelative(d: Date): string {

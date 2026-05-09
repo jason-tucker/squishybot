@@ -8,7 +8,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ## [Unreleased]
 
 ### Changed
-- **Bot presence is now a Custom Status — no "Watching" prefix, just the relative-time stamp.** Activity type flipped from `Watching` to `Custom`, so Discord renders the status as plain text (e.g. `12m ago` / `just now`) without a verb in front. `_lastUsedAt` is now persisted to `.presence-state.json` (gitignored) and re-read on boot, so the stamp survives the weekly auto-restart, deploys, and crashes — the bot doesn't show up "fresh" right after a restart anymore. DND status text also uses Custom now for the same prefix-free look.
+- **Bot presence is now a Custom Status — no "Watching" prefix, just the relative-time stamp.** Activity type flipped from `Watching` to `Custom`, so Discord renders the status as plain text (e.g. `12m ago` / `just now`) without a verb in front. `_lastUsedAt` is now persisted to `bot_settings` under `presence.last_used_at` and re-read on boot (via the existing settings cache, hoisted ahead of `initPresence` in `ready.ts`), so the stamp survives weekly auto-restart, deploys, and container recreation — the bot doesn't show up "fresh" right after a restart anymore. DND status text also uses Custom now for the same prefix-free look.
 
 ### Added
 - **`/settings → Staff Role` — self-service staff Discord role management.** New panel listing all 7 staff roles with per-role status (✅ holds / ➕ doesn't hold / 🚫 not linked / ⚠️ linked id missing in Discord). Behavior is gated by sudo:

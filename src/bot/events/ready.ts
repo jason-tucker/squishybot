@@ -13,12 +13,14 @@ import { startBirthdayScheduler } from '../../services/birthdayScheduler'
 export function registerReadyEvent(client: Client) {
   client.once('clientReady', async (c) => {
     attachClientToLogger(c)
-    initPresence(c)
     logger.info(`Logged in as ${c.user.tag}`)
     startHealthPush()
-    // Load runtime settings + sudo-user overrides + game catalog + social feeds into caches.
+    // Load runtime settings FIRST so initPresence can read the persisted
+    // `presence.last_used_at` from the cache. The other caches don't gate
+    // anything on the boot path, so they run in parallel after.
+    await loadSettings().catch(err => logger.error('Failed to load settings on startup', err))
+    initPresence(c)
     await Promise.all([
-      loadSettings().catch(err => logger.error('Failed to load settings on startup', err)),
       loadGames().catch(err => logger.error('Failed to load games on startup', err)),
       loadSocialFeeds().catch(err => logger.error('Failed to load social feeds on startup', err)),
     ])
