@@ -1,16 +1,25 @@
 import { ActivityType, type Client } from 'discord.js'
+import { readFileSync, writeFileSync } from 'node:fs'
+import { resolve } from 'node:path'
 
 /** After 60 min of no user-initiated activity, the bot flips to idle. */
 const IDLE_AFTER_MS = 60 * 60 * 1000
 
 /**
+ * Persist `_lastUsedAt` to disk so the relative-time stamp survives the
+ * weekly auto-restart, deploys, and crashes. Read once on init, written
+ * each time we push a new presence.
+ */
+const STATE_FILE = resolve(process.cwd(), '.presence-state.json')
+
+/**
  * Throttle the presence-update push to once every 5 minutes. The status text
- * includes a relative "last used X ago", and Discord shows that as a "Xm ago"
- * value too — refreshing more often than once per minute is wasted work AND
- * risks bumping into Discord's PRESENCE_UPDATE rate limit (~5 per 20 s per
- * shard ≈ 4 s/update floor). 5 minutes is far above the floor and matches the
- * granularity of the displayed text. Updates that arrive during the throttle
- * window coalesce — the next push carries the latest `_lastUsedAt`.
+ * is a relative timestamp ("Xm ago") — refreshing more often than once per
+ * minute is wasted work AND risks bumping into Discord's PRESENCE_UPDATE rate
+ * limit (~5 per 20 s per shard ≈ 4 s/update floor). 5 minutes is far above
+ * the floor and matches the granularity of the displayed text. Updates that
+ * arrive during the throttle window coalesce — the next push carries the
+ * latest `_lastUsedAt`.
  */
 const MIN_PRESENCE_INTERVAL_MS = 5 * 60 * 1000
 
@@ -23,6 +32,7 @@ let _pendingRefresh: ReturnType<typeof setTimeout> | null = null
 
 export function initPresence(client: Client): void {
   _client = client
+  _lastUsedAt = readPersistedLastUsedAt()
   setOnline()
 }
 
@@ -36,14 +46,14 @@ export function setOnline(): void {
 export function setIdle(): void {
   if (!_client?.user) return
   _currentStatus = 'idle'
-  // Idle status keeps the "last used X ago" stamp visible so anyone glancing
+  // Idle status keeps the relative-time stamp visible so anyone glancing
   // at the bot's profile sees the freshness even when it's gone idle.
-  const name = buildActivityName()
   _client.user.setPresence({
     status: 'idle',
-    activities: name ? [{ name, type: ActivityType.Watching }] : [],
+    activities: buildActivities(),
   })
   _lastPresenceUpdateAt = Date.now()
+  persistLastUsedAt()
 }
 
 export function setDnd(reason = 'Check logs for errors'): void {
@@ -52,7 +62,7 @@ export function setDnd(reason = 'Check logs for errors'): void {
   cancelIdleTimer()
   _client.user.setPresence({
     status: 'dnd',
-    activities: [{ name: reason, type: ActivityType.Watching }],
+    activities: [{ name: reason, state: reason, type: ActivityType.Custom }],
   })
   _lastPresenceUpdateAt = Date.now()
 }
@@ -94,16 +104,46 @@ function scheduleOnlineRefresh(): void {
 function pushPresenceNow(status: 'online'): void {
   if (!_client?.user) return
   _lastPresenceUpdateAt = Date.now()
-  const name = buildActivityName()
   _client.user.setPresence({
     status,
-    activities: name ? [{ name, type: ActivityType.Watching }] : [],
+    activities: buildActivities(),
   })
+  persistLastUsedAt()
+}
+
+function buildActivities() {
+  const text = buildActivityName()
+  if (!text) return []
+  // ActivityType.Custom suppresses Discord's verb prefix ("Watching ..."),
+  // showing just the `state` text. `name` is required by the API but ignored
+  // for display on Custom activities.
+  return [{ name: text, state: text, type: ActivityType.Custom }]
 }
 
 function buildActivityName(): string {
   if (!_lastUsedAt) return ''
-  return `last used ${formatRelative(_lastUsedAt)}`
+  return formatRelative(_lastUsedAt)
+}
+
+function readPersistedLastUsedAt(): Date | null {
+  try {
+    const raw = readFileSync(STATE_FILE, 'utf8')
+    const parsed = JSON.parse(raw) as { lastUsedAt?: string }
+    if (!parsed.lastUsedAt) return null
+    const d = new Date(parsed.lastUsedAt)
+    return Number.isNaN(d.getTime()) ? null : d
+  } catch {
+    return null
+  }
+}
+
+function persistLastUsedAt(): void {
+  if (!_lastUsedAt) return
+  try {
+    writeFileSync(STATE_FILE, JSON.stringify({ lastUsedAt: _lastUsedAt.toISOString() }))
+  } catch {
+    // Non-fatal — presence still works in-memory; we just won't survive a restart.
+  }
 }
 
 function formatRelative(d: Date): string {
