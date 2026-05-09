@@ -5,8 +5,6 @@ import {
   ContainerBuilder,
   TextDisplayBuilder,
   ActionRowBuilder,
-  ButtonBuilder,
-  ButtonStyle,
   StringSelectMenuBuilder,
   MessageFlags,
 } from 'discord.js'
@@ -75,15 +73,7 @@ export async function sendHelpPanel(
       .addOptions(sections)
   )
 
-  const buttonRow = new ActionRowBuilder<ButtonBuilder>().addComponents(
-    new ButtonBuilder()
-      .setCustomId('open_staff_request')
-      .setLabel('Request Staff Role')
-      .setEmoji('📝')
-      .setStyle(ButtonStyle.Primary),
-  )
-
-  const payload = { flags: MessageFlags.IsComponentsV2, components: [container, selectRow, buttonRow] }
+  const payload = { flags: MessageFlags.IsComponentsV2, components: [container, selectRow] }
   if ((interaction as StringSelectMenuInteraction).update) {
     await (interaction as StringSelectMenuInteraction).update(payload as any)
   } else {

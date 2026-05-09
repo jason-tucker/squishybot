@@ -148,7 +148,7 @@ The 7 staff roles (Tier 1 / Tier 2 / Tier 3 / Help Desk / Onsites / Security / L
 
 ### Staff request flow
 
-The "Request Staff Role" button (on `/help` and the Staff Requests help section) goes through:
+The "Request a Staff Role" button (on `/settings → Staff Role`) goes through:
 
 1. **`open_staff_request`** button → ephemeral CV2 message with a `staff:role_pick` string-select listing the 7 roles by label.
 2. **`staff:role_pick`** select → opens a modal `staff:request:{slug}` with two optional fields (`real_name`, `reason`). Slug is the suffix of the bot_settings key (e.g. `tier_1`, `help_desk`).
@@ -173,7 +173,7 @@ Actions: `delete`, `delete_confirm`, `rename`, `rename_submit`, `lock`, `unlock`
 - `report_reject_notice:{sessionKey}` / `report_reject_silent:{sessionKey}` — drop the session (with/without DMing reporter)
 
 Staff requests use:
-- `open_staff_request` — entry-point button (on `/help`, `/squishy`, etc.)
+- `open_staff_request` — entry-point button (on `/settings → Staff Role`)
 - `staff:role_pick` — string-select menu listing the 7 roles
 - `staff:request:{slug}` — modal submission carrying the picked role's slug
 - `staff:approve:{approvalId}` / `staff:deny:{approvalId}` — review buttons in the approval thread

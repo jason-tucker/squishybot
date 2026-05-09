@@ -102,22 +102,23 @@ export async function handleHelpPanelSelect(interaction: StringSelectMenuInterac
       .addTextDisplayComponents(new TextDisplayBuilder().setContent('## 📝 Staff Role Requests'))
       .addSeparatorComponents(sep())
       .addTextDisplayComponents(new TextDisplayBuilder().setContent(
-        'Want to join the server staff team? Submit a request and an admin will review it.\n\n' +
+        'Want to join the server staff team? Open **/settings → Staff Role** to request one. ' +
+        'An admin reviews each request.\n\n' +
         '**How it works:**\n' +
-        '1. Click **Submit Request** below — you get an ephemeral picker listing the 7 staff roles ' +
-        '(Tier 1 / Tier 2 / Tier 3 / Help Desk / Onsites / Security / Leadership).\n' +
-        '2. Pick the role you want — a small form pops up for your real / preferred name and a ' +
-        'short reason. Both are optional.\n' +
+        '1. Run **/settings** and click **Staff Role** — you\'ll see the 7 staff roles ' +
+        '(Tier 1 / Tier 2 / Tier 3 / Help Desk / Onsites / Security / Leadership) and their status.\n' +
+        '2. Click **Request a Staff Role**, pick the one you want, fill out the short form ' +
+        '(real / preferred name and reason — both optional).\n' +
         '3. Submit — an admin gets pinged in the staff approvals thread.\n' +
         '4. On **Approve**, the bot adds the role to you automatically and DMs you. On **Deny**, ' +
-        'you also get a DM.'
+        'you also get a DM.\n\n' +
+        '_/settings → Staff Role is also where you remove a staff role you no longer want._'
       ))
 
-    const row = new ActionRowBuilder<ButtonBuilder>().addComponents(
-      new ButtonBuilder().setCustomId('open_staff_request').setLabel('Submit Request').setEmoji('📝').setStyle(ButtonStyle.Primary),
-      new ButtonBuilder().setCustomId('help:back').setLabel('Back').setStyle(ButtonStyle.Secondary),
+    const backRow = new ActionRowBuilder<ButtonBuilder>().addComponents(
+      new ButtonBuilder().setCustomId('help:back').setLabel('Back').setStyle(ButtonStyle.Secondary)
     )
-    await interaction.update({ flags: MessageFlags.IsComponentsV2, components: [container, row] } as any)
+    await interaction.update({ flags: MessageFlags.IsComponentsV2, components: [container, backRow] } as any)
 
   } else if (section === 'panel') {
     const container = new ContainerBuilder()
