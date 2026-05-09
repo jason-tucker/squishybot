@@ -515,36 +515,51 @@ async function provisionStaffRoles(guild: Guild, byUserId: string): Promise<Prov
     if (role && role.position > basePosition) basePosition = role.position
   }
 
-  // 2. For each slot: prefer the already-linked role, then a name match, else create.
+  // 2. For each slot: prefer the already-linked role, then a name match, else
+  // create. In all three cases, also normalize the role's color to the
+  // canonical value so reruns repaint manually-fiddled colors back to spec.
   const resolvedIds: Record<string, string> = {}
   for (const def of STAFF_ROLE_DEFS) {
+    let role = null
     const linkedId = getSetting(def.key)
-    if (linkedId && guild.roles.cache.has(linkedId)) {
-      resolvedIds[def.key] = linkedId
+    if (linkedId) role = guild.roles.cache.get(linkedId) ?? null
+    if (role) {
+      resolvedIds[def.key] = role.id
       result.alreadyOk.push(def.label)
-      continue
+    } else {
+      const byName = guild.roles.cache.find(r => r.name === def.name && !r.managed) ?? null
+      if (byName) {
+        await setSetting(def.key, byName.id, byUserId)
+        resolvedIds[def.key] = byName.id
+        result.linked.push(def.label)
+        role = byName
+      } else {
+        try {
+          const created = await guild.roles.create({
+            name: def.name,
+            color: def.color,
+            hoist: true,
+            mentionable: false,
+            permissions: [],
+            reason: `staff role provisioning by ${byUserId}`,
+          })
+          await setSetting(def.key, created.id, byUserId)
+          resolvedIds[def.key] = created.id
+          result.created.push(def.label)
+          role = created
+        } catch (err) {
+          logger.warn(`Failed to create staff role ${def.name}:`, err)
+          result.errors.push(`${def.label}: ${(err as Error).message}`)
+        }
+      }
     }
-    const byName = guild.roles.cache.find(r => r.name === def.name && !r.managed)
-    if (byName) {
-      await setSetting(def.key, byName.id, byUserId)
-      resolvedIds[def.key] = byName.id
-      result.linked.push(def.label)
-      continue
-    }
-    try {
-      const created = await guild.roles.create({
-        name: def.name,
-        hoist: true,
-        mentionable: false,
-        permissions: [],
-        reason: `staff role provisioning by ${byUserId}`,
-      })
-      await setSetting(def.key, created.id, byUserId)
-      resolvedIds[def.key] = created.id
-      result.created.push(def.label)
-    } catch (err) {
-      logger.warn(`Failed to create staff role ${def.name}:`, err)
-      result.errors.push(`${def.label}: ${(err as Error).message}`)
+    if (role && role.color !== def.color) {
+      try {
+        await role.edit({ color: def.color, reason: `staff role color sync by ${byUserId}` })
+      } catch (err) {
+        logger.warn(`Failed to recolor staff role ${def.name}:`, err)
+        result.errors.push(`${def.label} color: ${(err as Error).message}`)
+      }
     }
   }
 

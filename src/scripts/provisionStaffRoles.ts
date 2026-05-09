@@ -29,6 +29,7 @@ interface DiscordRole {
   name: string
   position: number
   managed: boolean
+  color: number
 }
 
 const API = 'https://discord.com/api/v10'
@@ -113,43 +114,71 @@ async function main(): Promise<void> {
   const created: string[] = []
   const linkedNow: string[] = []
   const alreadyOk: string[] = []
+  const recolored: string[] = []
   const errors: string[] = []
   const resolvedIds: Record<string, string> = {}
+  // currentColor lets us decide whether a recolor PATCH is needed below.
+  const currentColor: Record<string, number> = {}
 
   for (const def of STAFF_ROLE_DEFS) {
+    let role: DiscordRole | undefined
     const linkedId = linked[def.key]
-    if (linkedId && allRoles.some(r => r.id === linkedId)) {
-      resolvedIds[def.key] = linkedId
+    if (linkedId) role = allRoles.find(r => r.id === linkedId)
+    if (role) {
+      resolvedIds[def.key] = role.id
       alreadyOk.push(def.label)
-      console.log(`  ✓ ${def.label} — already linked (${linkedId})`)
-      continue
+      console.log(`  ✓ ${def.label} — already linked (${role.id})`)
+    } else {
+      const byName = allRoles.find(r => r.name === def.name && !r.managed)
+      if (byName) {
+        await upsertSetting(def.key, byName.id)
+        resolvedIds[def.key] = byName.id
+        linkedNow.push(def.label)
+        role = byName
+        console.log(`  → ${def.label} — linked existing role by name (${byName.id})`)
+      } else {
+        try {
+          const newRole = await api<DiscordRole>('POST', `/guilds/${GUILD_ID}/roles`, {
+            name: def.name,
+            color: def.color,
+            hoist: true,
+            mentionable: false,
+            permissions: '0',
+          })
+          await upsertSetting(def.key, newRole.id)
+          resolvedIds[def.key] = newRole.id
+          created.push(def.label)
+          role = newRole
+          console.log(`  + ${def.label} — created and linked (${newRole.id})`)
+        } catch (err) {
+          const msg = (err as Error).message
+          errors.push(`${def.label}: ${msg}`)
+          console.error(`  ✗ ${def.label} — ${msg}`)
+        }
+        // Tiny spacing between role creations to be polite to the rate limiter.
+        await sleep(150)
+      }
     }
-    const byName = allRoles.find(r => r.name === def.name && !r.managed)
-    if (byName) {
-      await upsertSetting(def.key, byName.id)
-      resolvedIds[def.key] = byName.id
-      linkedNow.push(def.label)
-      console.log(`  → ${def.label} — linked existing role by name (${byName.id})`)
-      continue
-    }
+    if (role) currentColor[def.key] = role.color
+  }
+
+  // Recolor pass: PATCH any role whose current color drifts from the canonical
+  // value in STAFF_ROLE_DEFS. Newly-created roles already match, so this is a
+  // no-op for them; freshly linked existing roles are the typical target.
+  for (const def of STAFF_ROLE_DEFS) {
+    const id = resolvedIds[def.key]
+    if (!id) continue
+    if (currentColor[def.key] === def.color) continue
     try {
-      const newRole = await api<DiscordRole>('POST', `/guilds/${GUILD_ID}/roles`, {
-        name: def.name,
-        hoist: true,
-        mentionable: false,
-        permissions: '0',
-      })
-      await upsertSetting(def.key, newRole.id)
-      resolvedIds[def.key] = newRole.id
-      created.push(def.label)
-      console.log(`  + ${def.label} — created and linked (${newRole.id})`)
+      await api('PATCH', `/guilds/${GUILD_ID}/roles/${id}`, { color: def.color })
+      recolored.push(def.label)
+      console.log(`  🎨 ${def.label} — color set to #${def.color.toString(16).padStart(6, '0')}`)
+      await sleep(150)
     } catch (err) {
       const msg = (err as Error).message
-      errors.push(`${def.label}: ${msg}`)
-      console.error(`  ✗ ${def.label} — ${msg}`)
+      errors.push(`${def.label} color: ${msg}`)
+      console.error(`  ✗ ${def.label} color — ${msg}`)
     }
-    // Tiny spacing between role creations to be polite to the rate limiter.
-    await sleep(150)
   }
 
   // Bulk reposition: each slot one above the previous, starting at base+1.
@@ -174,6 +203,7 @@ async function main(): Promise<void> {
   console.log(`  already linked: ${alreadyOk.length}${alreadyOk.length ? ' — ' + alreadyOk.join(', ') : ''}`)
   console.log(`  linked existing: ${linkedNow.length}${linkedNow.length ? ' — ' + linkedNow.join(', ') : ''}`)
   console.log(`  created: ${created.length}${created.length ? ' — ' + created.join(', ') : ''}`)
+  console.log(`  recolored: ${recolored.length}${recolored.length ? ' — ' + recolored.join(', ') : ''}`)
   if (errors.length) console.log(`  errors: ${errors.join(' | ')}`)
   console.log('\nDone. Restart the bot so its in-memory settings cache reloads:')
   console.log('  squishybot restart\n')
