@@ -92,8 +92,7 @@ export async function handleStaffRolePickSelect(interaction: StringSelectMenuInt
 }
 
 /**
- * Back-compat shim — the help panel and /squishy still call
- * showStaffRequestModal; keep the export pointing at the new picker so legacy
- * imports don't need to change.
+ * Back-compat shim — older callers imported `showStaffRequestModal`; keep the
+ * export pointing at the new picker so those imports don't need to change.
  */
 export const showStaffRequestModal = showStaffRolePicker

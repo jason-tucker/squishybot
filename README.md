@@ -34,7 +34,7 @@ Roadmap, completed work, and open action items are tracked in the [Bot Developme
 
 ### Staff Requests
 
-- Submit a request via the `/squishy` panel
+- Submit a request via `/settings → Staff Role`
 - Bot posts the request in a configured admin thread, pinging the designated reviewer
 - Sudo can Approve or Deny in place; the requester gets a DM with the result
 
@@ -74,13 +74,13 @@ Roadmap, completed work, and open action items are tracked in the [Bot Developme
 ### User Profile Editor
 
 - **Sudo edits anyone's profile** — `/sudo → Settings → User Profiles` lets a sudo member browse profiles by Discord member picker, or right-click any member → **Manage User → Edit Profile** for a faster path. Sudo can edit: display name, real name, birthday, staff category / department / tier / leadership title, and the birthday opt-out flags.
-- **Self-service** — `/squishy → Edit My Profile` opens the same editor in self mode for the caller. Limited to display name, birthday, and the two birthday flags. All edits are logged.
+- **Self-service** — `/settings → Profile & Birthday` opens the same editor in self mode for the caller. Limited to display name, birthday, and the two birthday flags. All edits are logged.
 
 ### Game Roles + LFG Pings
 
 - **Catalog (sudo)** — `/sudo → Settings → Games` lets sudo define games with a name, aliases, View role, Ping role, channel, optional category, sort order, visibility, and archive flag.
 - **Member opt-in** — `/games` lists every visible game with two toggles per game: **View** (assigns the View role) and **Pings** (assigns the LFG Ping role). Toggling immediately syncs the role on Discord.
-- **Sudo-acts-on-behalf** — sudo can right-click any member → **Manage User → Game Prefs** and toggle View / Pings on that member's behalf. Same UI, same flow. Same pattern applies to profile editing — `/squishy → Edit My Profile` for self, **Manage User → Edit Profile** for sudo.
+- **Sudo-acts-on-behalf** — sudo can right-click any member → **Manage User → Game Prefs** and toggle View / Pings on that member's behalf. Same UI, same flow. Same pattern applies to profile editing — `/settings → Profile & Birthday` for self, **Manage User → Edit Profile** for sudo.
 - **`/play <game>`** — LFG ping. Autocompletes on name + aliases. Posts a Components V2 message in the game's channel pinging the LFG role; anyone can click the **🎮 I want to play!** button to join the session (toggle on/off). The host is locked in — they delete the message to cancel. 30-minute per-(user, game) cooldown; sudo can pass `force:true` to bypass.
 
 ### Planned Features
@@ -204,7 +204,8 @@ Four top-level slash commands plus one right-click context menu. All responses a
 | Command | Access | Description |
 |---|---|---|
 | `/voice` | Owner / Host / Sudo | Open an ephemeral copy of the control panel for the auto channel you're in |
-| `/squishy` | Everyone | User-facing menu: bot status, feature explainers (Voice / Panel / Reports / Staff), profile editor button, staff-request button |
+| `/help` | Everyone | User-facing menu: bot status + feature explainers (Voice / Panel / Reports / Staff). Routes self-service edits to `/settings`. |
+| `/settings` | Everyone | Self-service: Profile & Birthday, Game Prefs, Staff Role (request / remove). |
 | `/sudo` | Sudo | Admin select-menu panel: Settings (sudo users, channels, voice, hubs, auto threads, games, user profiles), active channels, hubs, force cleanup, pending approvals, run reconciler, restart instructions |
 | `/games` | Everyone | Pick which games you want View access + LFG pings for |
 | `/play` | Everyone | LFG ping. Posts a CV2 message in the game's channel with a "🎮 I want to play!" button others can click to join the session. Rate-limited per-(user, game). |

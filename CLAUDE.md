@@ -21,7 +21,7 @@ When you add a new per-user feature, follow the pattern. Don't ship a self-servi
 
 The Manage User context menu (`src/commands/manageUser.ts`) is the canonical landing pad for sudo-acts-on-behalf flows — add a new button there for every new per-user surface.
 
-**Avoid command bloat for self-service entry points.** Don't register a top-level slash command for every per-user feature — push them through `/squishy`'s panel-with-buttons UX instead. Profile editing is reachable via the **Edit My Profile** button on `/squishy`, not a `/profile` command. Reserve top-level slash commands for high-frequency or high-value flows (`/games`, `/play`, `/voice`, `/report`).
+**Avoid command bloat for self-service entry points.** Don't register a top-level slash command for every per-user feature — push them through `/settings`' panel-with-buttons UX instead. Profile editing is reachable via the **Profile & Birthday** button on `/settings`, not a `/profile` command. Reserve top-level slash commands for high-frequency or high-value flows (`/games`, `/play`, `/voice`, `/report`).
 
 ---
 
@@ -53,7 +53,8 @@ Slash commands are consolidated to four top-level commands plus one context menu
 | Command | Description | Permission |
 |---|---|---|
 | `/voice` | Open an ephemeral copy of the control panel for the channel you're currently in | Owner/Host/Sudo |
-| `/squishy` | User-facing menu: bot status, feature explainers, **Edit My Profile** button (opens profileEditor in self mode), Request Staff Role button | Everyone |
+| `/help` | User-facing menu: bot status + feature explainers (Voice / Panel / Reports / Staff). Self-service edits live under `/settings`. | Everyone |
+| `/settings` | Self-service: Profile & Birthday, Game Prefs, Staff Role (request / remove on self). | Everyone |
 | `/sudo` | Admin select-menu panel: Settings, Manage user (pick), Game Night (schedule), Active VCs, Hubs, Force cleanup, Pending approvals, Run reconciler, Restart instructions. Sub-panels have 🏠 Back to /sudo. | Sudo |
 | `/report` | Open a modal to file a GitHub issue (Title / Type / Description / Steps); owner approves via DM before it lands on GitHub | Everyone |
 | `/games` | Pick which games you want View / LFG-ping roles for | Everyone |
