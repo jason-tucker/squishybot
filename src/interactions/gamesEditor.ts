@@ -190,14 +190,17 @@ function statusInline(p: ResolvedPref): string {
 
 /**
  * Returns a short "⚠️ missing X, Y" warning when a game's catalog row is
- * missing one or more of the fields needed for it to actually function:
- * a view role, a chat channel, or a ping role. Shown to sudo viewers only
- * (regular members shouldn't be told to ask sudo "to fix" a game inline —
- * that lives on the dedicated games-catalog screen).
+ * missing a field needed for it to actually function: a chat channel (the
+ * View toggle target) or a ping role. Shown to sudo viewers only (regular
+ * members shouldn't be told to ask sudo "to fix" a game inline — that lives
+ * on the dedicated games-catalog screen).
+ *
+ * Note: the legacy `roleId` (view role) is no longer required — view access
+ * is granted via per-member channel overwrites on `channelId`. So a game
+ * with a channel + ping-role is fully functional even with `roleId` empty.
  */
 function setupWarning(g: Game): string | null {
   const missing: string[] = []
-  if (!g.roleId)     missing.push('view-role')
   if (!g.channelId)  missing.push('channel')
   if (!g.pingRoleId) missing.push('ping-role')
   return missing.length > 0 ? `⚠️ missing ${missing.join(', ')}` : null

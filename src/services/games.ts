@@ -106,11 +106,11 @@ export async function deleteGame(id: string): Promise<void> {
 
 export interface ResolvedPref {
   game: Game
-  /** Effective view state: DB row OR the member already holds the view role. */
+  /** Effective view state: DB row OR a member-level VIEW_CHANNEL allow on the game's channel. */
   wantsView: boolean
   /** Effective ping state: DB row OR the member already holds the ping role. */
   wantsPing: boolean
-  /** Whether the effective state was inferred from a Discord role rather than an explicit DB pref. */
+  /** Whether the effective state was inferred from current Discord state (channel overwrite for view, ping role for ping) rather than an explicit DB pref. */
   fromRole: { view: boolean; ping: boolean }
 }
 
@@ -304,7 +304,7 @@ export async function restoreMemberPrefs(member: GuildMember): Promise<{ restore
 // ---------------------------------------------------------------------------
 
 export interface GameInterest {
-  /** Distinct members (by Discord id) who hold the View role OR have wantsView=true. */
+  /** Distinct members (by Discord id) with VIEW_CHANNEL allow on the game's channel OR wantsView=true in DB. */
   view: number
   /** Distinct members who hold the Ping role OR have wantsPing=true. */
   ping: number
