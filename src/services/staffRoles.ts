@@ -26,6 +26,7 @@ export const STAFF_ROLE_DEFS: StaffRoleDef[] = [
   { key: 'staff.role.help_desk',  slug: 'help_desk',  label: 'Help Desk',  name: 'Help Desk' },
   { key: 'staff.role.onsites',    slug: 'onsites',    label: 'Onsites',    name: 'Onsites' },
   { key: 'staff.role.security',   slug: 'security',   label: 'Security',   name: 'Security' },
+  { key: 'staff.role.sales',      slug: 'sales',      label: 'Sales',      name: 'Sales' },
   { key: 'staff.role.leadership', slug: 'leadership', label: 'Leadership', name: 'Leadership' },
 ]
 
