@@ -14,12 +14,12 @@ const LAST_USED_SETTING_KEY = 'presence.last_used_at'
 
 /**
  * Throttle the presence-update push to once every 5 minutes. The status text
- * is a relative timestamp ("Xm ago") — refreshing more often than once per
- * minute is wasted work AND risks bumping into Discord's PRESENCE_UPDATE rate
- * limit (~5 per 20 s per shard ≈ 4 s/update floor). 5 minutes is far above
- * the floor and matches the granularity of the displayed text. Updates that
- * arrive during the throttle window coalesce — the next push carries the
- * latest `_lastUsedAt`.
+ * carries a relative timestamp ("/help • Xm ago") — refreshing more often
+ * than once per minute is wasted work AND risks bumping into Discord's
+ * PRESENCE_UPDATE rate limit (~5 per 20 s per shard ≈ 4 s/update floor).
+ * 5 minutes is far above the floor and matches the granularity of the
+ * displayed text. Updates that arrive during the throttle window coalesce —
+ * the next push carries the latest `_lastUsedAt`.
  */
 const MIN_PRESENCE_INTERVAL_MS = 5 * 60 * 1000
 
@@ -123,8 +123,8 @@ function buildActivities() {
 }
 
 function buildActivityName(): string {
-  if (!_lastUsedAt) return ''
-  return formatRelative(_lastUsedAt)
+  if (!_lastUsedAt) return '/help'
+  return `/help • ${formatRelative(_lastUsedAt)}`
 }
 
 function readPersistedLastUsedAt(): Date | null {
