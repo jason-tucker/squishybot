@@ -60,15 +60,25 @@ export async function handleSudoPanelSelect(interaction: StringSelectMenuInterac
     const rows = await db.select().from(autoChannels).where(eq(autoChannels.guildId, guildId))
     const guild = interaction.guild!
     const { deleteAutoChannel } = await import('../../services/voice/autoChannel')
+    // Was sequential 1-fetch + 1-delete per row — slow with 20+ active rooms
+    // and a sudo waiting on the deferUpdate ack. Process in chunks of 5 so
+    // empty-channel deletes can pipeline without fanning out into a global
+    // REST rate-limit storm. cache.get avoids the fetch entirely when hot.
+    const CHUNK = 5
     let deleted = 0, skipped = 0
-    for (const r of rows) {
-      const vc = await guild.channels.fetch(r.voiceChannelId).catch(() => null)
-      if (!vc || (vc.isVoiceBased() && vc.members.size === 0)) {
-        await deleteAutoChannel(interaction.client, r)
-        deleted++
-      } else {
-        skipped++
-      }
+    for (let i = 0; i < rows.length; i += CHUNK) {
+      const slice = rows.slice(i, i + CHUNK)
+      const results = await Promise.all(slice.map(async r => {
+        const vc = guild.channels.cache.get(r.voiceChannelId)
+          ?? await guild.channels.fetch(r.voiceChannelId).catch(() => null)
+        if (!vc || (vc.isVoiceBased() && vc.members.size === 0)) {
+          await deleteAutoChannel(interaction.client, r)
+          return 'deleted' as const
+        }
+        return 'skipped' as const
+      }))
+      deleted += results.filter(x => x === 'deleted').length
+      skipped += results.filter(x => x === 'skipped').length
     }
     await sendPanel(interaction, '🧹 Cleanup Complete', `**Deleted:** ${deleted}\n**Skipped (active):** ${skipped}`, 0x57f287)
     return

@@ -15,7 +15,7 @@ import {
 import { decodeVcId } from '../../utils/customId'
 import { db } from '../../db/client'
 import { autoChannels } from '../../db/schema'
-import { eq } from 'drizzle-orm'
+import { and, eq, sql } from 'drizzle-orm'
 import { canControlChannel, isSudo } from '../../services/voice/permissions'
 import { postOrUpdateControlPanel, buildPanelPayloadForRecord } from '../../services/voice/controlPanel'
 import { deleteAutoChannel } from '../../services/voice/autoChannel'
@@ -290,9 +290,27 @@ export async function handleVoiceControlButton(interaction: ButtonInteraction): 
       await interaction.reply({ content: '❌ You need to be in the voice channel to claim it.', ephemeral: true })
       return
     }
-    const newHosts = record.hostUserIds.filter(id => id !== member.id)
-    await db.update(autoChannels).set({ ownerUserId: member.id, hostUserIds: newHosts }).where(eq(autoChannels.voiceChannelId, voiceChannelId))
-    const updated = { ...record, ownerUserId: member.id, hostUserIds: newHosts }
+    // CAS-style update: only succeeds if owner_user_id is still what we read.
+    // Two near-simultaneous Claim clicks both pass the "owner present" check
+    // above; without this guard both UPDATEs would land and the second would
+    // silently overwrite the first. With it, the second sees 0 rows and we
+    // bail with a clean message.
+    const claimed = await db.update(autoChannels)
+      .set({
+        ownerUserId: member.id,
+        hostUserIds: sql`array_remove(${autoChannels.hostUserIds}, ${member.id})`,
+      })
+      .where(and(
+        eq(autoChannels.voiceChannelId, voiceChannelId),
+        eq(autoChannels.ownerUserId, record.ownerUserId),
+      ))
+      .returning()
+
+    if (claimed.length === 0) {
+      await interaction.reply({ content: '❌ Someone else just claimed it. Refresh the panel.', ephemeral: true })
+      return
+    }
+    const updated = claimed[0]
 
     // While hidden the new owner needs an explicit view-channel allow so
     // they don't lose track of their own VC after leaving voice.

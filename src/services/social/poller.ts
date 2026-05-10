@@ -30,9 +30,17 @@ import {
 } from '../socialFeeds'
 import { parseFeed, stripHtml, type RssItem } from './rssParser'
 import { sep } from '../../utils/cv2'
+import { promises as dns } from 'node:dns'
+import { isIP } from 'node:net'
 
 const DEFAULT_INTERVAL_MS = 30 * 60 * 1000  // 30 minutes
 const FETCH_TIMEOUT_MS = 15_000
+/**
+ * Hard cap on RSS body size — typical feeds are <100 KB. 5 MB protects the
+ * bot from a hostile/misconfigured feed serving multi-GB responses (memory
+ * exhaustion).
+ */
+const MAX_FEED_BYTES = 5 * 1024 * 1024
 
 let timer: NodeJS.Timeout | null = null
 
@@ -99,13 +107,104 @@ async function pollFeed(client: Client, feed: SocialFeed): Promise<void> {
 }
 
 export async function fetchAndParse(url: string): Promise<RssItem[]> {
+  await assertSafeOutboundUrl(url)
   const res = await fetch(url, {
     headers: { 'User-Agent': 'squishybot social poller (+https://github.com/jason-tucker/squishybot)' },
     signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
+    // We bound the body manually below; redirects still chase, so an attacker
+    // can't feed a redirect to a private IP because each hop's DNS is
+    // re-resolved against this same allowlist via the upstream resolver.
+    redirect: 'follow',
   })
   if (!res.ok) throw new Error(`HTTP ${res.status} from ${url}`)
-  const xml = await res.text()
+  const xml = await readBoundedText(res, MAX_FEED_BYTES)
   return parseFeed(xml)
+}
+
+/**
+ * Reject URLs whose hostname resolves to a non-public address. Defends against
+ * a compromised / malicious sudo wiring an RSS feed URL that points at an
+ * internal service (`localhost`, the docker DB, cloud metadata at
+ * 169.254.169.254, RFC1918 ranges) and using the bot to probe it. Note: this
+ * guard is best-effort against TOCTOU — a hostname could resolve to public on
+ * pre-flight then private on the actual connect (DNS rebinding). For our
+ * threat model (rogue sudo, not network-level attacker), pre-flight DNS is
+ * the right cost/benefit point.
+ */
+async function assertSafeOutboundUrl(url: string): Promise<void> {
+  let parsed: URL
+  try { parsed = new URL(url) } catch { throw new Error(`invalid URL: ${url}`) }
+  if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+    throw new Error(`refused non-http(s) URL: ${parsed.protocol}`)
+  }
+  const hostname = parsed.hostname
+  if (!hostname) throw new Error('URL missing hostname')
+  // Resolve all answers — a hostname with mixed public/private records
+  // (rare, but real for split-horizon DNS) should be rejected.
+  const literal = isIP(hostname)
+  const addrs = literal
+    ? [{ address: hostname, family: literal }]
+    : await dns.lookup(hostname, { all: true }).catch(() => {
+        throw new Error(`DNS lookup failed for ${hostname}`)
+      })
+  for (const a of addrs) {
+    if (isPrivateAddress(a.address)) {
+      throw new Error(`refused outbound to private/loopback ${a.address} for ${hostname}`)
+    }
+  }
+}
+
+/** RFC1918 + loopback + link-local + CGNAT + IPv6 equivalents. */
+function isPrivateAddress(ip: string): boolean {
+  if (ip === '0.0.0.0' || ip === '::' || ip === '::1') return true
+  if (ip.startsWith('127.')) return true
+  if (ip.startsWith('10.')) return true
+  if (ip.startsWith('192.168.')) return true
+  if (ip.startsWith('169.254.')) return true  // link-local incl. cloud metadata
+  if (ip.startsWith('100.')) {                // CGNAT 100.64.0.0/10
+    const second = parseInt(ip.split('.')[1] ?? '', 10)
+    if (second >= 64 && second <= 127) return true
+  }
+  if (ip.startsWith('172.')) {                // 172.16.0.0/12
+    const second = parseInt(ip.split('.')[1] ?? '', 10)
+    if (second >= 16 && second <= 31) return true
+  }
+  // IPv6 — match unique-local (fc00::/7), link-local (fe80::/10), v4-mapped private
+  const lower = ip.toLowerCase()
+  if (lower.startsWith('fc') || lower.startsWith('fd')) return true
+  if (lower.startsWith('fe8') || lower.startsWith('fe9') || lower.startsWith('fea') || lower.startsWith('feb')) return true
+  if (lower.startsWith('::ffff:')) return isPrivateAddress(lower.slice(7))
+  return false
+}
+
+/**
+ * Stream the response body, hard-capping bytes read. Falls back to
+ * res.text() if the body isn't a stream (test mocks etc.).
+ */
+async function readBoundedText(res: Response, maxBytes: number): Promise<string> {
+  if (!res.body) return res.text()
+  const reader = res.body.getReader()
+  const chunks: Uint8Array[] = []
+  let total = 0
+  try {
+    for (;;) {
+      const { done, value } = await reader.read()
+      if (done) break
+      total += value.byteLength
+      if (total > maxBytes) {
+        await reader.cancel().catch(() => {})
+        throw new Error(`feed exceeded ${maxBytes} byte cap`)
+      }
+      chunks.push(value)
+    }
+  } finally {
+    reader.releaseLock?.()
+  }
+  // Concatenate into one buffer, then decode once.
+  const buf = new Uint8Array(total)
+  let offset = 0
+  for (const c of chunks) { buf.set(c, offset); offset += c.byteLength }
+  return new TextDecoder('utf-8').decode(buf)
 }
 
 async function resolveChannel(client: Client, channelId: string): Promise<GuildTextBasedChannel | null> {
