@@ -1,4 +1,4 @@
-import { pgTable, text, uuid, timestamp, boolean, integer } from 'drizzle-orm/pg-core'
+import { pgTable, text, uuid, timestamp, boolean, integer, index } from 'drizzle-orm/pg-core'
 
 export const autoChannels = pgTable('auto_channels', {
   id: uuid('id').defaultRandom().primaryKey(),
@@ -26,4 +26,9 @@ export const autoChannels = pgTable('auto_channels', {
   scheduledCleanupAt: timestamp('scheduled_cleanup_at'),
   createdAt: timestamp('created_at').notNull().defaultNow(),
   lastActiveAt: timestamp('last_active_at').notNull().defaultNow(),
-})
+}, t => ({
+  // /sudo Active VCs and most service-level lookups filter by guild_id.
+  guildIdx: index('auto_channels_guild_idx').on(t.guildId),
+  // Right-click → Manage User → "owned channels" looks up by owner.
+  ownerIdx: index('auto_channels_owner_idx').on(t.ownerUserId),
+}))

@@ -1,4 +1,4 @@
-import { pgTable, text, uuid, timestamp, jsonb } from 'drizzle-orm/pg-core'
+import { pgTable, text, uuid, timestamp, jsonb, index } from 'drizzle-orm/pg-core'
 
 export const staffApprovals = pgTable('staff_approvals', {
   id: uuid('id').defaultRandom().primaryKey(),
@@ -11,4 +11,8 @@ export const staffApprovals = pgTable('staff_approvals', {
   reviewNote: text('review_note'),
   createdAt: timestamp('created_at').notNull().defaultNow(),
   reviewedAt: timestamp('reviewed_at'),
-})
+}, t => ({
+  // /sudo home and the approvals panel filter on (guildId, status='pending')
+  // every render. Without this the table scans per query.
+  guildStatusIdx: index('staff_approvals_guild_status_idx').on(t.guildId, t.status),
+}))

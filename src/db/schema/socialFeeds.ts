@@ -1,4 +1,4 @@
-import { pgTable, text, uuid, boolean, timestamp } from 'drizzle-orm/pg-core'
+import { pgTable, text, uuid, boolean, timestamp, index } from 'drizzle-orm/pg-core'
 
 /**
  * RSS-backed social feeds the bot polls and reposts into a Discord channel.
@@ -21,4 +21,7 @@ export const socialFeeds = pgTable('social_feeds', {
   lastError: text('last_error'),
   createdByDiscordId: text('created_by_discord_id'),
   createdAt: timestamp('created_at').notNull().defaultNow(),
-})
+}, t => ({
+  // Settings panel + poller list-by-guild queries scan otherwise.
+  guildIdx: index('social_feeds_guild_idx').on(t.guildId),
+}))

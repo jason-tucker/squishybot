@@ -1,4 +1,4 @@
-import { pgTable, text, uuid, timestamp, integer, boolean } from 'drizzle-orm/pg-core'
+import { pgTable, text, uuid, timestamp, integer, boolean, uniqueIndex, index } from 'drizzle-orm/pg-core'
 
 export const userProfiles = pgTable('user_profiles', {
   id: uuid('id').defaultRandom().primaryKey(),
@@ -17,4 +17,12 @@ export const userProfiles = pgTable('user_profiles', {
   leadershipTitle: text('leadership_title'),
   createdAt: timestamp('created_at').notNull().defaultNow(),
   updatedAt: timestamp('updated_at').notNull().defaultNow(),
-})
+}, t => ({
+  // One profile per (guild, user) — enforces data integrity AND serves the
+  // upsert + ensureProfile path. Without this, ensureProfile races could
+  // create duplicate rows on concurrent first-edits.
+  guildUserUq: uniqueIndex('user_profiles_guild_user_uq').on(t.guildId, t.userId),
+  // Birthday scheduler runs once a day filtering on (guildId, month, day,
+  // pings_enabled). Indexing the month+day half makes the daily scan O(matches).
+  birthdayIdx: index('user_profiles_birthday_idx').on(t.guildId, t.birthdayMonth, t.birthdayDay),
+}))
