@@ -11,7 +11,7 @@ import { syncTextChannelPermissions } from './permissions'
 import { seedHubsFromEnv } from './hubManager'
 import { createAutoChannel } from './autoChannel'
 import { computeAutoName } from './autoNaming'
-import { backfillMember, clearMembers } from './voiceMembers'
+import { backfillMembers, clearMembers } from './voiceMembers'
 import { logger } from '../logger'
 import { getSetting, unregisterHubChannel, untrackAutoChannelText, updateHubChannelId } from '../settings'
 
@@ -39,15 +39,21 @@ export async function runReconciler(client: Client): Promise<ReconcilerResult> {
   await seedHubsFromEnv(guild)
 
   // --- Reconcile known auto channels from DB ---
-  // Process records in parallel: each record's inner work serializes (fetch
+  // Process records in chunks: each record's inner work serializes (fetch
   // → permissions sync → message sweep → sticky), but records don't depend
-  // on each other, so a server with N rooms recovers in roughly the time
-  // of one record instead of N×.
+  // on each other. Bound the parallelism so a server with N rooms doesn't
+  // fan out into N parallel REST request streams (Discord's global REST
+  // bucket would shed load and add per-record latency anyway).
+  const RECONCILE_CONCURRENCY = 5
   const records = await db.select().from(autoChannels).where(eq(autoChannels.guildId, guild.id))
   const trackedVoiceIds = new Set(records.map(r => r.voiceChannelId))
 
-  await Promise.all(records.map(async (record) => {
-    const vc = await guild.channels.fetch(record.voiceChannelId).catch(() => null)
+  const reconcileOne = async (record: typeof records[number]) => {
+    // Cache.get is free; the bot manages these channels so they're cached
+    // once READY fires. Falls back to fetch only if the cache is cold (e.g.
+    // first reconcile pass before the guild fully populates).
+    const vc = guild.channels.cache.get(record.voiceChannelId)
+      ?? await guild.channels.fetch(record.voiceChannelId).catch(() => null)
 
     if (!vc) {
       // Voice channel gone — clean up text channel and DB row
@@ -68,16 +74,15 @@ export async function runReconciler(client: Client): Promise<ReconcilerResult> {
     }
 
     // Backfill member join times for anyone currently in the channel that we
-    // didn't yet have a row for. Original join times pre-restart are lost; we
-    // record `now()` and only for members not already tracked.
+    // didn't yet have a row for. One bulk INSERT instead of N parallel calls.
     if (vc.isVoiceBased()) {
-      await Promise.all(vc.members.map(m => backfillMember(record.voiceChannelId, m.id)))
+      await backfillMembers(record.voiceChannelId, vc.members.map(m => m.id))
     }
 
     // Hoist the text-channel fetch — both the auto-rename retry below AND
-    // the permission sync need it, and fetching twice was wasted work on
-    // every reconcile pass (one fetch per record × 2 = 2N HTTP calls).
-    const tc = await guild.channels.fetch(record.textChannelId).catch(() => null)
+    // the permission sync need it. Cache first to skip the HTTP round-trip.
+    const tc = guild.channels.cache.get(record.textChannelId)
+      ?? await guild.channels.fetch(record.textChannelId).catch(() => null)
 
     // Retroactively auto-rename when the channel is opted into auto-naming
     // and any current member is playing something. Covers the gap where
@@ -109,8 +114,12 @@ export async function runReconciler(client: Client): Promise<ReconcilerResult> {
           && m.id !== record.controlPanelMsgId
           && m.id !== record.stickyMsgId
         )
-        // Delete stale messages in parallel — they're independent.
-        await Promise.all([...stale.values()].map((m: any) => m.delete().catch(() => {})))
+        // Delete sequentially: parallel-deleting up to 30 messages × N
+        // records was easily a hundred concurrent DELETE calls and tripped
+        // Discord's global REST bucket on busy boots.
+        for (const m of stale.values()) {
+          await (m as any).delete().catch(() => {})
+        }
       }
 
       if (!record.controlPanelMsgId) {
@@ -132,7 +141,12 @@ export async function runReconciler(client: Client): Promise<ReconcilerResult> {
       // Always re-post the sticky on startup so it's at the bottom and current
       await postOrUpdateSticky(client, record)
     }
-  }))
+  }
+
+  for (let i = 0; i < records.length; i += RECONCILE_CONCURRENCY) {
+    const slice = records.slice(i, i + RECONCILE_CONCURRENCY)
+    await Promise.all(slice.map(reconcileOne))
+  }
 
   // --- Scan category for occupied channels not in the DB ---
   // Handles the case where the bot was offline when a user joined a hub.

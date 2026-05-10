@@ -11,6 +11,19 @@ import type { AutoChannelRecord } from '../../types/voice'
 import { listMembers } from './voiceMembers'
 import { logger } from '../logger'
 
+/**
+ * Hash of the inputs that drive the panel render, keyed by voiceChannelId.
+ * Lets us skip a no-op `existing.edit()` when nothing visible changed —
+ * voiceStateUpdate fires for mute/deafen/self-video toggles too, and we'd
+ * otherwise hit Discord with an edit per such event. Cleared from
+ * `deleteAutoChannel` via {@link clearPanelHash}.
+ */
+const lastPanelInputHash = new Map<string, string>()
+
+export function clearPanelHash(voiceChannelId: string): void {
+  lastPanelInputHash.delete(voiceChannelId)
+}
+
 export async function buildPanelPayloadForRecord(client: Client, record: AutoChannelRecord) {
   const [{ ownerTag, hostTags }, members] = await Promise.all([
     resolveDisplayTags(client, record),
@@ -23,16 +36,20 @@ async function resolveDisplayTags(client: Client, record: AutoChannelRecord): Pr
   const guild = client.guilds.cache.first()
   if (!guild) return { ownerTag: `<@${record.ownerUserId}>`, hostTags: record.hostUserIds.map(id => `<@${id}>`) }
 
-  const ownerMember = await guild.members.fetch(record.ownerUserId).catch(() => null)
-  const ownerTag = ownerMember ? ownerMember.displayName : `<@${record.ownerUserId}>`
+  // Prefer cache (GuildMembers intent populates it on READY + on join). Falls
+  // back to fetch only on miss. Without this, every voiceStateUpdate fired
+  // 1+N HTTP round-trips just to render display names — cache.get is free.
+  const resolveDisplayName = async (id: string): Promise<string> => {
+    const cached = guild.members.cache.get(id)
+    if (cached) return cached.displayName
+    const fetched = await guild.members.fetch(id).catch(() => null)
+    return fetched ? fetched.displayName : `<@${id}>`
+  }
 
-  const hostTags = await Promise.all(
-    record.hostUserIds.map(async id => {
-      const m = await guild.members.fetch(id).catch(() => null)
-      return m ? m.displayName : `<@${id}>`
-    })
-  )
-
+  const [ownerTag, ...hostTags] = await Promise.all([
+    resolveDisplayName(record.ownerUserId),
+    ...record.hostUserIds.map(resolveDisplayName),
+  ])
   return { ownerTag, hostTags }
 }
 
@@ -81,10 +98,29 @@ export async function postOrUpdateControlPanel(
   const payload = buildControlPanelPayload(record, ownerTag, hostTags, members)
 
   if (record.controlPanelMsgId) {
+    // Skip a no-op edit when none of the visible inputs changed. The hash
+    // covers everything `buildControlPanelPayload` reads: record state,
+    // owner/host display names, member list with presence + join times.
+    const inputHash = JSON.stringify({
+      o: record.ownerUserId,
+      h: record.hostUserIds,
+      l: record.isLocked,
+      d: record.isHidden,
+      n: record.manualName,
+      t: ownerTag,
+      ht: hostTags,
+      m: members.map(m => [m.userId, m.joinedAt.getTime(), m.game]),
+    })
+    if (lastPanelInputHash.get(record.voiceChannelId) === inputHash) return
+
     const existing = await textChannel.messages.fetch(record.controlPanelMsgId).catch(() => null)
     if (existing) {
       const editErr = await existing.edit({ ...payload, content: null } as any).then(() => null).catch(err => err)
-      if (editErr) logger.error(`Failed to edit control panel (vc=${record.voiceChannelId}):`, editErr)
+      if (editErr) {
+        logger.error(`Failed to edit control panel (vc=${record.voiceChannelId}):`, editErr)
+      } else {
+        lastPanelInputHash.set(record.voiceChannelId, inputHash)
+      }
       return
     }
   }

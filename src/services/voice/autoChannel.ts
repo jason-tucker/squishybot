@@ -6,7 +6,7 @@ import { eq } from 'drizzle-orm'
 import { env } from '../../config/env'
 import { getSetting, trackAutoChannelText, untrackAutoChannelText } from '../settings'
 import type { AutoChannelRecord } from '../../types/voice'
-import { postOrUpdateControlPanel } from './controlPanel'
+import { postOrUpdateControlPanel, clearPanelHash } from './controlPanel'
 import { postOrUpdateSticky } from './sticky'
 import { scheduleCleanup, cancelCleanup } from './cleanupScheduler'
 import { cancelAllHideGracesFor } from './hideGrace'
@@ -102,6 +102,7 @@ export async function deleteAutoChannel(client: Client, record: AutoChannelRecor
   cancelAllHideGracesFor(record.voiceChannelId)
   clearRenameThrottle(record.voiceChannelId)
   clearStickyDebounce(record.textChannelId)
+  clearPanelHash(record.voiceChannelId)
 
   await Promise.all([
     guild.channels.delete(record.voiceChannelId).catch(() => {}),

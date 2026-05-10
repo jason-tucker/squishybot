@@ -55,3 +55,17 @@ export async function backfillMember(voiceChannelId: string, userId: string): Pr
     .onConflictDoNothing()
     .catch(() => {})
 }
+
+/**
+ * Bulk variant of {@link backfillMember} — one INSERT for all userIds instead
+ * of N parallel queries. The reconciler uses this on boot for each room's
+ * members. No-op when the array is empty (drizzle errors on empty values).
+ */
+export async function backfillMembers(voiceChannelId: string, userIds: string[]): Promise<void> {
+  if (userIds.length === 0) return
+  const now = new Date()
+  await db.insert(autoChannelMembers)
+    .values(userIds.map(userId => ({ voiceChannelId, userId, joinedAt: now })))
+    .onConflictDoNothing()
+    .catch(() => {})
+}

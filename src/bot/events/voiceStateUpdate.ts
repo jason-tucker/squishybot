@@ -42,7 +42,10 @@ export function registerVoiceStateUpdate(client: Client): void {
         // They're back inside the VC — they have inherent view, no need to keep
         // a pending grace timer running.
         cancelHideGrace(joinedChannelId, member.id)
-        const textChannel = await guild.channels.fetch(record.textChannelId).catch(() => null)
+        // Cache.get is free vs fetch's HTTP round-trip; the channel will be
+        // in cache because the bot manages it. Fall back to fetch only on miss.
+        const textChannel = guild.channels.cache.get(record.textChannelId)
+          ?? await guild.channels.fetch(record.textChannelId).catch(() => null)
         if (textChannel?.isTextBased()) {
           await addMemberToTextChannel(textChannel as any, member)
         }
@@ -72,13 +75,15 @@ export function registerVoiceStateUpdate(client: Client): void {
       // Remove from text channel (only if they're not a host/owner with permanent access)
       const isSpecialUser = record.ownerUserId === member.id || record.hostUserIds.includes(member.id)
       if (!isSpecialUser) {
-        const textChannel = await guild.channels.fetch(record.textChannelId).catch(() => null)
+        const textChannel = guild.channels.cache.get(record.textChannelId)
+          ?? await guild.channels.fetch(record.textChannelId).catch(() => null)
         if (textChannel?.isTextBased()) {
           await removeMemberFromTextChannel(textChannel as any, member)
         }
       }
 
-      const vc = await guild.channels.fetch(leftChannelId).catch(() => null)
+      const vc = guild.channels.cache.get(leftChannelId)
+        ?? await guild.channels.fetch(leftChannelId).catch(() => null)
       if (!vc?.isVoiceBased()) return
 
       // Hide-grace: when leaving a hidden VC, non-sudo regular members lose
