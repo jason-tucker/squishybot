@@ -436,10 +436,12 @@ function formatProvisionSummary(result: GameProvisionResult): string {
   const r = result.role
   if (r.action === 'created')      lines.push(`• Role: created <@&${r.id}>`)
   else if (r.action === 'linked')  lines.push(`• Role: linked existing <@&${r.id}>`)
+  else if (r.action === 'kept')    lines.push(`• Role: already linked${r.id ? ` <@&${r.id}>` : ''}`)
   else if (r.action === 'failed')  lines.push(`• Role: ⚠️ ${r.error ?? 'failed'}`)
   const c = result.channel
   if (c.action === 'created')      lines.push(`• Channel: created <#${c.id}> _(hidden from @everyone — toggle "View" on /games to grant access)_`)
   else if (c.action === 'linked')  lines.push(`• Channel: linked existing <#${c.id}>`)
+  else if (c.action === 'kept')    lines.push(`• Channel: already linked${c.id ? ` <#${c.id}>` : ''}`)
   else if (c.action === 'failed')  lines.push(`• Channel: ⚠️ ${c.error ?? 'failed'}`)
   return lines.join('\n')
 }

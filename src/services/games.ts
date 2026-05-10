@@ -170,21 +170,33 @@ export async function provisionGameDiscord(
     }
   }
 
-  // --- Channel: link by exact-slug match in any GuildText channel, else create.
+  // --- Channel: link by exact-slug match, but ONLY within the configured
+  //     games category. Without the parent scope, adding a game named e.g.
+  //     "general" or "lobby" silently re-targets the server's existing
+  //     #general / #lobby — and then the per-member view overwrites we
+  //     write on /games toggles would be applied to the wrong channel.
+  //     Scoping the match means we only ever link to channels that are
+  //     already living under the games-category umbrella the sudo set up.
+  const categorySetting = getSetting('channel.games_category')
+  const parent = categorySetting && guild.channels.cache.has(categorySetting)
+    ? categorySetting : null
+
   const linkedChannel = game.channelId ? guild.channels.cache.get(game.channelId) ?? null : null
   if (!linkedChannel) {
     const slug = gameChannelSlug(game.name)
+    // If a games-category is set, only link channels already inside it. If
+    // not, only link top-level channels (parentId === null) — never a
+    // channel sitting under some unrelated category.
     const byName = guild.channels.cache.find(c =>
-      c.type === ChannelType.GuildText && c.name === slug
+      c.type === ChannelType.GuildText
+      && c.name === slug
+      && c.parentId === parent
     ) ?? null
     if (byName) {
       patch.channelId = byName.id
       patch.categoryId = byName.parentId ?? null
       result.channel = { action: 'linked', id: byName.id }
     } else {
-      const categorySetting = getSetting('channel.games_category')
-      const parent = categorySetting && guild.channels.cache.has(categorySetting)
-        ? categorySetting : null
       try {
         const created = await guild.channels.create({
           name: slug,
