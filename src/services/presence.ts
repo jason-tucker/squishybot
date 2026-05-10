@@ -29,6 +29,8 @@ let _currentStatus: 'online' | 'idle' | 'dnd' = 'online'
 let _lastUsedAt: Date | null = null
 let _lastPresenceUpdateAt = 0
 let _pendingRefresh: ReturnType<typeof setTimeout> | null = null
+let _periodicTicker: ReturnType<typeof setInterval> | null = null
+let _lastPushedActivityText: string | null = null
 
 export function initPresence(client: Client): void {
   _client = client
@@ -36,6 +38,35 @@ export function initPresence(client: Client): void {
   // `initPresence` so the persisted stamp is available on first push.
   _lastUsedAt = readPersistedLastUsedAt()
   setOnline()
+  // Without a periodic re-push, the relative-time string ("4m ago") freezes
+  // at whatever was last sent — Discord doesn't recompute relative times in
+  // activity strings. Tick at the throttle interval and re-push only when
+  // the rendered text would actually change.
+  if (!_periodicTicker) {
+    _periodicTicker = setInterval(periodicTick, MIN_PRESENCE_INTERVAL_MS)
+    _periodicTicker.unref?.()
+  }
+}
+
+/** Stop the periodic tick (test cleanup / SIGTERM handler). */
+export function shutdownPresence(): void {
+  if (_periodicTicker) { clearInterval(_periodicTicker); _periodicTicker = null }
+  if (_idleTimer) { clearTimeout(_idleTimer); _idleTimer = null }
+  if (_pendingRefresh) { clearTimeout(_pendingRefresh); _pendingRefresh = null }
+}
+
+function periodicTick(): void {
+  if (!_client?.user) return
+  if (_currentStatus === 'dnd') return  // DND text is static; nothing to refresh.
+  const next = buildActivityName()
+  if (next === _lastPushedActivityText) return  // bucket unchanged, skip
+  if (_currentStatus === 'idle') {
+    _client.user.setPresence({ status: 'idle', activities: buildActivities() })
+  } else {
+    _client.user.setPresence({ status: 'online', activities: buildActivities() })
+  }
+  _lastPresenceUpdateAt = Date.now()
+  _lastPushedActivityText = next
 }
 
 export function setOnline(): void {
@@ -55,6 +86,7 @@ export function setIdle(): void {
     activities: buildActivities(),
   })
   _lastPresenceUpdateAt = Date.now()
+  _lastPushedActivityText = buildActivityName()
   persistLastUsedAt()
 }
 
@@ -110,6 +142,7 @@ function pushPresenceNow(status: 'online'): void {
     status,
     activities: buildActivities(),
   })
+  _lastPushedActivityText = buildActivityName()
   persistLastUsedAt()
 }
 
