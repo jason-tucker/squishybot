@@ -2,7 +2,7 @@ import type { Client } from 'discord.js'
 import { startHealthPush } from '../healthPush'
 import { runReconciler } from '../../services/voice/reconciler'
 import { logger, attachClientToLogger } from '../../services/logger'
-import { initPresence } from '../../services/presence'
+import { initPresence, refreshPresence } from '../../services/presence'
 import { env } from '../../config/env'
 import { loadSettings } from '../../services/settings'
 import { loadGames } from '../../services/games'
@@ -20,6 +20,13 @@ export function registerReadyEvent(client: Client) {
     // anything on the boot path, so they run in parallel after.
     await loadSettings().catch(err => logger.error('Failed to load settings on startup', err))
     initPresence(c)
+
+    // Discord drops the bot's activity on every gateway resume — without
+    // these the "/help • Xm" status disappears whenever the connection
+    // blips and stays gone until someone runs a command.
+    client.on('shardResume', () => { refreshPresence() })
+    client.on('shardReady', () => { refreshPresence() })
+
     await Promise.all([
       loadGames().catch(err => logger.error('Failed to load games on startup', err)),
       loadSocialFeeds().catch(err => logger.error('Failed to load social feeds on startup', err)),
