@@ -221,7 +221,18 @@ export function registerInteractionCreate(client: Client) {
         }
       }
     } catch (err) {
-      console.error('Interaction error:', err)
+      // Structured context — without `tag`, `cmd`, `customId` etc. tracing
+      // an "Interaction error" entry to a specific button/command meant
+      // grepping the customId out of stack frames. With this we get one log
+      // line per failure that's directly diagnosable.
+      const tag = interaction.isChatInputCommand() ? `cmd=${interaction.commandName}`
+        : interaction.isContextMenuCommand() ? `ctx=${interaction.commandName}`
+        : interaction.isButton() || interaction.isStringSelectMenu() || interaction.isModalSubmit()
+          ? `id=${interaction.customId}`
+          : `type=${interaction.type}`
+      const userTag = `user=${interaction.user.id}`
+      const guildTag = interaction.guildId ? `guild=${interaction.guildId}` : 'guild=dm'
+      console.error(`Interaction error: ${tag} ${userTag} ${guildTag}`, err)
       const reply = { content: '❌ An unexpected error occurred.', ephemeral: true }
       if (interaction.isRepliable()) {
         if (interaction.deferred || interaction.replied) {
