@@ -11,7 +11,7 @@ import {
 } from 'discord.js'
 import { db } from '../db/client'
 import { autoChannels, hubChannels, staffApprovals } from '../db/schema'
-import { and, eq } from 'drizzle-orm'
+import { and, count, eq } from 'drizzle-orm'
 import { requireSudo } from '../services/voice/permissions'
 import { env } from '../config/env'
 import { sep } from '../utils/cv2'
@@ -23,16 +23,20 @@ export const data = new SlashCommandBuilder()
 
 export async function renderSudoHome(): Promise<{ flags: number; components: any[] }> {
   const guildId = env.GUILD_ID
-  const [channels, hubs, pending] = await Promise.all([
-    db.select().from(autoChannels).where(eq(autoChannels.guildId, guildId)),
-    db.select().from(hubChannels).where(eq(hubChannels.guildId, guildId)),
-    db.select().from(staffApprovals).where(and(eq(staffApprovals.guildId, guildId), eq(staffApprovals.status, 'pending'))),
+  // count() instead of pulling rows — pending approvals can grow unbounded
+  // if a sudo never reviews. Same approach for active channels + hubs since
+  // we only need badge numbers here.
+  const [channelsCount, hubsCount, pendingCount] = await Promise.all([
+    db.select({ n: count() }).from(autoChannels).where(eq(autoChannels.guildId, guildId)),
+    db.select({ n: count() }).from(hubChannels).where(eq(hubChannels.guildId, guildId)),
+    db.select({ n: count() }).from(staffApprovals)
+      .where(and(eq(staffApprovals.guildId, guildId), eq(staffApprovals.status, 'pending'))),
   ])
 
   const lines = [
-    `**Active voice channels:** ${channels.length}`,
-    `**Managed hubs:** ${hubs.length}`,
-    `**Pending staff approvals:** ${pending.length}`,
+    `**Active voice channels:** ${channelsCount[0]?.n ?? 0}`,
+    `**Managed hubs:** ${hubsCount[0]?.n ?? 0}`,
+    `**Pending staff approvals:** ${pendingCount[0]?.n ?? 0}`,
   ]
 
   const container = new ContainerBuilder()

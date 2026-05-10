@@ -58,9 +58,20 @@ interface LfgSession {
   hostId: string
   /** Excludes the host. Order = click order. */
   players: string[]
+  /** When the session was created — used to expire stale entries. */
+  createdAt: number
 }
 
 const sessions = new Map<string, LfgSession>()
+/** LFG sessions are useful for ~24h. The `parse-from-message` fallback in
+ *  ensureSession handles older messages, so dropping the in-memory entry
+ *  isn't lossy — it just costs one extra parse on the next click. */
+const SESSION_TTL_MS = 24 * 60 * 60_000
+
+function sweepSessions(): void {
+  const cutoff = Date.now() - SESSION_TTL_MS
+  for (const [k, s] of sessions) if (s.createdAt < cutoff) sessions.delete(k)
+}
 
 // ---------------------------------------------------------------------------
 // Message rendering
@@ -165,8 +176,9 @@ export async function execute(interaction: ChatInputCommandInteraction): Promise
     return
   }
 
-  const session: LfgSession = { gameId: game.id, hostId: member.id, players: [] }
+  const session: LfgSession = { gameId: game.id, hostId: member.id, players: [], createdAt: Date.now() }
   const sent = await (channel as TextChannel).send(buildPanel(game, session, { initialPing: true }) as any)
+  if (sessions.size > 200) sweepSessions()
   sessions.set(sent.id, session)
 
   if (!sudo) markPlayUsed(interaction.guild.id, member.id, game.id)
@@ -278,5 +290,8 @@ function recoverSessionFromMessage(interaction: ButtonInteraction): LfgSession |
     seen.add(id)
     dedupedPlayers.push(id)
   }
-  return { gameId, hostId, players: dedupedPlayers }
+  // Recovered sessions get a fresh createdAt — we can't recover the original
+  // from message contents, and a freshly-recovered entry shouldn't be
+  // immediately swept on the next size-trigger.
+  return { gameId, hostId, players: dedupedPlayers, createdAt: Date.now() }
 }

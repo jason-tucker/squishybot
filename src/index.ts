@@ -8,7 +8,7 @@ import { registerMessageCreate } from './bot/events/messageCreate'
 import { registerPresenceUpdate } from './bot/events/presenceUpdate'
 import { registerGuildMemberAdd } from './bot/events/guildMemberAdd'
 import { logger } from './services/logger'
-import { setDnd } from './services/presence'
+import { setDnd, shutdownPresence } from './services/presence'
 
 registerReadyEvent(client)
 registerInteractionCreate(client)
@@ -26,5 +26,27 @@ process.on('uncaughtException', async (err) => {
   setDnd('Uncaught exception — check logs')
   await logger.errorAndDm('Uncaught exception', err)
 })
+
+/**
+ * Graceful shutdown on SIGTERM (the signal Docker sends on `docker stop` /
+ * compose restart). Without this, the gateway connection drops abruptly,
+ * the presence ticker keeps running until the kill timeout, and the
+ * postgres pool sockets aren't drained — small edges, but together they
+ * make the bot show "RECONNECTING" in Discord for a few seconds longer
+ * than necessary on every deploy.
+ */
+let shuttingDown = false
+async function gracefulShutdown(signal: NodeJS.Signals): Promise<void> {
+  if (shuttingDown) return
+  shuttingDown = true
+  logger.info(`Received ${signal} — shutting down gracefully`)
+  shutdownPresence()
+  try { await client.destroy() } catch (err) { logger.warn('client.destroy failed', err) }
+  // Give postgres pool sockets a moment to flush; node will exit naturally
+  // once the event loop drains. 2 s is plenty in practice.
+  setTimeout(() => process.exit(0), 2_000).unref()
+}
+process.on('SIGTERM', () => { void gracefulShutdown('SIGTERM') })
+process.on('SIGINT',  () => { void gracefulShutdown('SIGINT') })
 
 client.login(env.DISCORD_BOT_TOKEN)

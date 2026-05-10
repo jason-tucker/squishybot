@@ -382,6 +382,13 @@ export async function gameInterestCounts(guild: Guild): Promise<Map<string, Game
 const PLAY_COOLDOWN_MS = 10 * 60_000  // 10 min — sudo bypasses entirely (see /play)
 const lastPlayAt = new Map<string, number>()
 
+/** Lazy sweep: drop entries past their cooldown window. Without this the Map
+ *  grows monotonically with unique (user × game) tuples over the bot's life. */
+function sweepPlayCooldowns(): void {
+  const cutoff = Date.now() - PLAY_COOLDOWN_MS
+  for (const [k, t] of lastPlayAt) if (t < cutoff) lastPlayAt.delete(k)
+}
+
 export function checkPlayCooldown(guildId: string, userId: string, gameId: string): { ok: true } | { ok: false; remainingSec: number } {
   const key = `${guildId}:${userId}:${gameId}`
   const last = lastPlayAt.get(key) ?? 0
@@ -391,6 +398,8 @@ export function checkPlayCooldown(guildId: string, userId: string, gameId: strin
 }
 
 export function markPlayUsed(guildId: string, userId: string, gameId: string): void {
+  // Sweep on write — cheap and bounds the Map. Read path stays O(1).
+  if (lastPlayAt.size > 100) sweepPlayCooldowns()
   lastPlayAt.set(`${guildId}:${userId}:${gameId}`, Date.now())
 }
 

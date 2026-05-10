@@ -54,9 +54,20 @@ interface GameNightState {
   notes: string
   rsvps: Map<string, Rsvp>
   ownership: Map<string, Ownership>
+  /** When the session entered the in-memory Map — used for stale-eviction. */
+  cachedAt: number
 }
 
 const sessions = new Map<string, GameNightState>()
+/** Game-night announcements are useful for ~7 days. The recoverFromMessage
+ *  fallback rebuilds RSVPs from message content, so dropping the in-memory
+ *  entry isn't lossy — it just adds one parse on the next click. */
+const SESSION_TTL_MS = 7 * 24 * 60 * 60_000
+
+function sweepGamenightSessions(): void {
+  const cutoff = Date.now() - SESSION_TTL_MS
+  for (const [k, s] of sessions) if (s.cachedAt < cutoff) sessions.delete(k)
+}
 
 // ── Pending previews ───────────────────────────────────────────────────────
 // Each one represents a sudo who submitted the setup modal but hasn't yet
@@ -179,6 +190,7 @@ function buildPreviewPayload(pending: PendingSession, sessionKey: string, _editi
     notes: pending.notes,
     rsvps: new Map(),
     ownership: new Map(),
+    cachedAt: Date.now(),
   }
   const inner = buildPanel(stub)
 
@@ -244,8 +256,10 @@ export async function handlePreviewButton(interaction: ButtonInteraction): Promi
       notes: pending.notes,
       rsvps: new Map(),
       ownership: new Map(),
+      cachedAt: Date.now(),
     }
     const sent = await (channel as TextChannel).send(buildPanel(state) as any)
+    if (sessions.size > 100) sweepGamenightSessions()
     sessions.set(sent.id, state)
     pendingSessions.delete(sessionKey)
     logger.info(`gamenight sent game=${state.gameName} host=${pending.sudoUserId} channel=${channel.id} message=${sent.id}`)
@@ -450,5 +464,5 @@ function recoverFromMessage(interaction: ButtonInteraction): GameNightState | nu
     }
   }
 
-  return { gameName, hostId, when, notes: '', rsvps, ownership }
+  return { gameName, hostId, when, notes: '', rsvps, ownership, cachedAt: Date.now() }
 }
