@@ -78,7 +78,7 @@ Roadmap, completed work, and open action items are tracked in the [Bot Developme
 
 ### Game Roles + LFG Pings
 
-- **Catalog (sudo)** — `/sudo → Settings → Games` lets sudo define games with a name, aliases, View role, Ping role, channel, optional category, sort order, visibility, and archive flag.
+- **Catalog (sudo)** — `/sudo → Settings → Games` lets sudo define games (name, aliases, sort order, visibility, archive flag). **Adding a game auto-provisions the Discord ping role and a hidden text channel** — links to existing role/channel by name match if they already exist, otherwise creates them. New channels deny `@everyone` ViewChannel so the per-member view overwrite path is the gate. The default parent category for auto-created channels is configurable via a category select on the same panel.
 - **Member opt-in** — `/games` lists every visible game with two toggles per game: **View** (assigns the View role) and **Pings** (assigns the LFG Ping role). Toggling immediately syncs the role on Discord.
 - **Sudo-acts-on-behalf** — sudo can right-click any member → **Manage User → Game Prefs** and toggle View / Pings on that member's behalf. Same UI, same flow. Same pattern applies to profile editing — `/settings → Profile & Birthday` for self, **Manage User → Edit Profile** for sudo.
 - **`/play <game>`** — LFG ping. Autocompletes on name + aliases. Posts a Components V2 message in the game's channel pinging the LFG role; anyone can click the **🎮 I want to play!** button to join the session (toggle on/off). The host is locked in — they delete the message to cancel. 30-minute per-(user, game) cooldown; sudo can pass `force:true` to bypass.
