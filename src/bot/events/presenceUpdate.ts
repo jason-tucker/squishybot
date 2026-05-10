@@ -10,6 +10,12 @@ import { computeAutoName } from '../../services/voice/autoNaming'
 const lastRename = new Map<string, number>()
 const RENAME_COOLDOWN_MS = 10 * 60 * 1000
 
+/** Drop the throttle entry when an auto-channel is deleted, otherwise the Map
+ * leaks one entry per channel ever auto-renamed. Called from deleteAutoChannel. */
+export function clearRenameThrottle(voiceChannelId: string): void {
+  lastRename.delete(voiceChannelId)
+}
+
 export function registerPresenceUpdate(client: Client): void {
   client.on('presenceUpdate', async (_old: Presence | null, newPresence: Presence) => {
     if (newPresence.guild?.id !== env.GUILD_ID) return

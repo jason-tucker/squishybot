@@ -11,6 +11,8 @@ import { postOrUpdateSticky } from './sticky'
 import { scheduleCleanup, cancelCleanup } from './cleanupScheduler'
 import { cancelAllHideGracesFor } from './hideGrace'
 import { clearMembers, recordMemberJoin } from './voiceMembers'
+import { clearRenameThrottle } from '../../bot/events/presenceUpdate'
+import { clearStickyDebounce } from '../../bot/events/messageCreate'
 import { logger } from '../logger'
 
 export async function createAutoChannel(
@@ -98,6 +100,8 @@ export async function deleteAutoChannel(client: Client, record: AutoChannelRecor
 
   cancelCleanup(record.voiceChannelId)
   cancelAllHideGracesFor(record.voiceChannelId)
+  clearRenameThrottle(record.voiceChannelId)
+  clearStickyDebounce(record.textChannelId)
 
   await Promise.all([
     guild.channels.delete(record.voiceChannelId).catch(() => {}),

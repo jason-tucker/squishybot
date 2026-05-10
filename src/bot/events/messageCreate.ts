@@ -7,7 +7,16 @@ import { getAutoThreadConfig, isAutoChannelText, isAutoThreadChannel } from '../
 import { logger } from '../../services/logger'
 
 const lastReposted = new Map<string, number>()
-const DEBOUNCE_MS = 1500
+// 10 s caps a busy chat at ~6 sticky bumps/min instead of ~40 at the old
+// 1.5 s window. The sticky is purely a discoverability aid (📋 Open Panel) —
+// being a few seconds behind the bottom is fine and saves a lot of API churn.
+const DEBOUNCE_MS = 10_000
+
+/** Drop the sticky debounce entry when an auto-channel's text channel is
+ * deleted; without this the Map leaks one entry per text channel forever. */
+export function clearStickyDebounce(textChannelId: string): void {
+  lastReposted.delete(textChannelId)
+}
 
 export function registerMessageCreate(client: Client): void {
   client.on('messageCreate', async (msg: Message) => {
