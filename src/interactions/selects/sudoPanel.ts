@@ -91,7 +91,15 @@ export async function handleSudoPanelSelect(interaction: StringSelectMenuInterac
       ? '_No pending approvals._'
       : pending.map(a => {
           const d = a.requestedData as Record<string, unknown>
-          const summary = Object.entries(d).filter(([, v]) => v).map(([k, v]) => `${k}: \`${v}\``).join(' · ')
+          // Coerce + truncate so a malformed JSON shape (object/array value)
+          // can't render as `[object Object]` or blow the Discord field limit.
+          const summary = Object.entries(d)
+            .filter(([, v]) => v !== null && v !== undefined && v !== '')
+            .map(([k, v]) => {
+              const display = (typeof v === 'string' ? v : JSON.stringify(v)).slice(0, 80)
+              return `${k}: \`${display}\``
+            })
+            .join(' · ')
           return `• <@${a.userId}> — ${summary}`
         }).join('\n\n')
     await sendPanel(interaction, '📥 Pending Approvals', body, 0xfee75c)

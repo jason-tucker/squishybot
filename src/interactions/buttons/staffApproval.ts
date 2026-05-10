@@ -63,10 +63,14 @@ export async function handleStaffApprovalButton(interaction: ButtonInteraction):
   if (typeof data.reason === 'string' && data.reason)       detailLines.push(`**Reason:** ${data.reason}`)
   // Legacy rows (pre-redesign) lack role_label — fall back to dumping every
   // remaining field so the reviewer still sees what was originally requested.
+  // Coerce to string + cap length so a malformed JSON shape (object/array
+  // value, megabyte-long string) can't destabilize the approval card render
+  // or hit Discord's 4000-char text-display limit.
   if (!roleLabel) {
     for (const [k, v] of Object.entries(data)) {
-      if (v === null || v === '') continue
-      detailLines.push(`**${formatLabel(k)}:** ${v}`)
+      if (v === null || v === undefined || v === '') continue
+      const display = (typeof v === 'string' ? v : JSON.stringify(v)).slice(0, 200)
+      detailLines.push(`**${formatLabel(k)}:** ${display}`)
     }
   }
   if (grantNote) detailLines.push('', grantNote)
