@@ -18,7 +18,8 @@
  * customId families:
  *   games:cat:list                          button — back to catalog list
  *   games:cat:add                           button — show create modal
- *   games:cat:add_submit                    modal  — persist new game
+ *   games:cat:add_submit                    modal  — persist new game + auto-provision role/channel
+ *   games:cat:set_category                  channel-select — set the default games category
  *   games:cat:select                        string-select — pick a game to edit
  *   games:cat:detail:{gid}                  button — render the editor for one game
  *   games:cat:edit:{gid}:{field}            button — show modal for a text field
@@ -44,10 +45,11 @@ import {
 } from 'discord.js'
 import { sep } from '../utils/cv2'
 import { requireSudo } from '../services/voice/permissions'
+import { clearSetting, getSetting, setSetting } from '../services/settings'
 import {
   createGame, deleteGame, gameCount, gameInterestCounts, getGame, listGames,
-  matchedPingRoleId, matchedViewChannel, resolvePrefs, setPref, updateGame,
-  type Game, type ResolvedPref,
+  matchedPingRoleId, matchedViewChannel, provisionGameDiscord, resolvePrefs, setPref, updateGame,
+  type Game, type GameProvisionResult, type ResolvedPref,
 } from '../services/games'
 
 // ===========================================================================
@@ -56,10 +58,15 @@ import {
 
 export async function renderCatalogList(guildId: string) {
   const all = listGames({ includeArchived: true, includeHidden: true })
+  const defaultCategoryId = getSetting('channel.games_category')
 
   const lines: string[] = ['### 🎮 Games — catalog', `_${gameCount()} game(s)._`, '']
+  lines.push(defaultCategoryId
+    ? `📁 New game channels will be created under <#${defaultCategoryId}>.`
+    : '📁 _No default category set — new game channels will be created at the top level. Pick one below to organize them._')
+  lines.push('')
   if (all.length === 0) {
-    lines.push('_No games defined yet. Click **Add Game** to start._')
+    lines.push('_No games defined yet. Click **Add Game** to auto-create the role + channel._')
   } else {
     for (const g of all) {
       const flags: string[] = []
@@ -76,6 +83,15 @@ export async function renderCatalogList(guildId: string) {
     .addTextDisplayComponents(new TextDisplayBuilder().setContent(lines.join('\n')))
 
   const components: any[] = [container]
+
+  // Default category select for auto-created game channels.
+  const categorySelect = new ChannelSelectMenuBuilder()
+    .setCustomId('games:cat:set_category')
+    .setPlaceholder('Default category for new game channels…')
+    .setChannelTypes(ChannelType.GuildCategory)
+    .setMinValues(0).setMaxValues(1)
+  if (defaultCategoryId) categorySelect.addDefaultChannels(defaultCategoryId)
+  components.push(new ActionRowBuilder<MessageActionRowComponentBuilder>().addComponents(categorySelect))
 
   if (all.length > 0) {
     const opts = all.slice(0, 25).map(g => ({
@@ -415,6 +431,21 @@ async function authorizePrefs(
 // Catalog handlers
 // ===========================================================================
 
+function formatProvisionSummary(result: GameProvisionResult): string {
+  const lines: string[] = []
+  const r = result.role
+  if (r.action === 'created')      lines.push(`• Role: created <@&${r.id}>`)
+  else if (r.action === 'linked')  lines.push(`• Role: linked existing <@&${r.id}>`)
+  else if (r.action === 'kept')    lines.push(`• Role: already linked${r.id ? ` <@&${r.id}>` : ''}`)
+  else if (r.action === 'failed')  lines.push(`• Role: ⚠️ ${r.error ?? 'failed'}`)
+  const c = result.channel
+  if (c.action === 'created')      lines.push(`• Channel: created <#${c.id}> _(hidden from @everyone — toggle "View" on /games to grant access)_`)
+  else if (c.action === 'linked')  lines.push(`• Channel: linked existing <#${c.id}>`)
+  else if (c.action === 'kept')    lines.push(`• Channel: already linked${c.id ? ` <#${c.id}>` : ''}`)
+  else if (c.action === 'failed')  lines.push(`• Channel: ⚠️ ${c.error ?? 'failed'}`)
+  return lines.join('\n')
+}
+
 export async function handleCatalogButton(interaction: ButtonInteraction): Promise<void> {
   if (!await requireSudo(interaction)) return
   const id = interaction.customId
@@ -526,6 +557,16 @@ export async function handleCatalogRoleSelect(interaction: RoleSelectMenuInterac
 
 export async function handleCatalogChannelSelect(interaction: ChannelSelectMenuInteraction): Promise<void> {
   if (!await requireSudo(interaction)) return
+
+  // Default category for auto-created game channels (catalog list panel).
+  if (interaction.customId === 'games:cat:set_category') {
+    const channelId = interaction.values[0] ?? null
+    if (channelId) await setSetting('channel.games_category', channelId, interaction.user.id)
+    else await clearSetting('channel.games_category')
+    await interaction.update(await renderCatalogList(interaction.guildId!) as any)
+    return
+  }
+
   const [, , , gid, kind] = interaction.customId.split(':')  // games:cat:channel:{gid}:{kind}
   const channelId = interaction.values[0] ?? null
   const patch: Partial<Game> = kind === 'category' ? { categoryId: channelId } : { channelId }
@@ -546,11 +587,31 @@ export async function handleCatalogModal(interaction: ModalSubmitInteraction): P
       await interaction.reply({ content: '❌ Sort order must be an integer.', ephemeral: true })
       return
     }
+
+    // Role + channel creation can take a few seconds (two API round-trips).
+    // Defer up front so we don't blow the 3 s ack window.
+    if (interaction.isFromMessage()) await interaction.deferUpdate()
+    else await interaction.deferReply({ ephemeral: true })
+
     const created = await createGame({ guildId: interaction.guildId!, name, aliases, sortOrder })
+
+    let provisioned = created
+    let summary: string | null = null
+    if (interaction.guild) {
+      const { game: g, result } = await provisionGameDiscord(interaction.guild, created, interaction.user.id)
+      provisioned = g
+      summary = formatProvisionSummary(result)
+    }
+
     if (interaction.isFromMessage()) {
-      await interaction.update(renderGameDetail(created) as any)
+      await interaction.editReply(renderGameDetail(provisioned) as any)
+      if (summary) {
+        await interaction.followUp({ content: summary, flags: MessageFlags.Ephemeral }).catch(() => {})
+      }
     } else {
-      await interaction.reply({ content: `✅ Created **${created.name}**.`, ephemeral: true })
+      const lines = [`✅ Created **${provisioned.name}**.`]
+      if (summary) lines.push(summary)
+      await interaction.editReply({ content: lines.join('\n') })
     }
     return
   }

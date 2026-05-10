@@ -8,11 +8,12 @@
  * and refreshed on every catalog mutation.
  */
 import type { Guild, GuildBasedChannel, GuildMember } from 'discord.js'
-import { PermissionFlagsBits } from 'discord.js'
+import { ChannelType, PermissionFlagsBits } from 'discord.js'
 import { and, eq, inArray } from 'drizzle-orm'
 import { db } from '../db/client'
 import { games, userGamePrefs } from '../db/schema'
 import { logger } from './logger'
+import { getSetting } from './settings'
 
 export type Game = typeof games.$inferSelect
 export type GamePref = typeof userGamePrefs.$inferSelect
@@ -98,6 +99,133 @@ export async function deleteGame(id: string): Promise<void> {
   await db.delete(games).where(eq(games.id, id))
   catalog.delete(id)
   logger.info(`game-delete id=${id}`)
+}
+
+// ---------------------------------------------------------------------------
+// Discord provisioning — auto-create role + channel for a freshly-added game.
+// Called from /sudo → Settings → Games → Add Game.
+//
+// Strategy mirrors provisionStaffRoles: prefer existing-by-name (so adding a
+// catalog row for a game that already has a Discord role/channel just links
+// the existing ones), only create when nothing matches. New channels are
+// hidden from @everyone so per-member view overwrites are the gate.
+// ---------------------------------------------------------------------------
+
+export type GameProvisionAction = 'created' | 'linked' | 'kept' | 'failed'
+export interface GameProvisionResult {
+  role: { action: GameProvisionAction; id: string | null; error?: string }
+  channel: { action: GameProvisionAction; id: string | null; error?: string }
+}
+
+/** Discord channel-name slug from a game name. Lowercase, alphanumerics + hyphens, max 100 chars. */
+export function gameChannelSlug(name: string): string {
+  const slug = name
+    .toLowerCase()
+    .normalize('NFKD')
+    .replace(/[^\p{Letter}\p{Number}\s_-]/gu, '')
+    .trim()
+    .replace(/\s+/g, '-')
+    .replace(/-+/g, '-')
+    .slice(0, 100)
+  return slug || 'game'
+}
+
+export async function provisionGameDiscord(
+  guild: Guild,
+  game: Game,
+  byUserId: string,
+): Promise<{ game: Game; result: GameProvisionResult }> {
+  const result: GameProvisionResult = {
+    role: { action: 'kept', id: game.pingRoleId },
+    channel: { action: 'kept', id: game.channelId },
+  }
+  const patch: Partial<Game> = {}
+
+  // --- Role: link by name match, else create. Skip if already linked + valid.
+  const linkedRole = game.pingRoleId ? guild.roles.cache.get(game.pingRoleId) ?? null : null
+  if (!linkedRole) {
+    const candidates = [game.name, ...game.aliases]
+      .map(s => s.trim().toLowerCase()).filter(Boolean)
+    const byName = guild.roles.cache.find(r =>
+      !r.managed && candidates.includes(r.name.trim().toLowerCase())
+    ) ?? null
+    if (byName) {
+      patch.pingRoleId = byName.id
+      result.role = { action: 'linked', id: byName.id }
+    } else {
+      try {
+        const created = await guild.roles.create({
+          name: game.name,
+          mentionable: true,
+          hoist: false,
+          permissions: [],
+          reason: `auto-create game role for "${game.name}" by ${byUserId}`,
+        })
+        patch.pingRoleId = created.id
+        result.role = { action: 'created', id: created.id }
+      } catch (err) {
+        logger.warn(`Failed to create role for game ${game.name}:`, err)
+        result.role = { action: 'failed', id: null, error: (err as Error).message }
+      }
+    }
+  }
+
+  // --- Channel: link by exact-slug match, but ONLY within the configured
+  //     games category. Without the parent scope, adding a game named e.g.
+  //     "general" or "lobby" silently re-targets the server's existing
+  //     #general / #lobby — and then the per-member view overwrites we
+  //     write on /games toggles would be applied to the wrong channel.
+  //     Scoping the match means we only ever link to channels that are
+  //     already living under the games-category umbrella the sudo set up.
+  const categorySetting = getSetting('channel.games_category')
+  const parent = categorySetting && guild.channels.cache.has(categorySetting)
+    ? categorySetting : null
+
+  const linkedChannel = game.channelId ? guild.channels.cache.get(game.channelId) ?? null : null
+  if (!linkedChannel) {
+    const slug = gameChannelSlug(game.name)
+    // If a games-category is set, only link channels already inside it. If
+    // not, only link top-level channels (parentId === null) — never a
+    // channel sitting under some unrelated category.
+    const byName = guild.channels.cache.find(c =>
+      c.type === ChannelType.GuildText
+      && c.name === slug
+      && c.parentId === parent
+    ) ?? null
+    if (byName) {
+      patch.channelId = byName.id
+      patch.categoryId = byName.parentId ?? null
+      result.channel = { action: 'linked', id: byName.id }
+    } else {
+      try {
+        const created = await guild.channels.create({
+          name: slug,
+          type: ChannelType.GuildText,
+          parent: parent ?? undefined,
+          permissionOverwrites: [
+            {
+              id: guild.roles.everyone.id,
+              deny: [PermissionFlagsBits.ViewChannel],
+            },
+          ],
+          reason: `auto-create game channel for "${game.name}" by ${byUserId}`,
+        })
+        patch.channelId = created.id
+        patch.categoryId = parent
+        result.channel = { action: 'created', id: created.id }
+      } catch (err) {
+        logger.warn(`Failed to create channel for game ${game.name}:`, err)
+        result.channel = { action: 'failed', id: null, error: (err as Error).message }
+      }
+    }
+  }
+
+  let updated = game
+  if (Object.keys(patch).length > 0) {
+    const row = await updateGame(game.id, patch)
+    if (row) updated = row
+  }
+  return { game: updated, result }
 }
 
 // ---------------------------------------------------------------------------
