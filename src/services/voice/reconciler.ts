@@ -5,6 +5,7 @@ import { autoChannels, hubChannels } from '../../db/schema'
 import { eq } from 'drizzle-orm'
 import { env } from '../../config/env'
 import { scheduleCleanup, restoreScheduledCleanups } from './cleanupScheduler'
+import { restoreOwnerGraces } from './ownerGrace'
 import { postOrUpdateControlPanel } from './controlPanel'
 import { postOrUpdateSticky } from './sticky'
 import { syncTextChannelPermissions } from './permissions'
@@ -175,6 +176,8 @@ export async function runReconciler(client: Client): Promise<ReconcilerResult> {
 
   // Restore in-progress cleanup timers from DB
   await restoreScheduledCleanups(client)
+  // Restore in-progress owner-grace timers from DB (promotes any overdue)
+  await restoreOwnerGraces(client)
 
   // --- Reconcile hubs ---
   for (const hub of hubs) {

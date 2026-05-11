@@ -3,7 +3,7 @@ import { decodeVcId } from '../../utils/customId'
 import { db } from '../../db/client'
 import { autoChannels } from '../../db/schema'
 import { eq, sql } from 'drizzle-orm'
-import { canControlChannel, isSudo, syncTextChannelPermissions } from '../../services/voice/permissions'
+import { canControlChannel, isOwner, isSudo, syncTextChannelPermissions } from '../../services/voice/permissions'
 import { postOrUpdateControlPanel } from '../../services/voice/controlPanel'
 
 export async function handleVoiceControlSelect(interaction: StringSelectMenuInteraction): Promise<void> {
@@ -19,7 +19,13 @@ export async function handleVoiceControlSelect(interaction: StringSelectMenuInte
   }
 
   const member = await interaction.guild!.members.fetch(interaction.user.id)
-  if (!canControlChannel(member, record) && !isSudo(member)) {
+  // Hosts management is owner-or-sudo only — the acting owner during a grace
+  // window can't unseat the original owner or other hosts. Other actions on
+  // this handler still use the broader canControlChannel gate.
+  const guardOk = action === 'hosts'
+    ? (isOwner(member, record) || isSudo(member))
+    : (canControlChannel(member, record) || isSudo(member))
+  if (!guardOk) {
     await interaction.reply({ content: '❌ You do not have permission.', ephemeral: true })
     return
   }

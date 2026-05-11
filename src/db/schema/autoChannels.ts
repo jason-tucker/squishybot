@@ -24,6 +24,12 @@ export const autoChannels = pgTable('auto_channels', {
   controlPanelMsgId: text('control_panel_msg_id'),
   stickyMsgId: text('sticky_msg_id'),
   scheduledCleanupAt: timestamp('scheduled_cleanup_at'),
+  // Owner-grace fields. When the owner leaves a non-empty channel, we keep
+  // owner_user_id pointed at them and put someone else in acting_owner_user_id
+  // for the duration of the grace. If they return before owner_grace_expires_at,
+  // the acting owner is cleared. If they don't, the acting owner is promoted.
+  actingOwnerUserId: text('acting_owner_user_id'),
+  ownerGraceExpiresAt: timestamp('owner_grace_expires_at'),
   createdAt: timestamp('created_at').notNull().defaultNow(),
   lastActiveAt: timestamp('last_active_at').notNull().defaultNow(),
 }, t => ({

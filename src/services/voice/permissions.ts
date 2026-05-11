@@ -51,8 +51,18 @@ export function isHost(member: GuildMember, record: AutoChannelRecord): boolean 
   return record.hostUserIds.includes(member.id)
 }
 
+/**
+ * True while the channel is in a grace window AND `member` is the acting
+ * owner. False once grace expires (the actingOwnerUserId column is cleared
+ * when the promotion happens, so this naturally goes false at expiry).
+ */
+export function isActingOwner(member: GuildMember, record: AutoChannelRecord): boolean {
+  if (!record.actingOwnerUserId) return false
+  return member.id === record.actingOwnerUserId
+}
+
 export function canControlChannel(member: GuildMember, record: AutoChannelRecord): boolean {
-  return isSudo(member) || isOwner(member, record) || isHost(member, record)
+  return isSudo(member) || isOwner(member, record) || isHost(member, record) || isActingOwner(member, record)
 }
 
 export async function addMemberToTextChannel(textChannel: TextChannel, member: GuildMember): Promise<void> {
@@ -115,6 +125,16 @@ export async function syncTextChannelPermissions(
     allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ReadMessageHistory],
     type: OverwriteType.Member,
   })
+
+  // Acting owner during grace — same text-channel perms as a host so they can
+  // operate the panel and chat even if they momentarily step out of the VC.
+  if (record.actingOwnerUserId && record.actingOwnerUserId !== record.ownerUserId) {
+    overwrites.push({
+      id: record.actingOwnerUserId,
+      allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ReadMessageHistory],
+      type: OverwriteType.Member,
+    })
+  }
 
   // Hosts
   for (const userId of record.hostUserIds) {

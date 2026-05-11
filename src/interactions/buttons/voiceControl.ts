@@ -16,7 +16,7 @@ import { decodeVcId } from '../../utils/customId'
 import { db } from '../../db/client'
 import { autoChannels } from '../../db/schema'
 import { and, eq, sql } from 'drizzle-orm'
-import { canControlChannel, isSudo } from '../../services/voice/permissions'
+import { canControlChannel, isOwner, isSudo } from '../../services/voice/permissions'
 import { postOrUpdateControlPanel, buildPanelPayloadForRecord } from '../../services/voice/controlPanel'
 import { deleteAutoChannel } from '../../services/voice/autoChannel'
 import { sep } from '../../utils/cv2'
@@ -36,6 +36,23 @@ async function requireControl(
   message = '❌ You do not have permission.',
 ): Promise<boolean> {
   if (canControlChannel(member, record) || isSudo(member)) return true
+  await interaction.reply({ content: message, ephemeral: true })
+  return false
+}
+
+/**
+ * Stricter guard for destructive actions (delete, hosts) — the acting owner
+ * during a grace window is explicitly excluded. Only the real owner or sudo
+ * can take these actions; this prevents an acting owner from deleting the
+ * room or unseating the original owner before they get a chance to return.
+ */
+async function requireOwnerOrSudo(
+  interaction: ButtonInteraction,
+  member: GuildMember,
+  record: AutoChannelRecord,
+  message = '❌ The original host hasn\'t lost the room yet — only they (or a sudo) can do that.',
+): Promise<boolean> {
+  if (isOwner(member, record) || isSudo(member)) return true
   await interaction.reply({ content: message, ephemeral: true })
   return false
 }
@@ -64,7 +81,7 @@ export async function handleVoiceControlButton(interaction: ButtonInteraction): 
   }
 
   if (action === 'delete') {
-    if (!await requireControl(interaction, member, record, '❌ You do not have permission to delete this channel.')) return
+    if (!await requireOwnerOrSudo(interaction, member, record, '❌ Only the original host (or a sudo) can delete this channel.')) return
     const row = new ActionRowBuilder<ButtonBuilder>().addComponents(
       new ButtonBuilder()
         .setCustomId(`vc:${voiceChannelId}:delete_confirm`)
@@ -80,7 +97,7 @@ export async function handleVoiceControlButton(interaction: ButtonInteraction): 
   }
 
   if (action === 'delete_confirm') {
-    if (!await requireControl(interaction, member, record)) return
+    if (!await requireOwnerOrSudo(interaction, member, record)) return
     await interaction.deferReply({ ephemeral: true })
     await deleteAutoChannel(interaction.client, record)
     await interaction.editReply({ content: '✅ Channel deleted.' })
@@ -179,7 +196,7 @@ export async function handleVoiceControlButton(interaction: ButtonInteraction): 
   }
 
   if (action === 'hosts') {
-    if (!await requireControl(interaction, member, record)) return
+    if (!await requireOwnerOrSudo(interaction, member, record, '❌ Only the original host (or a sudo) can manage hosts.')) return
     const guild = interaction.guild!
     const vc = await guild.channels.fetch(record.voiceChannelId).catch(() => null)
 
@@ -284,6 +301,14 @@ export async function handleVoiceControlButton(interaction: ButtonInteraction): 
     const ownerPresent = vc.members.has(record.ownerUserId)
     if (ownerPresent && !isSudo(member)) {
       await interaction.reply({ content: '❌ The owner is still in the channel. You can only claim when they\'ve left.', ephemeral: true })
+      return
+    }
+    // Active grace — the original owner has a reserved seat until grace expires.
+    // Acting owner is in place; nobody else can claim until the timer runs out.
+    const inGrace = record.actingOwnerUserId && record.ownerGraceExpiresAt && record.ownerGraceExpiresAt.getTime() > Date.now()
+    if (inGrace && !isSudo(member)) {
+      const returnBySec = Math.floor(record.ownerGraceExpiresAt!.getTime() / 1000)
+      await interaction.reply({ content: `❌ The original host has a grace window — they can return until <t:${returnBySec}:R>. After that the acting host (<@${record.actingOwnerUserId}>) becomes the permanent owner.`, ephemeral: true })
       return
     }
     if (!vc.members.has(member.id) && !isSudo(member)) {

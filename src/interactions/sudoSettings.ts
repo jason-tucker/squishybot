@@ -102,6 +102,7 @@ interface NumericSettingDef {
 
 const NUMERIC_SETTINGS: NumericSettingDef[] = [
   { key: 'voice.cleanup_delay_ms', label: 'Cleanup delay (ms)', description: 'Empty auto channels are deleted after this many ms', envFallback: env.VOICE_CLEANUP_DELAY_MS, min: 0, max: 600000 },
+  { key: 'voice.owner_grace_ms', label: 'Owner grace (ms)', description: 'When the owner leaves a non-empty channel, an acting owner runs it for this long before promotion. The original owner can reclaim by rejoining. 0 disables grace (instant transfer).', envFallback: 300000, min: 0, max: 3600000 },
 ]
 
 interface BoolSettingDef {

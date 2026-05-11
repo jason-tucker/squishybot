@@ -125,6 +125,8 @@ export async function postOrUpdateControlPanel(
       t: ownerTag,
       ht: hostTags,
       m: members.map(m => [m.userId, m.joinedAt.getTime(), m.game]),
+      ao: record.actingOwnerUserId,
+      gx: record.ownerGraceExpiresAt?.getTime() ?? null,
     })
     if (lastPanelInputHash.get(record.voiceChannelId) === inputHash) return
 

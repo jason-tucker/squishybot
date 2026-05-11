@@ -34,7 +34,14 @@ export function buildControlPanelPayload(
 ) {
   const createdSec = Math.floor(record.createdAt.getTime() / 1000)
   const headerLines: string[] = []
-  headerLines.push(`🔊 host <@${record.ownerUserId}> · created <t:${createdSec}:R>`)
+  const inGrace = record.actingOwnerUserId && record.ownerGraceExpiresAt && record.ownerGraceExpiresAt.getTime() > Date.now()
+  if (inGrace) {
+    const returnBySec = Math.floor(record.ownerGraceExpiresAt!.getTime() / 1000)
+    headerLines.push(`🔊 host <@${record.ownerUserId}> _(away — returns by <t:${returnBySec}:R>)_ · created <t:${createdSec}:R>`)
+    headerLines.push(`🎙️ acting host <@${record.actingOwnerUserId}>`)
+  } else {
+    headerLines.push(`🔊 host <@${record.ownerUserId}> · created <t:${createdSec}:R>`)
+  }
   if (hostTags.length > 0) {
     headerLines.push(`👑 ${hostTags.join(', ')}`)
   }
