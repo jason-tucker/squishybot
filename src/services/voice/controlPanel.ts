@@ -27,13 +27,13 @@ export function clearPanelHash(voiceChannelId: string): void {
 export async function buildPanelPayloadForRecord(client: Client, record: AutoChannelRecord) {
   const [{ ownerTag, hostTags }, members] = await Promise.all([
     resolveDisplayTags(client, record),
-    resolveMembersWithPresence(client, record.voiceChannelId),
+    resolveMembersWithPresence(client, record.guildId, record.voiceChannelId),
   ])
   return buildControlPanelPayload(record, ownerTag, hostTags, members)
 }
 
 async function resolveDisplayTags(client: Client, record: AutoChannelRecord): Promise<{ ownerTag: string; hostTags: string[] }> {
-  const guild = client.guilds.cache.first()
+  const guild = client.guilds.cache.get(record.guildId)
   if (!guild) return { ownerTag: `<@${record.ownerUserId}>`, hostTags: record.hostUserIds.map(id => `<@${id}>`) }
 
   // Prefer cache (GuildMembers intent populates it on READY + on join). Falls
@@ -54,9 +54,9 @@ async function resolveDisplayTags(client: Client, record: AutoChannelRecord): Pr
 }
 
 /** Pull the DB join rows and overlay each user's current "Playing X" activity. */
-async function resolveMembersWithPresence(client: Client, voiceChannelId: string): Promise<MemberPresenceInfo[]> {
+async function resolveMembersWithPresence(client: Client, guildId: string, voiceChannelId: string): Promise<MemberPresenceInfo[]> {
   const rows = await listMembers(voiceChannelId)
-  const guild = client.guilds.cache.first()
+  const guild = client.guilds.cache.get(guildId)
   return rows.map(r => {
     const member = guild?.members.cache.get(r.userId)
     const game = member?.presence?.activities.find(a => a.type === ActivityType.Playing)?.name ?? null
@@ -75,9 +75,9 @@ export async function postOrUpdateControlPanel(
   record: AutoChannelRecord,
   prefetchedTextChannel?: TextChannel,
 ): Promise<void> {
-  const guild = client.guilds.cache.first()
+  const guild = client.guilds.cache.get(record.guildId)
   if (!guild) {
-    logger.warn(`postOrUpdateControlPanel: no guild in cache for vc=${record.voiceChannelId}`)
+    logger.warn(`postOrUpdateControlPanel: guild ${record.guildId} not in cache for vc=${record.voiceChannelId}`)
     return
   }
 
@@ -108,7 +108,7 @@ export async function postOrUpdateControlPanel(
 
   const [{ ownerTag, hostTags }, members] = await Promise.all([
     resolveDisplayTags(client, record),
-    resolveMembersWithPresence(client, record.voiceChannelId),
+    resolveMembersWithPresence(client, record.guildId, record.voiceChannelId),
   ])
   const payload = buildControlPanelPayload(record, ownerTag, hostTags, members)
 
