@@ -47,6 +47,7 @@ async function maybeAutoThread(msg: Message): Promise<void> {
   // Forums/media channels create posts-as-threads natively; voice/stage text-in-voice doesn't.
   if (msg.channel.type !== ChannelType.GuildText && msg.channel.type !== ChannelType.GuildAnnouncement) return
   if (msg.hasThread) return  // someone already started one
+  if (msg.attachments.size === 0) return
 
   const channel = msg.channel
   const me = msg.guild?.members.me
