@@ -83,12 +83,27 @@ export async function postOrUpdateControlPanel(
 
   let textChannel: TextChannel | null = prefetchedTextChannel ?? null
   if (!textChannel) {
-    const fetched = await guild.channels.fetch(record.textChannelId).catch(() => null)
-    if (!fetched || !fetched.isTextBased()) {
-      logger.warn(`postOrUpdateControlPanel: text channel ${record.textChannelId} unavailable (vc=${record.voiceChannelId})`)
-      return
+    // The bot manages this channel, so it should be in the local cache.
+    // Try cache first; only fall back to a network fetch on miss. This
+    // makes us resilient to transient API hiccups (5xx, rate limits, etc.)
+    // that would otherwise quietly stall the panel until the next voice
+    // event re-tried — which might be hours later.
+    const cached = guild.channels.cache.get(record.textChannelId) ?? null
+    if (cached && cached.isTextBased()) {
+      textChannel = cached as TextChannel
+    } else {
+      let fetchErr: unknown = null
+      const fetched = await guild.channels.fetch(record.textChannelId).catch(err => {
+        fetchErr = err
+        return null
+      })
+      if (!fetched || !fetched.isTextBased()) {
+        const errInfo = fetchErr ? ` (fetch error: code=${(fetchErr as any)?.code ?? '?'} status=${(fetchErr as any)?.status ?? '?'} msg=${(fetchErr as any)?.message ?? String(fetchErr)})` : ''
+        logger.warn(`postOrUpdateControlPanel: text channel ${record.textChannelId} unavailable (vc=${record.voiceChannelId})${errInfo}`)
+        return
+      }
+      textChannel = fetched as TextChannel
     }
-    textChannel = fetched as TextChannel
   }
 
   const [{ ownerTag, hostTags }, members] = await Promise.all([
