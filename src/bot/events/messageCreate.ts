@@ -1,4 +1,4 @@
-import { ChannelType, PermissionFlagsBits, type Client, type Message } from 'discord.js'
+import { ChannelType, PermissionFlagsBits, type Client, type Message, type PartialMessage } from 'discord.js'
 import { db } from '../../db/client'
 import { autoChannels } from '../../db/schema'
 import { eq } from 'drizzle-orm'
@@ -37,6 +37,17 @@ export function registerMessageCreate(client: Client): void {
     if (!record) return
     await postOrUpdateSticky(client, record)
   })
+
+  // Link embeds are resolved a beat after the message lands, firing a
+  // messageUpdate. Re-check so URL-only posts in auto-thread channels still
+  // get a thread once their preview shows up.
+  client.on('messageUpdate', async (_old, updated: Message | PartialMessage) => {
+    if (updated.partial) return  // we only enabled GuildMember partials, so this is rare
+    if (!updated.guildId) return
+    if (updated.author?.id === client.user!.id) return
+    if (updated.embeds.length === 0) return  // not the embed-resolution update we care about
+    await maybeAutoThread(updated as Message).catch(err => logger.error('Auto-thread (update) failed', err))
+  })
 }
 
 async function maybeAutoThread(msg: Message): Promise<void> {
@@ -47,7 +58,10 @@ async function maybeAutoThread(msg: Message): Promise<void> {
   // Forums/media channels create posts-as-threads natively; voice/stage text-in-voice doesn't.
   if (msg.channel.type !== ChannelType.GuildText && msg.channel.type !== ChannelType.GuildAnnouncement) return
   if (msg.hasThread) return  // someone already started one
-  if (msg.attachments.size === 0) return
+  // Only thread messages with media — uploaded files or link embeds.
+  // Embeds populate asynchronously, so plain-text posts with a URL are
+  // re-checked in messageUpdate once Discord resolves the embed.
+  if (msg.attachments.size === 0 && msg.embeds.length === 0) return
 
   const channel = msg.channel
   const me = msg.guild?.members.me
