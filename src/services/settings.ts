@@ -39,18 +39,24 @@ const hubsCache = new Map<string, HubInfo>()  // keyed by channelId
 // Read on the messageCreate hot path to avoid a DB query per message.
 const autoChannelTextIdsCache = new Set<string>()
 
+// Map of auto-channel voice IDs → their attached text channel ID.
+// Read on messageCreate for the "no voice-chat messages" PSA feature so we
+// can both identify the voice channel and link the user to the proper chat.
+const autoChannelVoiceMapCache = new Map<string, string>()
+
 export async function loadSettings(): Promise<void> {
   settingsCache.clear()
   sudoUsersCache.clear()
   autoThreadCache.clear()
   hubsCache.clear()
   autoChannelTextIdsCache.clear()
+  autoChannelVoiceMapCache.clear()
   const [rows, sudo, threads, hubs, autos] = await Promise.all([
     db.select().from(botSettings).catch(() => []),
     db.select().from(sudoUsers).catch(() => []),
     db.select().from(autoThreadChannels).catch(() => []),
     db.select().from(hubChannels).catch(() => []),
-    db.select({ textChannelId: autoChannels.textChannelId }).from(autoChannels).catch(() => []),
+    db.select({ voiceChannelId: autoChannels.voiceChannelId, textChannelId: autoChannels.textChannelId }).from(autoChannels).catch(() => []),
   ])
   for (const r of rows) settingsCache.set(r.key, r.value)
   for (const s of sudo) sudoUsersCache.add(s.userId)
@@ -72,7 +78,10 @@ export async function loadSettings(): Promise<void> {
       label: h.label,
     })
   }
-  for (const a of autos) autoChannelTextIdsCache.add(a.textChannelId)
+  for (const a of autos) {
+    autoChannelTextIdsCache.add(a.textChannelId)
+    autoChannelVoiceMapCache.set(a.voiceChannelId, a.textChannelId)
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -269,4 +278,37 @@ export function trackAutoChannelText(textChannelId: string): void {
 
 export function untrackAutoChannelText(textChannelId: string): void {
   autoChannelTextIdsCache.delete(textChannelId)
+}
+
+// ---------------------------------------------------------------------------
+// Auto-channel voice-channel IDs — hot-path lookup for the "no voice-chat
+// messages" PSA on messages in the built-in voice-channel text chat.
+// ---------------------------------------------------------------------------
+
+export function isAutoChannelVoice(voiceChannelId: string): boolean {
+  return autoChannelVoiceMapCache.has(voiceChannelId)
+}
+
+export function getAutoChannelTextFor(voiceChannelId: string): string | null {
+  return autoChannelVoiceMapCache.get(voiceChannelId) ?? null
+}
+
+export function trackAutoChannelVoice(voiceChannelId: string, textChannelId: string): void {
+  autoChannelVoiceMapCache.set(voiceChannelId, textChannelId)
+}
+
+export function untrackAutoChannelVoice(voiceChannelId: string): void {
+  autoChannelVoiceMapCache.delete(voiceChannelId)
+}
+
+// ---------------------------------------------------------------------------
+// Boolean setting helper. Stored as the string "true" / "false" in
+// bot_settings; default is whatever the caller wants (usually false).
+// ---------------------------------------------------------------------------
+
+export function getBoolSetting(key: string, fallback = false): boolean {
+  const v = settingsCache.get(key)
+  if (v === 'true') return true
+  if (v === 'false') return false
+  return fallback
 }

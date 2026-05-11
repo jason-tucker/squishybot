@@ -12,6 +12,7 @@
  *   sudo:set:autothread:remove        string-select — remove an auto-thread channel
  *   sudo:set:edit_modal:{key}         button — show modal for free-form value (numbers / etc.)
  *   sudo:set:save:{key}               modal submit — persist the modal value
+ *   sudo:set:bool_toggle:{key}        button — flip a boolean setting on/off
  */
 import {
   type ButtonInteraction,
@@ -47,6 +48,7 @@ import {
   addAutoThreadChannel,
   addSudoUser,
   clearSetting,
+  getBoolSetting,
   getSetting,
   listAdditionalSudoUsers,
   listAutoThreadChannels,
@@ -100,6 +102,23 @@ interface NumericSettingDef {
 
 const NUMERIC_SETTINGS: NumericSettingDef[] = [
   { key: 'voice.cleanup_delay_ms', label: 'Cleanup delay (ms)', description: 'Empty auto channels are deleted after this many ms', envFallback: env.VOICE_CLEANUP_DELAY_MS, min: 0, max: 600000 },
+]
+
+interface BoolSettingDef {
+  key: string
+  label: string
+  description: string
+  defaultValue: boolean
+}
+
+// Boolean toggles that live in the Voice sub-panel.
+const VOICE_BOOL_SETTINGS: BoolSettingDef[] = [
+  {
+    key: 'voice.no_voice_chat_messages',
+    label: 'No Voice Channel Messages',
+    description: 'When on, the bot replies to messages sent in an auto-voice channel\'s built-in chat, pointing folks at the attached text channel instead.',
+    defaultValue: false,
+  },
 ]
 
 // ---------------------------------------------------------------------------
@@ -297,6 +316,10 @@ function renderVoice() {
     const sourceLabel = source === 'override' ? '⚙️ DB override' : '📄 env'
     lines.push(`**${def.label}** · \`${value}\` · _${sourceLabel}_\n_${def.description}_\n`)
   }
+  for (const def of VOICE_BOOL_SETTINGS) {
+    const on = getBoolSetting(def.key, def.defaultValue)
+    lines.push(`**${def.label}** · ${on ? '🟢 On' : '⚪ Off'}\n_${def.description}_\n`)
+  }
   const cat = effectiveChannelValue(VOICE_CATEGORY_SETTING)
   const catSourceLabel = cat.source === 'override' ? '⚙️ DB override' : cat.source === 'env' ? '📄 env' : '— unset'
   lines.push(`**${VOICE_CATEGORY_SETTING.label}** · ${channelMentionOrNone(cat.value)} · _${catSourceLabel}_\n_${VOICE_CATEGORY_SETTING.description}_`)
@@ -321,6 +344,18 @@ function renderVoice() {
       new ActionRowBuilder<MessageActionRowComponentBuilder>().addComponents(
         new ButtonBuilder().setCustomId(`sudo:set:edit_modal:${def.key}`).setLabel(`Edit ${def.label}`).setEmoji('✏️').setStyle(ButtonStyle.Primary),
         new ButtonBuilder().setCustomId(`sudo:set:reset:${def.key}`).setLabel('Reset').setEmoji('♻️').setStyle(ButtonStyle.Secondary),
+      )
+    )
+  }
+  for (const def of VOICE_BOOL_SETTINGS) {
+    const on = getBoolSetting(def.key, def.defaultValue)
+    components.push(
+      new ActionRowBuilder<MessageActionRowComponentBuilder>().addComponents(
+        new ButtonBuilder()
+          .setCustomId(`sudo:set:bool_toggle:${def.key}`)
+          .setLabel(`${on ? 'Disable' : 'Enable'} ${def.label}`)
+          .setEmoji(on ? '🔕' : '🔔')
+          .setStyle(on ? ButtonStyle.Secondary : ButtonStyle.Success),
       )
     )
   }
@@ -887,6 +922,20 @@ export async function handleSettingsButton(interaction: ButtonInteraction): Prom
     const { removeSocialFeed } = await import('../services/socialFeeds')
     await removeSocialFeed(feedId)
     await interaction.editReply((await renderSocials()) as any)
+    return
+  }
+
+  // sudo:set:bool_toggle:{key} — flip a boolean setting; currently all live in Voice
+  if (id.startsWith('sudo:set:bool_toggle:')) {
+    const key = id.slice('sudo:set:bool_toggle:'.length)
+    const def = VOICE_BOOL_SETTINGS.find(d => d.key === key)
+    if (!def) {
+      await interaction.followUp({ content: `Unknown toggle: ${key}`, flags: MessageFlags.Ephemeral })
+      return
+    }
+    const next = !getBoolSetting(def.key, def.defaultValue)
+    await setSetting(def.key, next ? 'true' : 'false', interaction.user.id)
+    await interaction.editReply(renderVoice() as any)
     return
   }
 

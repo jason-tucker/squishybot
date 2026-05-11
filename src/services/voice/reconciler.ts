@@ -13,7 +13,7 @@ import { createAutoChannel } from './autoChannel'
 import { computeAutoName } from './autoNaming'
 import { backfillMembers, clearMembers } from './voiceMembers'
 import { logger } from '../logger'
-import { getSetting, unregisterHubChannel, untrackAutoChannelText, updateHubChannelId } from '../settings'
+import { getSetting, unregisterHubChannel, untrackAutoChannelText, untrackAutoChannelVoice, updateHubChannelId } from '../settings'
 
 export interface ReconcilerResult {
   recovered: number
@@ -61,6 +61,7 @@ export async function runReconciler(client: Client): Promise<ReconcilerResult> {
       await db.delete(autoChannels).where(eq(autoChannels.voiceChannelId, record.voiceChannelId)).catch(() => {})
       await clearMembers(record.voiceChannelId)
       untrackAutoChannelText(record.textChannelId)
+      untrackAutoChannelVoice(record.voiceChannelId)
       result.cleaned++
       logger.info(`Reconciler: cleaned orphan vc=${record.voiceChannelId}`)
       return

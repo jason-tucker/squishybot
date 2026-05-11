@@ -3,7 +3,7 @@ import { db } from '../../db/client'
 import { autoChannels } from '../../db/schema'
 import { eq } from 'drizzle-orm'
 import { postOrUpdateSticky } from '../../services/voice/sticky'
-import { getAutoThreadConfig, isAutoChannelText, isAutoThreadChannel } from '../../services/settings'
+import { getAutoChannelTextFor, getAutoThreadConfig, getBoolSetting, isAutoChannelText, isAutoChannelVoice, isAutoThreadChannel } from '../../services/settings'
 import { logger } from '../../services/logger'
 
 const lastReposted = new Map<string, number>()
@@ -24,6 +24,7 @@ export function registerMessageCreate(client: Client): void {
     if (msg.author.id === client.user!.id) return
 
     await maybeAutoThread(msg).catch(err => logger.error('Auto-thread failed', err))
+    await maybeNudgeOutOfVoiceChat(msg).catch(err => logger.error('Voice-chat nudge failed', err))
 
     if (!isAutoChannelText(msg.channelId)) return
 
@@ -97,6 +98,33 @@ async function maybeAutoThread(msg: Message): Promise<void> {
     }
     throw err
   }
+}
+
+// Per-(channel, user) cooldown so the bot doesn't spam the nudge if someone
+// fires off five messages in a row. The voice channel chat is low-traffic by
+// design, so a long window is fine.
+const NUDGE_COOLDOWN_MS = 5 * 60_000  // 5 minutes
+const lastNudged = new Map<string, number>()  // key = `${voiceChannelId}:${userId}`
+
+async function maybeNudgeOutOfVoiceChat(msg: Message): Promise<void> {
+  if (msg.author.bot) return
+  if (msg.system) return
+  if (msg.channel.type !== ChannelType.GuildVoice) return  // only the built-in voice-channel text chat
+  if (!isAutoChannelVoice(msg.channelId)) return
+  if (!getBoolSetting('voice.no_voice_chat_messages')) return
+
+  const cooldownKey = `${msg.channelId}:${msg.author.id}`
+  const now = Date.now()
+  const last = lastNudged.get(cooldownKey) ?? 0
+  if (now - last < NUDGE_COOLDOWN_MS) return
+  lastNudged.set(cooldownKey, now)
+
+  const textChannelId = getAutoChannelTextFor(msg.channelId)
+  const pointer = textChannelId ? `<#${textChannelId}>` : 'the attached text channel'
+  await msg.reply({
+    content: `Heads up — this voice channel has its own text channel just below (${pointer}). Mind moving the convo there?`,
+    allowedMentions: { parse: [], repliedUser: false },
+  }).catch(err => logger.warn(`Voice-chat nudge reply failed in vc=${msg.channelId}: ${err?.message ?? err}`))
 }
 
 function formatThreadName(msg: Message, template: string | null): string {

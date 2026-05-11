@@ -4,7 +4,7 @@ import { db } from '../../db/client'
 import { autoChannels } from '../../db/schema'
 import { eq } from 'drizzle-orm'
 import { env } from '../../config/env'
-import { getSetting, trackAutoChannelText, untrackAutoChannelText } from '../settings'
+import { getSetting, trackAutoChannelText, trackAutoChannelVoice, untrackAutoChannelText, untrackAutoChannelVoice } from '../settings'
 import type { AutoChannelRecord } from '../../types/voice'
 import { postOrUpdateControlPanel, clearPanelHash } from './controlPanel'
 import { postOrUpdateSticky } from './sticky'
@@ -79,6 +79,7 @@ export async function createAutoChannel(
     throw err
   }
   trackAutoChannelText(record.textChannelId)
+  trackAutoChannelVoice(record.voiceChannelId, record.textChannelId)
 
   // Record the joining owner in the members table so the panel shows them
   // immediately. voiceStateUpdate fires for them too but the order isn't
@@ -112,6 +113,7 @@ export async function deleteAutoChannel(client: Client, record: AutoChannelRecor
   await db.delete(autoChannels).where(eq(autoChannels.voiceChannelId, record.voiceChannelId)).catch(() => {})
   await clearMembers(record.voiceChannelId)
   untrackAutoChannelText(record.textChannelId)
+  untrackAutoChannelVoice(record.voiceChannelId)
 
   logger.info(`Auto channel deleted: vc=${record.voiceChannelId}`)
 }
