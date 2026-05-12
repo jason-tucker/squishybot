@@ -8,6 +8,7 @@ import { scheduleCleanup, cancelCleanup } from '../../services/voice/cleanupSche
 import { postOrUpdateControlPanel } from '../../services/voice/controlPanel'
 import { cancelHideGrace, grantHideGrace } from '../../services/voice/hideGrace'
 import { cancelGraceTimer, getOwnerGraceMs, pickActingOwner, scheduleGracePromotion } from '../../services/voice/ownerGrace'
+import { maybeRenameChannel } from '../../services/voice/autoRename'
 import { recordMemberJoin, recordMemberLeave } from '../../services/voice/voiceMembers'
 import { logger } from '../../services/logger'
 import { recordActivity } from '../../services/presence'
@@ -70,6 +71,9 @@ export function registerVoiceStateUpdate(client: Client): void {
             .catch(() => {})
         }
         await postOrUpdateControlPanel(client, updatedRecord).catch(() => {})
+        // New member arrived — they may be playing something that should
+        // change the channel name. Re-evaluate (handles throttle internally).
+        await maybeRenameChannel(client, joinedChannelId).catch(() => {})
         return
       }
 
@@ -170,6 +174,9 @@ export function registerVoiceStateUpdate(client: Client): void {
         scheduleCleanup(client, leftChannelId)
       } else {
         await postOrUpdateControlPanel(client, updatedRecord).catch(() => {})
+        // Member who left may have been the one whose game was driving the
+        // channel name — re-evaluate so the fallback kicks in.
+        await maybeRenameChannel(client, leftChannelId).catch(() => {})
       }
     }
   })

@@ -18,6 +18,19 @@ export interface MemberPresenceInfo {
   joinedAt: Date
   /** Discord rich-presence "Playing X" activity name, if any. */
   game: string | null
+  /** Rich-presence details line (e.g. "Match in progress"). */
+  details: string | null
+  /** Rich-presence state line (e.g. "Quick Play"). */
+  state: string | null
+  /** Rich-presence party size, when reported. */
+  partySize: [number, number] | null
+}
+
+export interface PanelNameContext {
+  /** The live Discord channel name (may lag the DB during throttle). */
+  currentName: string
+  /** Human-readable explanation of why the channel is named that way. */
+  reason: string
 }
 
 /**
@@ -31,6 +44,7 @@ export function buildControlPanelPayload(
   ownerTag: string,
   hostTags: string[],
   members: MemberPresenceInfo[],
+  nameContext?: PanelNameContext | null,
 ) {
   const createdSec = Math.floor(record.createdAt.getTime() / 1000)
   const headerLines: string[] = []
@@ -57,9 +71,21 @@ export function buildControlPanelPayload(
     headerLines.push('👥 In channel')
     for (const m of sorted) {
       const joinedSec = Math.floor(m.joinedAt.getTime() / 1000)
-      const playing = m.game ? ` · 🎮 ${m.game}` : ''
-      headerLines.push(`• <@${m.userId}> joined <t:${joinedSec}:R>${playing}`)
+      headerLines.push(`• <@${m.userId}> joined <t:${joinedSec}:R>`)
+      if (m.game) {
+        const bits: string[] = [`🎮 ${m.game}`]
+        if (m.details) bits.push(m.details)
+        if (m.state) bits.push(m.state)
+        if (m.partySize) bits.push(`🎉 ${m.partySize[0]}/${m.partySize[1]}`)
+        headerLines.push(`   ↳ ${bits.join(' · ')}`)
+      }
     }
+  }
+
+  if (nameContext) {
+    headerLines.push('')
+    headerLines.push(`📛 **Current name:** \`${nameContext.currentName}\``)
+    headerLines.push(`💡 ${nameContext.reason}`)
   }
 
   const container = new ContainerBuilder()

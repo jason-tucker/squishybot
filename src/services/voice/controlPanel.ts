@@ -29,7 +29,11 @@ export async function buildPanelPayloadForRecord(client: Client, record: AutoCha
     resolveDisplayTags(client, record),
     resolveMembersWithPresence(client, record.guildId, record.voiceChannelId),
   ])
-  return buildControlPanelPayload(record, ownerTag, hostTags, members)
+  const guild = client.guilds.cache.get(record.guildId)
+  const vc = guild?.channels.cache.get(record.voiceChannelId)
+  const liveName = (vc && 'name' in vc) ? vc.name : record.fallbackName ?? '(unknown)'
+  const nameContext = explainName(record, members, liveName)
+  return buildControlPanelPayload(record, ownerTag, hostTags, members, nameContext)
 }
 
 async function resolveDisplayTags(client: Client, record: AutoChannelRecord): Promise<{ ownerTag: string; hostTags: string[] }> {
@@ -59,9 +63,71 @@ async function resolveMembersWithPresence(client: Client, guildId: string, voice
   const guild = client.guilds.cache.get(guildId)
   return rows.map(r => {
     const member = guild?.members.cache.get(r.userId)
-    const game = member?.presence?.activities.find(a => a.type === ActivityType.Playing)?.name ?? null
-    return { userId: r.userId, joinedAt: r.joinedAt, game }
+    const playing = member?.presence?.activities.find(a => a.type === ActivityType.Playing) ?? null
+    const partyArr = playing?.party?.size
+    const partySize: [number, number] | null = partyArr && partyArr.length === 2 ? [partyArr[0], partyArr[1]] : null
+    return {
+      userId: r.userId,
+      joinedAt: r.joinedAt,
+      game: playing?.name ?? null,
+      details: playing?.details ?? null,
+      state: playing?.state ?? null,
+      partySize,
+    }
   })
+}
+
+/**
+ * Human-readable "why is the channel named what it is" line for the panel.
+ * Computes the explanation from the record + the live members' presence.
+ */
+function explainName(
+  record: AutoChannelRecord,
+  members: MemberPresenceInfo[],
+  liveChannelName: string,
+): { currentName: string; reason: string } {
+  if (!record.autoNameEnabled) {
+    return { currentName: liveChannelName, reason: 'Auto-rename **off** — name was set manually or by a fixed template.' }
+  }
+  const template = record.nameTemplate ?? 'auto'
+  if (template === 'chill') {
+    return { currentName: liveChannelName, reason: 'Chill template — fixed name, auto-rename disabled.' }
+  }
+  const playing = members.filter(m => m.game)
+  if (playing.length === 0) {
+    return {
+      currentName: liveChannelName,
+      reason: `Nobody is playing anything → falling back to **${record.fallbackName ?? '(unset)'}**.`,
+    }
+  }
+  // Top game (owner wins ties).
+  const counts = new Map<string, number>()
+  for (const m of playing) counts.set(m.game!, (counts.get(m.game!) ?? 0) + 1)
+  const ownerGame = playing.find(m => m.userId === record.ownerUserId)?.game ?? null
+  let top: string | null = null
+  let topCount = 0
+  for (const [g, c] of counts) {
+    if (c > topCount || (c === topCount && g === ownerGame)) { top = g; topCount = c }
+  }
+  if (!top) {
+    return { currentName: liveChannelName, reason: `Template \`${template}\` — no winner from presence; using fallback **${record.fallbackName ?? '(unset)'}**.` }
+  }
+  const memberCount = members.length
+  let templateDetail = ''
+  switch (template) {
+    case 'auto':    templateDetail = topCount > 1 ? `prefixes with \`(${topCount})\` since 2+ are playing` : 'just the game name (only 1 player)'; break
+    case 'counter': templateDetail = `appends \`[${memberCount}]\` (channel member count)`; break
+    case 'squad':   templateDetail = memberCount > 1 ? `appends \`· ${memberCount} squad\`` : 'just the game name (only 1 member)'; break
+    case 'detail':  templateDetail = 'appends rich-presence `details` (if present)'; break
+    case 'state':   templateDetail = 'appends rich-presence `state` (if present)'; break
+    case 'party':   templateDetail = 'appends `(X/Y party)` when rich presence reports a party'; break
+    case 'stealth': templateDetail = 'just the game name, no decoration'; break
+    default:        templateDetail = '_(unknown template)_'
+  }
+  return {
+    currentName: liveChannelName,
+    reason: `Template \`${template}\` · **${topCount}/${memberCount}** playing **${top}** wins. ${templateDetail}.`,
+  }
 }
 
 /**
@@ -110,12 +176,17 @@ export async function postOrUpdateControlPanel(
     resolveDisplayTags(client, record),
     resolveMembersWithPresence(client, record.guildId, record.voiceChannelId),
   ])
-  const payload = buildControlPanelPayload(record, ownerTag, hostTags, members)
+  const vc = guild.channels.cache.get(record.voiceChannelId)
+  const liveName = (vc && 'name' in vc) ? vc.name : record.fallbackName ?? '(unknown)'
+  const nameContext = explainName(record, members, liveName)
+  const payload = buildControlPanelPayload(record, ownerTag, hostTags, members, nameContext)
 
   if (record.controlPanelMsgId) {
     // Skip a no-op edit when none of the visible inputs changed. The hash
     // covers everything `buildControlPanelPayload` reads: record state,
-    // owner/host display names, member list with presence + join times.
+    // owner/host display names, member list with presence + join times,
+    // and the rich-presence detail/state/party fields surfaced in the
+    // "why this name" line.
     const inputHash = JSON.stringify({
       o: record.ownerUserId,
       h: record.hostUserIds,
@@ -124,9 +195,11 @@ export async function postOrUpdateControlPanel(
       n: record.manualName,
       t: ownerTag,
       ht: hostTags,
-      m: members.map(m => [m.userId, m.joinedAt.getTime(), m.game]),
+      m: members.map(m => [m.userId, m.joinedAt.getTime(), m.game, m.details, m.state, m.partySize?.[0] ?? null, m.partySize?.[1] ?? null]),
       ao: record.actingOwnerUserId,
       gx: record.ownerGraceExpiresAt?.getTime() ?? null,
+      ln: liveName,
+      ra: nameContext.reason,
     })
     if (lastPanelInputHash.get(record.voiceChannelId) === inputHash) return
 

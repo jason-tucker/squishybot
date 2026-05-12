@@ -53,6 +53,21 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - **`/sudo → Settings → Voice → No Voice Channel Messages` toggle.** When on, the bot replies to messages sent in an auto-voice channel's built-in chat with a pointer to the attached text channel ("Heads up — this voice channel has its own text channel just below…"). Per-(channel, user) 5-minute cooldown. Setting key `voice.no_voice_chat_messages`, default off.
 
 ### Fixed
+- **Auto-rename now reliably falls back to the channel's `fallback_name` when nobody is playing a game.** Three compounding bugs were causing the channel to stay stuck on the last game's name:
+  1. **Template filter dropped most templates.** `presenceUpdate` only ran for `null` / `'auto'` / `'counter'` — `squad`, `detail`, `state`, `party`, `stealth` were silently ignored. Now uses the full `ALL_TEMPLATES` set.
+  2. **Throttled renames were dropped, not deferred.** Discord's per-channel rename rate limit is 2/10 min. The old handler bailed entirely when throttled — so a "stop playing" event within the cooldown window never triggered the fallback. The new pipeline schedules a single deferred retry that fires as soon as the bucket allows, and coalesces concurrent retries.
+  3. **`voiceStateUpdate` never re-evaluated the name.** When the owner / driver of a game-derived name left the VC (or a new member joined who's playing something), the rename pipeline didn't run. Now both join and leave fire `maybeRenameChannel`.
+- Centralized into new `src/services/voice/autoRename.ts`. Reconciler now calls the same function on boot, so a redeploy mid-presence reconciles cleanly. `presenceUpdate.ts` shrank from a manual hot path to a thin event-to-service handoff; `feature.presence_renames` flag still gates renames, but the control panel still updates on presence changes so the rich-presence list and "why this name" line stay live even when the flag is off.
+
+### Added
+- **Voice control panel: full rich presence + current name + reason.** The In-channel list now shows each member's game name, rich-presence `details`, `state`, and party size (when reported) on a sub-line below their tag. Below the member list, two new lines surface the live channel name and a plain-English explanation of why it's that name:
+  - `Auto-rename off → manual / fixed template`
+  - `Chill template → fixed name`
+  - `Nobody is playing → falling back to <fallback>`
+  - `Template <key> · N/M playing <Game> wins. <how the template formats it>.`
+- The panel re-renders on presence changes (with hash dedup so silent edits don't fire).
+
+### Fixed
 - **Control panel updates no longer silently fail when the bot is in multiple guilds.** `postOrUpdateControlPanel` and its two helper resolvers were calling `client.guilds.cache.first()` instead of looking up the auto-channel record's own guild. With more than one guild in cache, `.first()` could return the wrong guild and every `channels.fetch()` failed with `GuildChannelUnowned` ("The fetched channel does not belong to this manager's guild") — silently, because the error was swallowed by `.catch(() => null)`. Now uses `client.guilds.cache.get(record.guildId)` throughout, plus a cache-first lookup on the text channel so transient API hiccups don't stall the panel until the next voice event. On cache miss the diagnostic log now includes the actual error code / status / message so any future recurrence is debuggable instead of guessable.
 
 ### Changed

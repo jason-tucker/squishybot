@@ -3,74 +3,40 @@ import { db } from '../../db/client'
 import { autoChannels } from '../../db/schema'
 import { eq } from 'drizzle-orm'
 import { env } from '../../config/env'
+import { maybeRenameChannel, clearRenameState } from '../../services/voice/autoRename'
+import { postOrUpdateControlPanel } from '../../services/voice/controlPanel'
+import { getBoolSetting } from '../../services/settings'
 import { logger } from '../../services/logger'
-import { computeAutoName } from '../../services/voice/autoNaming'
 
-// Debounce: don't rename more than once per 10 minutes per channel (Discord rate limit)
-const lastRename = new Map<string, number>()
-const RENAME_COOLDOWN_MS = 10 * 60 * 1000
-
-/** Drop the throttle entry when an auto-channel is deleted, otherwise the Map
- * leaks one entry per channel ever auto-renamed. Called from deleteAutoChannel. */
+/** Drop the per-channel rename state when an auto-channel is deleted. */
 export function clearRenameThrottle(voiceChannelId: string): void {
-  lastRename.delete(voiceChannelId)
+  clearRenameState(voiceChannelId)
 }
 
 export function registerPresenceUpdate(client: Client): void {
   client.on('presenceUpdate', async (_old: Presence | null, newPresence: Presence) => {
     if (newPresence.guild?.id !== env.GUILD_ID) return
     if (!newPresence.userId) return
-    // Feature flag (#33).
-    const { getBoolSetting } = await import('../../services/settings')
-    if (!getBoolSetting('feature.presence_renames', true)) return
 
-    // Look up the auto channel the user is currently sitting in (if any).
-    // Tracking by voice-channel rather than ownership lets a non-owner's
-    // game activity influence the name, which is needed for the "(N) Game"
-    // counted-name feature when multiple members are playing the same thing.
+    // Keying off voice-channel rather than ownership lets a non-owner's
+    // game activity drive the name (and the panel rich-presence list).
     const memberVcId = newPresence.member?.voice.channelId
     if (!memberVcId) return
-    const [record] = await db.select().from(autoChannels)
-      .where(eq(autoChannels.voiceChannelId, memberVcId))
 
+    // Only fire the heavy paths when the user is actually in an auto channel.
+    const [record] = await db.select().from(autoChannels).where(eq(autoChannels.voiceChannelId, memberVcId))
     if (!record) return
-    if (!record.autoNameEnabled) return
-    // nameTemplate semantics:
-    //   null   → default auto (just the game name) — fresh channels land here
-    //   'auto' → same: just the game name
-    //   'counter' → "<game> [N/limit]"
-    //   anything else → manual mode (e.g. tryhard / chill / custom rename); skip
-    if (record.nameTemplate !== null && record.nameTemplate !== 'auto' && record.nameTemplate !== 'counter') return
 
-    // Rate limit check
-    const lastTime = lastRename.get(record.voiceChannelId) ?? 0
-    if (Date.now() - lastTime < RENAME_COOLDOWN_MS) return
-
-    const guild = client.guilds.cache.get(env.GUILD_ID)
-    if (!guild) return
-
-    const vc = await guild.channels.fetch(record.voiceChannelId).catch(() => null)
-    if (!vc?.isVoiceBased()) return
-
-    // When nobody is playing anything we can derive a name from, fall back to
-    // the channel's stored fallbackName (initial random name OR last manual
-    // rename / Tryhard / Chill template). Skip if there's no fallback recorded
-    // (legacy rows pre-migration).
-    const computed = computeAutoName(vc, record.ownerUserId, record.nameTemplate, record.userLimit)
-    const newName = computed ?? record.fallbackName
-    if (!newName) return
-
-    // Don't rename if the name didn't actually change
-    if (vc.name === newName) return
-
-    lastRename.set(record.voiceChannelId, Date.now())
-    await vc.setName(newName).catch(() => {})
-
-    // Update text channel too
-    const tc = await guild.channels.fetch(record.textChannelId).catch(() => null)
-    const textName = newName.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'voice-chat'
-    if (tc?.isTextBased()) await (tc as any).setName(textName).catch(() => {})
-
-    logger.info(`Presence auto-rename: vc=${record.voiceChannelId} → ${newName}`)
+    // Rename pipeline — gated by feature.presence_renames so the kill switch
+    // works. Panel refresh runs independently so the rich-presence list and
+    // "why this name" line stay current even when renames are disabled.
+    if (getBoolSetting('feature.presence_renames', true)) {
+      await maybeRenameChannel(client, memberVcId).catch(err =>
+        logger.warn(`presenceUpdate rename: ${(err as Error).message}`),
+      )
+    }
+    // The control panel's hash dedup will skip no-op edits, so this is cheap
+    // when the user's relevant presence fields didn't change.
+    await postOrUpdateControlPanel(client, record).catch(() => {})
   })
 }

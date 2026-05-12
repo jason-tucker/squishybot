@@ -12,7 +12,6 @@ import { postOrUpdateSticky } from './sticky'
 import { syncTextChannelPermissions } from './permissions'
 import { seedHubsFromEnv } from './hubManager'
 import { createAutoChannel } from './autoChannel'
-import { computeAutoName } from './autoNaming'
 import { backfillMembers, clearMembers } from './voiceMembers'
 import { logger } from '../logger'
 import { getSetting, unregisterHubChannel, untrackAutoChannelText, untrackAutoChannelVoice, updateHubChannelId } from '../settings'
@@ -87,20 +86,11 @@ export async function runReconciler(client: Client): Promise<ReconcilerResult> {
     const tc = guild.channels.cache.get(record.textChannelId)
       ?? await guild.channels.fetch(record.textChannelId).catch(() => null)
 
-    // Retroactively auto-rename when the channel is opted into auto-naming
-    // and any current member is playing something. Covers the gap where
-    // presenceUpdate events between bot restarts were lost.
-    if (vc.isVoiceBased() && record.autoNameEnabled
-        && (record.nameTemplate === null || record.nameTemplate === 'auto' || record.nameTemplate === 'counter')) {
-      const computed = computeAutoName(vc, record.ownerUserId, record.nameTemplate, record.userLimit)
-      const newName = computed ?? record.fallbackName
-      if (newName && vc.name !== newName) {
-        await vc.setName(newName).catch(() => {})
-        const textName = newName.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'voice-chat'
-        if (tc?.isTextBased()) await (tc as any).setName(textName).catch(() => {})
-        logger.info(`Reconciler auto-rename: vc=${record.voiceChannelId} → ${newName}`)
-      }
-    }
+    // Retroactively auto-rename — handles presence updates that fired while
+    // the bot was down. Centralized logic in autoRename.ts handles template
+    // filtering + throttle + deferred retry on its own.
+    const { maybeRenameChannel } = await import('./autoRename')
+    await maybeRenameChannel(client, record.voiceChannelId).catch(() => {})
 
     // Sync text channel permissions for current members
     if (tc?.isTextBased() && vc.isVoiceBased()) {
