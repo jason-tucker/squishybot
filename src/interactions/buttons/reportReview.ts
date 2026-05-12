@@ -3,6 +3,29 @@ import { env } from '../../config/env'
 import { isBotOwner } from '../../services/botOwner'
 import { logger } from '../../services/logger'
 import { getReportSession, deleteReportSession } from '../../services/reportCache'
+import { db } from '../../db/client'
+import { reportLog } from '../../db/schema'
+import { and, desc, eq } from 'drizzle-orm'
+
+async function markReportLogStatus(
+  userId: string,
+  title: string,
+  status: 'filed' | 'dropped',
+  githubIssueUrl: string | null,
+  decidedByUserId: string,
+): Promise<void> {
+  // Match the most-recent pending row by (user, title). Each /report submit
+  // inserts exactly one row, so the latest pending one is the right target.
+  const [latest] = await db.select({ id: reportLog.id }).from(reportLog)
+    .where(and(eq(reportLog.userId, userId), eq(reportLog.title, title), eq(reportLog.status, 'pending')))
+    .orderBy(desc(reportLog.createdAt))
+    .limit(1)
+  if (!latest) return
+  await db.update(reportLog)
+    .set({ status, githubIssueUrl, decidedByUserId, decidedAt: new Date() })
+    .where(eq(reportLog.id, latest.id))
+    .catch(() => {})
+}
 
 export async function handleReportReview(interaction: ButtonInteraction): Promise<void> {
   if (!await isBotOwner(interaction.client, interaction.user.id)) {
@@ -33,6 +56,7 @@ export async function handleReportReview(interaction: ButtonInteraction): Promis
 
   if (!isApprove) {
     deleteReportSession(sessionKey)
+    await markReportLogStatus(session.reporterId, session.title, 'dropped', null, interaction.user.id)
     await interaction.editReply({
       content: `❌ **Rejected${notify ? '' : ' silently'}** — /report from <@${session.reporterId}> (\`${session.reporterTag}\`)\n**Title:** ${session.title}`,
       components: [],
@@ -77,6 +101,7 @@ export async function handleReportReview(interaction: ButtonInteraction): Promis
 
   const data = (await res.json()) as { html_url: string; number: number }
   deleteReportSession(sessionKey)
+  await markReportLogStatus(session.reporterId, session.title, 'filed', data.html_url, interaction.user.id)
 
   await interaction.editReply({
     content: `✅ **Filed${notify ? ' + notified reporter' : ' silently'}** — Issue **#${data.number}** — ${data.html_url}\nReporter: <@${session.reporterId}> (\`${session.reporterTag}\`)`,

@@ -48,6 +48,26 @@ export async function handleReportSubmit(interaction: ModalSubmitInteraction): P
     labels,
   })
 
+  // #24 — Persist the report to the audit log so /sudo triage can find it.
+  // The review handler will look up the most-recent pending row for this user
+  // by sessionKey-derived heuristics; for simplicity, the row stores the
+  // reporter's user_id and title, and the review handler matches on that.
+  try {
+    const { db } = await import('../../db/client')
+    const { reportLog } = await import('../../db/schema')
+    await db.insert(reportLog).values({
+      guildId: interaction.guildId!,
+      userId: interaction.user.id,
+      title,
+      reportType: type || 'unknown',
+      description,
+      steps: steps || null,
+      status: 'pending',
+    })
+  } catch (err) {
+    logger.warn('report_log insert failed', err)
+  }
+
   // DM the bot owner with Approve / Reject buttons
   try {
     const owner = await interaction.client.users.fetch(env.BOT_OWNER_ID)

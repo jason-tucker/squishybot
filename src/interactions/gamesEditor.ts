@@ -128,6 +128,7 @@ function renderGameDetail(g: Game) {
   lines.push(`**Ping role** — ${g.pingRoleId ? `<@&${g.pingRoleId}>` : '_unset (will name-match)_'} _(toggling "Pings" adds/removes this role)_`)
   lines.push(`**Sort order** — \`${g.sortOrder}\``)
   lines.push(`**/play cooldown** — ${g.playCooldownSeconds === null || g.playCooldownSeconds === undefined ? '_default (1800s = 30 min)_' : g.playCooldownSeconds === 0 ? '🟢 disabled' : `\`${g.playCooldownSeconds}s\``}`)
+  lines.push(`**Auto-archive after** — ${g.autoArchiveDays && g.autoArchiveDays > 0 ? `\`${g.autoArchiveDays} days\` of silence` : '_disabled_'}`)
   lines.push(`**Visible** — ${g.isVisible ? '🟢 yes' : '🔴 hidden'}`)
   lines.push(`**Archived** — ${g.isArchived ? '📦 yes' : '🟢 no'}`)
 
@@ -144,6 +145,7 @@ function renderGameDetail(g: Game) {
       new ButtonBuilder().setCustomId(`games:cat:edit:${g.id}:aliases`).setLabel('Aliases').setEmoji('🔤').setStyle(ButtonStyle.Primary),
       new ButtonBuilder().setCustomId(`games:cat:edit:${g.id}:sortOrder`).setLabel('Sort').setEmoji('🔢').setStyle(ButtonStyle.Primary),
       new ButtonBuilder().setCustomId(`games:cat:edit:${g.id}:cooldown`).setLabel('/play cooldown').setEmoji('⏱️').setStyle(ButtonStyle.Primary),
+      new ButtonBuilder().setCustomId(`games:cat:edit:${g.id}:archive_days`).setLabel('Auto-archive days').setEmoji('🗄️').setStyle(ButtonStyle.Primary),
     )
   )
 
@@ -494,6 +496,11 @@ export async function handleCatalogButton(interaction: ButtonInteraction): Promi
       value = g.playCooldownSeconds === null || g.playCooldownSeconds === undefined ? '' : String(g.playCooldownSeconds)
       placeholder = 'blank = default 1800s · 0 = no cooldown'
     }
+    else if (field === 'archive_days') {
+      label = 'Auto-archive after N days (blank/0 = off)'
+      value = g.autoArchiveDays && g.autoArchiveDays > 0 ? String(g.autoArchiveDays) : ''
+      placeholder = 'e.g. 90 — channel auto-archives after N days silence'
+    }
 
     const modal = new ModalBuilder()
       .setCustomId(`games:cat:save:${gid}:${field}`)
@@ -651,6 +658,17 @@ export async function handleCatalogModal(interaction: ModalSubmitInteraction): P
           return
         }
         patch.playCooldownSeconds = n
+      }
+    } else if (field === 'archive_days') {
+      if (raw === '' || raw === '0') {
+        patch.autoArchiveDays = null
+      } else {
+        const n = Number(raw)
+        if (!Number.isInteger(n) || n < 1 || n > 3650) {
+          await interaction.reply({ content: '❌ Days must be an integer 1–3650, or blank/0 to disable.', ephemeral: true })
+          return
+        }
+        patch.autoArchiveDays = n
       }
     } else {
       await interaction.reply({ content: `❌ Unknown field: \`${field}\``, ephemeral: true })

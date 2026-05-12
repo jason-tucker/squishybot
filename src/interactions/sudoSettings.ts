@@ -600,6 +600,7 @@ async function renderDebug(client: any, userId: string) {
       new ButtonBuilder().setCustomId('sudo:set:nav:staff_history').setLabel('Staff request history').setEmoji('📜').setStyle(ButtonStyle.Secondary),
       new ButtonBuilder().setCustomId('sudo:set:nav:audit_log').setLabel('Audit log').setEmoji('📝').setStyle(ButtonStyle.Secondary),
       new ButtonBuilder().setCustomId('sudo:set:nav:usage_stats').setLabel('Usage stats').setEmoji('📊').setStyle(ButtonStyle.Secondary),
+      new ButtonBuilder().setCustomId('sudo:set:nav:report_triage').setLabel('Report triage').setEmoji('📨').setStyle(ButtonStyle.Secondary),
       new ButtonBuilder().setCustomId('sudo:set:home').setLabel('Back').setStyle(ButtonStyle.Secondary),
     ),
   )
@@ -810,6 +811,33 @@ async function renderColorRoles(guildId: string) {
     ),
   )
   return { flags: MessageFlags.IsComponentsV2 as number, components }
+}
+
+async function renderReportTriage(guildId: string) {
+  const { db } = await import('../db/client')
+  const { reportLog } = await import('../db/schema')
+  const { desc } = await import('drizzle-orm')
+  const rows = await db.select().from(reportLog).where(eq(reportLog.guildId, guildId)).orderBy(desc(reportLog.createdAt)).limit(20)
+
+  const lines = ['### 📨 /report triage (bot-owner only)', `_Showing the most recent ${rows.length} report(s)._\n`]
+  if (rows.length === 0) {
+    lines.push('_No reports filed yet._')
+  } else {
+    for (const r of rows) {
+      const when = `<t:${Math.floor(r.createdAt.getTime() / 1000)}:R>`
+      const icon = r.status === 'filed' ? '✅' : r.status === 'dropped' ? '❌' : '⏳'
+      const link = r.githubIssueUrl ? ` · [issue](${r.githubIssueUrl})` : ''
+      lines.push(`${icon} <@${r.userId}> · **${r.title.slice(0, 80)}** · \`${r.reportType}\` · ${when}${link}`)
+    }
+  }
+  const container = new ContainerBuilder()
+    .setAccentColor(0x9b59b6)
+    .addTextDisplayComponents(new TextDisplayBuilder().setContent(lines.join('\n').slice(0, 3900)))
+  const back = new ActionRowBuilder<MessageActionRowComponentBuilder>().addComponents(
+    new ButtonBuilder().setCustomId('sudo:set:nav:report_triage').setLabel('Refresh').setEmoji('♻️').setStyle(ButtonStyle.Primary),
+    new ButtonBuilder().setCustomId('sudo:set:nav:debug').setLabel('Back to Debug').setStyle(ButtonStyle.Secondary),
+  )
+  return { flags: MessageFlags.IsComponentsV2 as number, components: [container, back] }
 }
 
 async function renderWelcome() {
@@ -1723,6 +1751,13 @@ export async function handleSettingsButton(interaction: ButtonInteraction): Prom
       await interaction.editReply((await renderColorRoles(interaction.guildId!)) as any)
     } else if (category === 'welcome') {
       await interaction.editReply((await renderWelcome()) as any)
+    } else if (category === 'report_triage') {
+      const { isBotOwner } = await import('../services/botOwner')
+      if (!await isBotOwner(interaction.client, interaction.user.id)) {
+        await interaction.followUp({ content: '❌ Report triage is bot-owner-only.', flags: MessageFlags.Ephemeral })
+        return
+      }
+      await interaction.editReply((await renderReportTriage(interaction.guildId!)) as any)
     } else if (category === 'auto_threads') {
       await interaction.editReply(renderAutoThreads() as any)
     } else if (category === 'staff_roles') {

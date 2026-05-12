@@ -36,6 +36,8 @@ export function registerReadyEvent(client: Client) {
     ])
     startBirthdayScheduler(c)
     startSocialPoller(c)
+    const { startGameAutoArchiver } = await import('../../services/gameAutoArchive')
+    startGameAutoArchiver(c, env.GUILD_ID)
 
     const guild = c.guilds.cache.get(env.GUILD_ID)
     const guildName = guild?.name ?? '(not a member)'
