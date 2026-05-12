@@ -26,14 +26,14 @@ export function registerVoiceStateUpdate(client: Client): void {
     // Promise.then with no error boundary; without this wrap a rejected
     // promise crashes the worker.
     try {
-      await handleVoiceStateUpdate(oldState, newState)
+      await handleVoiceStateUpdate(client, oldState, newState)
     } catch (err) {
       logger.error('voiceStateUpdate handler threw — swallowed', err)
     }
   })
 }
 
-async function handleVoiceStateUpdate(oldState: VoiceState, newState: VoiceState): Promise<void> {
+async function handleVoiceStateUpdate(client: Client, oldState: VoiceState, newState: VoiceState): Promise<void> {
     // Only handle the configured guild
     if (newState.guild.id !== env.GUILD_ID && oldState.guild.id !== env.GUILD_ID) return
 
