@@ -22,6 +22,8 @@ import '../../services/rpc/handlers/staff'
 import '../../services/rpc/handlers/welcome/preview'
 // Wave 7b — admin verbs: reload-caches, orphan-scan, reconciler-run.
 import '../../services/rpc/handlers/admin'
+// Wave 7b — games.refresh_cache verb (post-write cache reload hook).
+import '../../services/rpc/handlers/games/refresh_cache'
 
 const SUPPRESS_NOTIFICATIONS = 1 << 12  // MessageFlags.SuppressNotifications
 
