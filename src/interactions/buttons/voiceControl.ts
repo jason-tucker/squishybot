@@ -21,6 +21,13 @@ import { postOrUpdateControlPanel, buildPanelPayloadForRecord } from '../../serv
 import { deleteAutoChannel } from '../../services/voice/autoChannel'
 import { sep } from '../../utils/cv2'
 import { env } from '../../config/env'
+import {
+  publish,
+  voiceCh,
+  type VoiceLockToggledEvent,
+  type VoiceHiddenToggledEvent,
+  type VoiceOwnerChangedEvent,
+} from '../../services/eventBus'
 
 type AutoChannelRecord = typeof autoChannels.$inferSelect
 
@@ -140,6 +147,10 @@ export async function handleVoiceControlButton(interaction: ButtonInteraction): 
     await db.update(autoChannels).set({ isLocked }).where(eq(autoChannels.voiceChannelId, voiceChannelId))
     const updated = { ...record, isLocked }
 
+    void publish<VoiceLockToggledEvent>(voiceCh('lock_toggled'), {
+      voiceChannelId, isLocked, ts: new Date().toISOString(),
+    })
+
     // Update the clicked panel directly via interaction.update so the button
     // changes immediately even if the user is clicking on a duplicate/stale panel
     const payload = await buildPanelPayloadForRecord(interaction.client, updated)
@@ -185,6 +196,10 @@ export async function handleVoiceControlButton(interaction: ButtonInteraction): 
 
     await db.update(autoChannels).set({ isHidden }).where(eq(autoChannels.voiceChannelId, voiceChannelId))
     const updated = { ...record, isHidden }
+
+    void publish<VoiceHiddenToggledEvent>(voiceCh('hidden_toggled'), {
+      voiceChannelId, isHidden, ts: new Date().toISOString(),
+    })
 
     const payload = await buildPanelPayloadForRecord(interaction.client, updated)
     await interaction.update({ ...payload, content: null } as any).catch(() => {})
@@ -336,6 +351,13 @@ export async function handleVoiceControlButton(interaction: ButtonInteraction): 
       return
     }
     const updated = claimed[0]
+
+    void publish<VoiceOwnerChangedEvent>(voiceCh('owner_changed'), {
+      voiceChannelId,
+      oldOwnerUserId: record.ownerUserId,
+      newOwnerUserId: member.id,
+      ts: new Date().toISOString(),
+    })
 
     // While hidden the new owner needs an explicit view-channel allow so
     // they don't lose track of their own VC after leaving voice.

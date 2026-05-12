@@ -14,6 +14,7 @@ import { clearMembers, recordMemberJoin } from './voiceMembers'
 import { clearRenameThrottle } from '../../bot/events/presenceUpdate'
 import { clearStickyDebounce } from '../../bot/events/messageCreate'
 import { logger } from '../logger'
+import { publish, voiceCh, type VoiceChannelCreatedEvent, type VoiceChannelDeletedEvent } from '../eventBus'
 
 export async function createAutoChannel(
   client: Client,
@@ -103,7 +104,7 @@ export async function createAutoChannel(
   // Record the joining owner in the members table so the panel shows them
   // immediately. voiceStateUpdate fires for them too but the order isn't
   // guaranteed relative to the panel's first render.
-  await recordMemberJoin(record.voiceChannelId, owner.id)
+  await recordMemberJoin(record.voiceChannelId, owner.id, guild.id)
 
   // 4. Post control panel + sticky. Pass the freshly-created textChannel so
   // we don't depend on the bot's channel cache having caught up to the create.
@@ -111,6 +112,15 @@ export async function createAutoChannel(
   await postOrUpdateSticky(client, record)
 
   logger.info(`Auto channel created: ${channelName} (vc=${existingVoiceChannel.id}, tc=${textChannel.id})`)
+
+  void publish<VoiceChannelCreatedEvent>(voiceCh('channel_created'), {
+    voiceChannelId: record.voiceChannelId,
+    textChannelId: record.textChannelId,
+    ownerUserId: record.ownerUserId,
+    name: effectiveName,
+    ts: new Date().toISOString(),
+  })
+
   return record
 }
 
@@ -136,4 +146,12 @@ export async function deleteAutoChannel(client: Client, record: AutoChannelRecor
   untrackAutoChannelVoice(record.voiceChannelId)
 
   logger.info(`Auto channel deleted: vc=${record.voiceChannelId}`)
+
+  void publish<VoiceChannelDeletedEvent>(voiceCh('channel_deleted'), {
+    voiceChannelId: record.voiceChannelId,
+    textChannelId: record.textChannelId,
+    ownerUserId: record.ownerUserId,
+    name: record.fallbackName ?? '',
+    ts: new Date().toISOString(),
+  })
 }

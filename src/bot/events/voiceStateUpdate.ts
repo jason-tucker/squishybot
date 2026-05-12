@@ -13,6 +13,7 @@ import { recordMemberJoin, recordMemberLeave } from '../../services/voice/voiceM
 import { logger } from '../../services/logger'
 import { recordActivity } from '../../services/presence'
 import { env } from '../../config/env'
+import { publish, voiceCh, type VoiceOwnerChangedEvent } from '../../services/eventBus'
 
 export function registerVoiceStateUpdate(client: Client): void {
   client.on('voiceStateUpdate', async (oldState: VoiceState, newState: VoiceState) => {
@@ -51,7 +52,7 @@ export function registerVoiceStateUpdate(client: Client): void {
         if (textChannel?.isTextBased()) {
           await addMemberToTextChannel(textChannel as any, member)
         }
-        await recordMemberJoin(joinedChannelId, member.id)
+        await recordMemberJoin(joinedChannelId, member.id, guild.id)
 
         // Owner returned during their grace window — restore them, drop the
         // acting owner, refresh the panel.
@@ -89,7 +90,7 @@ export function registerVoiceStateUpdate(client: Client): void {
       const [record] = await db.select().from(autoChannels).where(eq(autoChannels.voiceChannelId, leftChannelId))
       if (!record) return
 
-      await recordMemberLeave(leftChannelId, member.id)
+      await recordMemberLeave(leftChannelId, member.id, guild.id)
 
       // Owner, hosts, and the current acting owner keep their text-channel
       // overwrite when they leave the VC. Acting owner needs to retain access
@@ -145,6 +146,12 @@ export function registerVoiceStateUpdate(client: Client): void {
             .catch(() => {})
           logger.info(`Ownership transferred to ${newOwner.displayName} in vc=${leftChannelId}`)
           updatedRecord = { ...record, ownerUserId: newOwner.id, hostUserIds: newOwnerHosts, actingOwnerUserId: null, ownerGraceExpiresAt: null }
+          void publish<VoiceOwnerChangedEvent>(voiceCh('owner_changed'), {
+            voiceChannelId: leftChannelId,
+            oldOwnerUserId: record.ownerUserId,
+            newOwnerUserId: newOwner.id,
+            ts: new Date().toISOString(),
+          })
         }
       } else if (record.actingOwnerUserId === member.id && remainingMemberIds.size > 0) {
         // ACTING OWNER LEFT during grace — per design, this breaks the chain:
@@ -162,6 +169,12 @@ export function registerVoiceStateUpdate(client: Client): void {
           .catch(() => {})
         logger.info(`Acting owner ${member.id} left — grace cancelled, ownership permanently transferred to ${newOwner.displayName} in vc=${leftChannelId}`)
         updatedRecord = { ...record, ownerUserId: newOwner.id, hostUserIds: newOwnerHosts, actingOwnerUserId: null, ownerGraceExpiresAt: null }
+        void publish<VoiceOwnerChangedEvent>(voiceCh('owner_changed'), {
+          voiceChannelId: leftChannelId,
+          oldOwnerUserId: record.ownerUserId,
+          newOwnerUserId: newOwner.id,
+          ts: new Date().toISOString(),
+        })
       }
 
       // Schedule cleanup if channel is now empty; otherwise refresh the panel

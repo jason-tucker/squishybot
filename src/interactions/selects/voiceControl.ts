@@ -5,6 +5,7 @@ import { autoChannels } from '../../db/schema'
 import { eq, sql } from 'drizzle-orm'
 import { canControlChannel, isOwner, isSudo, syncTextChannelPermissions } from '../../services/voice/permissions'
 import { postOrUpdateControlPanel } from '../../services/voice/controlPanel'
+import { publish, voiceCh, type VoiceHostsChangedEvent } from '../../services/eventBus'
 
 export async function handleVoiceControlSelect(interaction: StringSelectMenuInteraction): Promise<void> {
   const decoded = decodeVcId(interaction.customId)
@@ -76,6 +77,13 @@ export async function handleVoiceControlSelect(interaction: StringSelectMenuInte
       }
     }
     await postOrUpdateControlPanel(interaction.client, updated)
+
+    void publish<VoiceHostsChangedEvent>(voiceCh('hosts_changed'), {
+      voiceChannelId,
+      op,
+      userId,
+      ts: new Date().toISOString(),
+    })
 
     await interaction.editReply({
       content: op === 'add'

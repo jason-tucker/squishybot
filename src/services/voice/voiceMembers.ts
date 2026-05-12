@@ -1,6 +1,7 @@
 import { and, eq } from 'drizzle-orm'
 import { db } from '../../db/client'
 import { autoChannelMembers } from '../../db/schema'
+import { publish, voiceCh, type VoiceMemberJoinEvent, type VoiceMemberLeaveEvent } from '../eventBus'
 
 export interface MemberJoin {
   userId: string
@@ -8,7 +9,7 @@ export interface MemberJoin {
 }
 
 /** Record (or refresh, on rejoin) when a member entered the voice channel. */
-export async function recordMemberJoin(voiceChannelId: string, userId: string): Promise<void> {
+export async function recordMemberJoin(voiceChannelId: string, userId: string, guildId?: string): Promise<void> {
   await db.insert(autoChannelMembers)
     .values({ voiceChannelId, userId, joinedAt: new Date() })
     .onConflictDoUpdate({
@@ -16,16 +17,29 @@ export async function recordMemberJoin(voiceChannelId: string, userId: string): 
       set: { joinedAt: new Date() },
     })
     .catch(() => {})
+  // Fan out to subscribers. guildId is optional because some callers (the
+  // panel reconciler backfill) don't have it cheaply; in those cases we
+  // skip the event rather than publish a half-filled payload.
+  if (guildId) {
+    void publish<VoiceMemberJoinEvent>(voiceCh('member_join'), {
+      guildId, userId, channelId: voiceChannelId, ts: new Date().toISOString(),
+    })
+  }
 }
 
 /** Forget a member's join time (on leave or kick). */
-export async function recordMemberLeave(voiceChannelId: string, userId: string): Promise<void> {
+export async function recordMemberLeave(voiceChannelId: string, userId: string, guildId?: string): Promise<void> {
   await db.delete(autoChannelMembers)
     .where(and(
       eq(autoChannelMembers.voiceChannelId, voiceChannelId),
       eq(autoChannelMembers.userId, userId),
     ))
     .catch(() => {})
+  if (guildId) {
+    void publish<VoiceMemberLeaveEvent>(voiceCh('member_leave'), {
+      guildId, userId, channelId: voiceChannelId, ts: new Date().toISOString(),
+    })
+  }
 }
 
 /** Drop every row for a channel — call when the auto channel is deleted. */

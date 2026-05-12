@@ -19,6 +19,12 @@ import { eq } from 'drizzle-orm'
 import { logger } from '../logger'
 import { clearSetting, getSetting, setSetting } from '../settings'
 import { env } from '../../config/env'
+import {
+  publish,
+  voiceCh,
+  type VoiceLockdownStartedEvent,
+  type VoiceLockdownEndedEvent,
+} from '../eventBus'
 
 const SERVER_LOCKDOWN_KEY = 'voice.guild_lockdown_until'
 const SERVER_TIMER_KEY = '__server__'
@@ -59,6 +65,11 @@ export async function lockHub(client: Client, guildId: string, channelId: string
     void unlockHub(client, guildId, channelId)
   }, remaining))
   logger.info(`Hub ${channelId} locked until ${until.toISOString()}`)
+  void publish<VoiceLockdownStartedEvent>(voiceCh('lockdown_started'), {
+    hubChannelId: channelId,
+    until: until.toISOString(),
+    ts: new Date().toISOString(),
+  })
 }
 
 export async function unlockHub(client: Client, guildId: string, channelId: string): Promise<void> {
@@ -71,6 +82,10 @@ export async function unlockHub(client: Client, guildId: string, channelId: stri
     await applyHubConnect(client, guildId, channelId, true)
   }
   logger.info(`Hub ${channelId} unlocked`)
+  void publish<VoiceLockdownEndedEvent>(voiceCh('lockdown_ended'), {
+    hubChannelId: channelId,
+    ts: new Date().toISOString(),
+  })
 }
 
 export async function lockAllHubs(client: Client, guildId: string, until: Date): Promise<void> {
@@ -86,6 +101,11 @@ export async function lockAllHubs(client: Client, guildId: string, until: Date):
     void unlockAllHubs(client, guildId)
   }, remaining))
   logger.info(`All hubs in guild ${guildId} locked until ${until.toISOString()}`)
+  void publish<VoiceLockdownStartedEvent>(voiceCh('lockdown_started'), {
+    guildWide: true,
+    until: until.toISOString(),
+    ts: new Date().toISOString(),
+  })
 }
 
 export async function unlockAllHubs(client: Client, guildId: string): Promise<void> {
@@ -99,6 +119,10 @@ export async function unlockAllHubs(client: Client, guildId: string): Promise<vo
     await applyHubConnect(client, guildId, h.channelId, true)
   }
   logger.info(`Guild ${guildId} hub lockdown lifted`)
+  void publish<VoiceLockdownEndedEvent>(voiceCh('lockdown_ended'), {
+    guildWide: true,
+    ts: new Date().toISOString(),
+  })
 }
 
 export function getServerLockUntil(): Date | null {
