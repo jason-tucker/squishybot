@@ -8,6 +8,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ## [Unreleased]
 
 ### Added
+- **`/report` is locked for Discord accounts younger than 6 months (#17).** Common throwaway-account spam mitigation. Computes `createdAt + 6 months`, and if that's still in the future, replies ephemerally with the exact unlock time as a relative timestamp: _"Your Discord account is too new to file reports. /report unlocks for accounts older than 6 months — yours unlocks `<t:N:R>`."_ Sudo isn't bypass-special — they can request normally via the staff-request flow if their account is new enough.
 - **`/sudo → Settings → Archive` — in-depth manual channel-archive workflow (#15).** Manual, sudo-driven, opt-in safety model:
   - **Opt-in categories.** Nothing is scannable unless its parent category is explicitly opt-in via the Archive panel. Auto-channel text channels, hub voice channels, and already-archived channels are unconditionally excluded.
   - **Configurable destination + threshold.** `channel.archive_destination` (the category to move channels into) and `archive.stale_days` (default 90, range 1–3650). Threshold edits via modal.
