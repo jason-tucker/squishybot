@@ -9,6 +9,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ### Added
 
+- **Three meta RPC verbs (`meta.list_roles`, `meta.list_channels`, `meta.list_members`)** — read-only listings powering panel-side pickers. Pure cache reads; zero Discord API hits. Members verb supports query+limit for typeahead.
 - **`users.resolve` RPC verb** — batch lookup of `[{id, username, displayName, avatarUrl}]` for up to 100 snowflakes. Pure cache read; returns null fields for users the bot doesn't have cached so the panel can fall back to displaying the raw id.
 
 - **`games.refresh_cache` RPC verb (Wave 7b).** New side-effect handler at `src/services/rpc/handlers/games/refresh_cache.ts` (wired in via `src/bot/events/ready.ts`) that re-runs `loadGames()` to repopulate the in-memory `catalog` Map and replies `{ ok: true, data: { gameCount } }`. Botpanel calls this after every games-table mutation (add/update/remove from the new `/squishy/games` CRUD surface) so the bot's cache stays in sync with the DB without waiting for a restart or a `/sudo → Debug → Force-clear caches` round-trip. Pure cache-invalidation — DB writes themselves happen panel-side, the bot just reloads its read-cache.
