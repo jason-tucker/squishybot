@@ -1,17 +1,15 @@
 /**
  * `staff.request` — panel-side self-service "Request a staff role".
  *
- * Mirrors what the `/settings → Staff Role` modal does on the bot:
- * inserts a `staff_approvals` row and posts the approval card to the
- * configured thread. Centralized in `staffRequestService.ts` so the
- * panel path and the modal path produce byte-identical Discord output.
- *
- * Params: { userId, slug, realName?, reason? }
+ * Params: { userId, departmentSlug?, tierSlug?, realName? }
+ *   - At least one of departmentSlug / tierSlug must be present (the bot
+ *     rejects empty requests with `no-selection`).
  *   - `userId` is the requester's snowflake. The panel route validates
- *     that `userId` matches the authenticated session before publishing
- *     this verb (a sudo could otherwise impersonate). We don't repeat
- *     that check here — RPC is a privileged channel, the panel is the
- *     authorization boundary.
+ *     `userId` matches the authenticated session before publishing;
+ *     RPC is a privileged channel.
+ *
+ * Routes through `staffRequestService.submitStaffRequest` so this verb
+ * and the bot's slash flow stay byte-identical.
  */
 import { registerVerb, type VerbResult } from '../../registry'
 import { submitStaffRequest } from '../../../staffRequestService'
@@ -21,32 +19,45 @@ const SLUG = /^[a-z0-9_]+$/
 
 registerVerb('staff.request', async (rawParams, ctx): Promise<VerbResult> => {
   const params = rawParams as
-    | { userId?: unknown; slug?: unknown; realName?: unknown; reason?: unknown }
+    | {
+        userId?: unknown
+        departmentSlug?: unknown
+        tierSlug?: unknown
+        realName?: unknown
+      }
     | null
   if (!params || typeof params !== 'object') {
     return { ok: false, error: 'invalid-params' }
   }
 
   const userId = params.userId
-  const slug = params.slug
   if (typeof userId !== 'string' || !SNOWFLAKE.test(userId)) {
     return { ok: false, error: 'bad-user-id' }
   }
-  if (typeof slug !== 'string' || !SLUG.test(slug) || slug.length > 32) {
-    return { ok: false, error: 'bad-slug' }
+
+  const departmentSlug =
+    typeof params.departmentSlug === 'string' && params.departmentSlug.length > 0
+      ? params.departmentSlug
+      : null
+  const tierSlug =
+    typeof params.tierSlug === 'string' && params.tierSlug.length > 0 ? params.tierSlug : null
+
+  if (departmentSlug !== null && (!SLUG.test(departmentSlug) || departmentSlug.length > 32)) {
+    return { ok: false, error: 'bad-department-slug' }
+  }
+  if (tierSlug !== null && (!SLUG.test(tierSlug) || tierSlug.length > 32)) {
+    return { ok: false, error: 'bad-tier-slug' }
   }
 
   const realName = typeof params.realName === 'string' ? params.realName : null
-  const reason = typeof params.reason === 'string' ? params.reason : null
   if (realName !== null && realName.length > 120) return { ok: false, error: 'real-name-too-long' }
-  if (reason !== null && reason.length > 1000) return { ok: false, error: 'reason-too-long' }
 
   const result = await submitStaffRequest({
     client: ctx.client,
     userId,
-    slug,
+    departmentSlug,
+    tierSlug,
     realName,
-    reason,
   })
 
   if (!result.ok) {
@@ -58,7 +69,8 @@ registerVerb('staff.request', async (rawParams, ctx): Promise<VerbResult> => {
     data: {
       approvalId: result.approvalId,
       approvalMsgId: result.approvalMsgId,
-      roleLabel: result.roleLabel,
+      departmentLabel: result.departmentLabel,
+      tierLabel: result.tierLabel,
     },
   }
 })
