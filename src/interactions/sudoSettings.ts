@@ -584,15 +584,98 @@ async function renderDebug(client: any, userId: string) {
     new ActionRowBuilder<MessageActionRowComponentBuilder>().addComponents(
       new ButtonBuilder().setCustomId('sudo:set:nav:feature_flags').setLabel('Feature flags').setEmoji('🚦').setStyle(ButtonStyle.Primary),
       new ButtonBuilder().setCustomId('sudo:set:nav:orphan_scan').setLabel('Orphan resource scan').setEmoji('🔎').setStyle(ButtonStyle.Secondary),
+      new ButtonBuilder().setCustomId('sudo:set:nav:heartbeat').setLabel('Heartbeat').setEmoji('💓').setStyle(ButtonStyle.Secondary),
       new ButtonBuilder().setCustomId('sudo:set:debug:clear_caches').setLabel('Force-clear caches').setEmoji('🧹').setStyle(ButtonStyle.Danger),
     ),
   )
   components.push(
     new ActionRowBuilder<MessageActionRowComponentBuilder>().addComponents(
+      new ButtonBuilder().setCustomId('sudo:set:nav:staff_history').setLabel('Staff request history').setEmoji('📜').setStyle(ButtonStyle.Secondary),
       new ButtonBuilder().setCustomId('sudo:set:home').setLabel('Back').setStyle(ButtonStyle.Secondary),
     ),
   )
   return { flags: MessageFlags.IsComponentsV2 as number, components }
+}
+
+async function renderHeartbeat(client: any) {
+  // DB latency: probe with a trivial round-trip.
+  const { db } = await import('../db/client')
+  const { sql } = await import('drizzle-orm')
+  const start = Date.now()
+  let dbMs: number | null = null
+  let dbErr: string | null = null
+  try {
+    await db.execute(sql`SELECT 1`)
+    dbMs = Date.now() - start
+  } catch (err) {
+    dbErr = (err as Error).message
+  }
+
+  const wsPing = client.ws?.ping ?? -1
+  const uptimeSec = Math.floor((client.uptime ?? 0) / 1000)
+  const uptimeStr = uptimeSec > 0
+    ? `${Math.floor(uptimeSec / 86400)}d ${Math.floor((uptimeSec % 86400) / 3600)}h ${Math.floor((uptimeSec % 3600) / 60)}m`
+    : '_unknown_'
+
+  // Best-effort version from package.json + git SHA from env (set by CI build).
+  let version = '_unknown_'
+  try {
+    const pkg = await import('../../package.json' as any)
+    version = (pkg as any).version ?? '_unknown_'
+  } catch {}
+  const sha = process.env.GIT_SHA ?? process.env.SOURCE_COMMIT ?? '_unset_'
+  const startTime = client.readyTimestamp ? `<t:${Math.floor(client.readyTimestamp / 1000)}:F> (<t:${Math.floor(client.readyTimestamp / 1000)}:R>)` : '_unknown_'
+
+  const lines = [
+    '### 💓 Bot Heartbeat',
+    `**Gateway ping:** ${wsPing >= 0 ? `${wsPing}ms` : '_unknown_'}`,
+    `**DB latency:** ${dbMs !== null ? `${dbMs}ms` : `❌ ${dbErr}`}`,
+    `**Process uptime:** ${uptimeStr}`,
+    `**Version:** \`${version}\``,
+    `**Git SHA:** \`${sha}\``,
+    `**Started:** ${startTime}`,
+    `**Bot owners:** ${(await (await import('../services/botOwner')).getBotOwnerIds(client)).size}`,
+  ]
+  const container = new ContainerBuilder()
+    .setAccentColor(0x57f287)
+    .addTextDisplayComponents(new TextDisplayBuilder().setContent(lines.join('\n')))
+  const back = new ActionRowBuilder<MessageActionRowComponentBuilder>().addComponents(
+    new ButtonBuilder().setCustomId('sudo:set:nav:heartbeat').setLabel('Refresh').setEmoji('♻️').setStyle(ButtonStyle.Primary),
+    new ButtonBuilder().setCustomId('sudo:set:nav:debug').setLabel('Back to Debug').setStyle(ButtonStyle.Secondary),
+  )
+  return { flags: MessageFlags.IsComponentsV2 as number, components: [container, back] }
+}
+
+async function renderStaffHistory(guildId: string) {
+  const { db } = await import('../db/client')
+  const { staffApprovals } = await import('../db/schema')
+  const { desc } = await import('drizzle-orm')
+  const rows = await db.select().from(staffApprovals)
+    .where(eq(staffApprovals.guildId, guildId))
+    .orderBy(desc(staffApprovals.createdAt))
+    .limit(20)
+
+  const lines = ['### 📜 Staff request history', `_Showing the most recent ${rows.length} request(s)._\n`]
+  if (rows.length === 0) {
+    lines.push('_No requests on file._')
+  } else {
+    for (const r of rows) {
+      const created = `<t:${Math.floor(r.createdAt.getTime() / 1000)}:R>`
+      const icon = r.status === 'approved' ? '✅' : r.status === 'denied' ? '❌' : '⏳'
+      const d = (r.requestedData as Record<string, unknown>) ?? {}
+      const role = String(d.role_label ?? d.role_key ?? d.tier ?? 'unknown')
+      lines.push(`${icon} <@${r.userId}> · **${role}** · ${r.status} · ${created}`)
+    }
+  }
+
+  const container = new ContainerBuilder()
+    .setAccentColor(0x9b59b6)
+    .addTextDisplayComponents(new TextDisplayBuilder().setContent(lines.join('\n')))
+  const back = new ActionRowBuilder<MessageActionRowComponentBuilder>().addComponents(
+    new ButtonBuilder().setCustomId('sudo:set:nav:debug').setLabel('Back to Debug').setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder().setCustomId('sudo:set:home').setLabel('Settings home').setStyle(ButtonStyle.Secondary),
+  )
+  return { flags: MessageFlags.IsComponentsV2 as number, components: [container, back] }
 }
 
 async function renderFeatureFlags() {
@@ -1238,6 +1321,25 @@ export async function handleSettingsButton(interaction: ButtonInteraction): Prom
     await interaction.showModal(buildSocialAddModal())
     return
   }
+  if (id === 'sudo:set:profiles:csv_import') {
+    if (!await requireSudo(interaction)) return
+    const modal = new ModalBuilder()
+      .setCustomId('sudo:set:profiles:csv_submit')
+      .setTitle('Bulk-import birthdays')
+      .addComponents(
+        new ActionRowBuilder<TextInputBuilder>().addComponents(
+          new TextInputBuilder()
+            .setCustomId('csv')
+            .setLabel('CSV: user_id,month,day  OR  user_id,MM-DD')
+            .setStyle(TextInputStyle.Paragraph)
+            .setRequired(true)
+            .setMaxLength(4000)
+            .setPlaceholder('117501528641634310,11,20\n484484232199012352,03-15\n…'),
+        ),
+      )
+    await interaction.showModal(modal)
+    return
+  }
   if (id === 'sudo:set:archive:edit_threshold') {
     if (!await requireSudo(interaction)) return
     const { getStaleDays } = await import('../services/archive')
@@ -1329,6 +1431,10 @@ export async function handleSettingsButton(interaction: ButtonInteraction): Prom
       await interaction.editReply((await renderFeatureFlags()) as any)
     } else if (category === 'orphan_scan') {
       await interaction.editReply((await renderOrphanScan(interaction.client, interaction.guildId!)) as any)
+    } else if (category === 'heartbeat') {
+      await interaction.editReply((await renderHeartbeat(interaction.client)) as any)
+    } else if (category === 'staff_history') {
+      await interaction.editReply((await renderStaffHistory(interaction.guildId!)) as any)
     } else if (category === 'auto_threads') {
       await interaction.editReply(renderAutoThreads() as any)
     } else if (category === 'staff_roles') {
@@ -1431,6 +1537,27 @@ export async function handleSettingsButton(interaction: ButtonInteraction): Prom
     const { updateAutoThreadChannel } = await import('../services/settings')
     await updateAutoThreadChannel(channelId, { archiveDuration })
     await interaction.editReply(renderAutoThreads() as any)
+    return
+  }
+
+  // #18 — sudo:set:profiles:csv_example — send example CSV as an attachment
+  if (id === 'sudo:set:profiles:csv_example') {
+    const example = [
+      '# Bulk birthday import CSV',
+      '# Format: user_id,month,day   OR   user_id,MM-DD',
+      '# Lines starting with # are ignored. Blank lines are fine.',
+      '#',
+      '# user_id is the Discord snowflake (right-click a user → Copy User ID,',
+      '# requires Developer Mode in Discord settings).',
+      '117501528641634310,11,20',
+      '484484232199012352,03-15',
+      '539266131651854336,2,29',
+    ].join('\n')
+    await interaction.followUp({
+      content: '📄 Example CSV attached. Paste similar content into the **Bulk-import birthdays** modal.',
+      files: [{ attachment: Buffer.from(example, 'utf8'), name: 'birthdays.csv' }],
+      flags: MessageFlags.Ephemeral,
+    })
     return
   }
 
@@ -1906,6 +2033,53 @@ export async function handleSettingsStringSelect(interaction: StringSelectMenuIn
 
 export async function handleSettingsModalSubmit(interaction: ModalSubmitInteraction): Promise<void> {
   if (!await requireSudo(interaction)) return
+
+  // #18 — Bulk-import birthdays CSV
+  if (interaction.customId === 'sudo:set:profiles:csv_submit') {
+    const raw = interaction.fields.getTextInputValue('csv')
+    const lines = raw.split(/\r?\n/).map(l => l.trim()).filter(l => l && !l.startsWith('#'))
+    const { db } = await import('../db/client')
+    const { userProfiles } = await import('../db/schema')
+
+    let imported = 0
+    const errors: string[] = []
+
+    for (const [i, line] of lines.entries()) {
+      // Split on commas; tolerate "MM-DD" combined too.
+      const parts = line.split(',').map(p => p.trim()).filter(Boolean)
+      if (parts.length < 2) { errors.push(`L${i + 1}: not enough fields — \`${line}\``); continue }
+      const userIdRaw = parts[0].replace(/[<@!>]/g, '')
+      if (!/^\d{15,25}$/.test(userIdRaw)) { errors.push(`L${i + 1}: bad user_id \`${userIdRaw}\``); continue }
+
+      let month: number, day: number
+      if (parts.length >= 3) {
+        month = Number(parts[1]); day = Number(parts[2])
+      } else {
+        const md = parts[1].split(/[-/]/)
+        if (md.length !== 2) { errors.push(`L${i + 1}: bad date \`${parts[1]}\``); continue }
+        month = Number(md[0]); day = Number(md[1])
+      }
+      if (!Number.isInteger(month) || month < 1 || month > 12) { errors.push(`L${i + 1}: bad month \`${month}\``); continue }
+      if (!Number.isInteger(day) || day < 1 || day > 31) { errors.push(`L${i + 1}: bad day \`${day}\``); continue }
+
+      await db.insert(userProfiles)
+        .values({ guildId: interaction.guildId!, userId: userIdRaw, birthdayMonth: month, birthdayDay: day })
+        .onConflictDoUpdate({
+          target: [userProfiles.guildId, userProfiles.userId],
+          set: { birthdayMonth: month, birthdayDay: day },
+        })
+      imported++
+    }
+
+    const lines2 = [`✅ Imported **${imported}** birthday row${imported === 1 ? '' : 's'}.`]
+    if (errors.length > 0) {
+      lines2.push(`⚠️ **${errors.length}** error${errors.length === 1 ? '' : 's'}:`)
+      lines2.push(...errors.slice(0, 15))
+      if (errors.length > 15) lines2.push(`_…and ${errors.length - 15} more._`)
+    }
+    await interaction.reply({ content: lines2.join('\n'), ephemeral: true })
+    return
+  }
 
   // #26 Auto-thread template editor — modal submit
   if (interaction.customId.startsWith('sudo:set:autothread:template_submit:')) {

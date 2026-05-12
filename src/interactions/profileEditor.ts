@@ -94,11 +94,16 @@ export async function renderSudoUserPicker(guildId: string) {
       .setMinValues(1).setMaxValues(1)
   )
 
+  const bulk = new ActionRowBuilder<MessageActionRowComponentBuilder>().addComponents(
+    new ButtonBuilder().setCustomId('sudo:set:profiles:csv_import').setLabel('Bulk-import birthdays').setEmoji('📥').setStyle(ButtonStyle.Primary),
+    new ButtonBuilder().setCustomId('sudo:set:profiles:csv_example').setLabel('Example CSV').setEmoji('📄').setStyle(ButtonStyle.Secondary),
+  )
+
   const back = new ActionRowBuilder<MessageActionRowComponentBuilder>().addComponents(
     new ButtonBuilder().setCustomId('sudo:set:home').setLabel('Back').setStyle(ButtonStyle.Secondary)
   )
 
-  return { flags: MessageFlags.IsComponentsV2 as number, components: [container, userPick, back] }
+  return { flags: MessageFlags.IsComponentsV2 as number, components: [container, userPick, bulk, back] }
 }
 
 export async function renderProfileEditor(
