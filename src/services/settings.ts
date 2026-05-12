@@ -9,6 +9,14 @@
 import { eq } from 'drizzle-orm'
 import { db } from '../db/client'
 import { autoChannels, autoThreadChannels, botSettings, hubChannels, sudoUsers } from '../db/schema'
+import {
+  publish,
+  settingsCh,
+  sudoCh,
+  type SettingChangedEvent,
+  type SudoGrantedEvent,
+  type SudoRevokedEvent,
+} from './eventBus'
 
 // ---------------------------------------------------------------------------
 // In-memory caches
@@ -111,6 +119,9 @@ export async function setSetting(key: string, value: string, byDiscordId?: strin
   if (oldValue !== value) {
     const { settingChanges } = await import('../db/schema')
     await db.insert(settingChanges).values({ key, oldValue, newValue: value, changedByUserId: byDiscordId ?? null }).catch(() => {})
+    void publish<SettingChangedEvent>(settingsCh('setting_changed'), {
+      key, oldValue, newValue: value, by: byDiscordId ?? null, ts: new Date().toISOString(),
+    })
   }
 }
 
@@ -121,6 +132,9 @@ export async function clearSetting(key: string, byDiscordId?: string): Promise<v
   if (oldValue !== null) {
     const { settingChanges } = await import('../db/schema')
     await db.insert(settingChanges).values({ key, oldValue, newValue: null, changedByUserId: byDiscordId ?? null }).catch(() => {})
+    void publish<SettingChangedEvent>(settingsCh('setting_changed'), {
+      key, oldValue, newValue: null, by: byDiscordId ?? null, ts: new Date().toISOString(),
+    })
   }
 }
 
@@ -157,15 +171,27 @@ export function listAdditionalSudoUsers(): string[] {
 }
 
 export async function addSudoUser(userId: string, byDiscordId?: string, note?: string): Promise<void> {
+  const wasAlreadySudo = sudoUsersCache.has(userId)
   await db.insert(sudoUsers)
     .values({ userId, addedByDiscordId: byDiscordId ?? null, note: note ?? null })
     .onConflictDoNothing()
   sudoUsersCache.add(userId)
+  if (!wasAlreadySudo) {
+    void publish<SudoGrantedEvent>(sudoCh('granted'), {
+      userId, by: byDiscordId ?? null, ts: new Date().toISOString(),
+    })
+  }
 }
 
-export async function removeSudoUser(userId: string): Promise<void> {
+export async function removeSudoUser(userId: string, byDiscordId?: string): Promise<void> {
+  const hadSudo = sudoUsersCache.has(userId)
   await db.delete(sudoUsers).where(eq(sudoUsers.userId, userId))
   sudoUsersCache.delete(userId)
+  if (hadSudo) {
+    void publish<SudoRevokedEvent>(sudoCh('revoked'), {
+      userId, by: byDiscordId ?? null, ts: new Date().toISOString(),
+    })
+  }
 }
 
 // ---------------------------------------------------------------------------

@@ -2300,7 +2300,7 @@ export async function handleSettingsStringSelect(interaction: StringSelectMenuIn
   const id = interaction.customId
   if (id === 'sudo:set:removeuser') {
     const userId = interaction.values[0]
-    if (userId) await removeSudoUser(userId)
+    if (userId) await removeSudoUser(userId, interaction.user.id)
     await interaction.update((await renderSudoUsers()) as any)
     return
   }
