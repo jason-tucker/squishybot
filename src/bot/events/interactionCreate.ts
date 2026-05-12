@@ -158,6 +158,9 @@ export function registerInteractionCreate(client: Client) {
           const targetId = interaction.values[0]
           const { renderManagePanel } = await import('../../commands/manageUser')
           await interaction.update(await renderManagePanel(interaction.guild!, targetId) as any)
+        } else if (id.startsWith('sudo:force_owner:user_pick:')) {
+          const { handleForceOwnerUserPick } = await import('../../interactions/forceOwnerTransfer')
+          await handleForceOwnerUserPick(interaction)
         }
 
       } else if (interaction.isRoleSelectMenu()) {
@@ -178,6 +181,9 @@ export function registerInteractionCreate(client: Client) {
         } else if (id === 'sudo:action') {
           const { handleSudoPanelSelect } = await import('../../interactions/selects/sudoPanel')
           await handleSudoPanelSelect(interaction as StringSelectMenuInteraction)
+        } else if (id === 'sudo:force_owner:channel_pick') {
+          const { handleForceOwnerChannelPick } = await import('../../interactions/forceOwnerTransfer')
+          await handleForceOwnerChannelPick(interaction as StringSelectMenuInteraction)
         } else if (id === 'help:section') {
           const { handleHelpPanelSelect } = await import('../../interactions/selects/helpPanel')
           await handleHelpPanelSelect(interaction as StringSelectMenuInteraction)

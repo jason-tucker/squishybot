@@ -5,6 +5,7 @@ import {
   ButtonStyle,
   ContainerBuilder,
   type MessageActionRowComponentBuilder,
+  StringSelectMenuBuilder,
   TextDisplayBuilder,
   MessageFlags,
   UserSelectMenuBuilder,
@@ -125,6 +126,43 @@ export async function handleSudoPanelSelect(interaction: StringSelectMenuInterac
   if (value === 'settings') {
     const { showSettingsPanel } = await import('../sudoSettings')
     await showSettingsPanel(interaction)
+    return
+  }
+
+  if (value === 'force_owner') {
+    const rows = await db.select().from(autoChannels).where(eq(autoChannels.guildId, guildId))
+    const container = new ContainerBuilder()
+      .setAccentColor(0xfee75c)
+      .addTextDisplayComponents(new TextDisplayBuilder().setContent('## 👤 Force owner transfer'))
+      .addSeparatorComponents(sep())
+      .addTextDisplayComponents(new TextDisplayBuilder().setContent(
+        rows.length === 0
+          ? '_No active auto channels._'
+          : '_Pick an auto-channel. Then pick the new owner. This **bypasses claim, grace, and ownership rules** — use sparingly._'
+      ))
+    const components: any[] = [container]
+    if (rows.length > 0) {
+      const options = rows.slice(0, 25).map(r => ({
+        label: (r.manualName ?? r.fallbackName ?? `vc=${r.voiceChannelId.slice(-6)}`).slice(0, 100),
+        value: r.voiceChannelId,
+        emoji: '🔊',
+        description: `current owner: ${r.ownerUserId}`.slice(0, 100),
+      }))
+      components.push(
+        new ActionRowBuilder<MessageActionRowComponentBuilder>().addComponents(
+          new StringSelectMenuBuilder()
+            .setCustomId('sudo:force_owner:channel_pick')
+            .setPlaceholder('Pick an auto-channel…')
+            .addOptions(options),
+        ),
+      )
+    }
+    components.push(
+      new ActionRowBuilder<MessageActionRowComponentBuilder>().addComponents(
+        new ButtonBuilder().setCustomId('sudo:home').setLabel('Back to /sudo').setEmoji('🏠').setStyle(ButtonStyle.Secondary),
+      ),
+    )
+    await interaction.editReply({ flags: MessageFlags.IsComponentsV2, components } as any)
     return
   }
 
