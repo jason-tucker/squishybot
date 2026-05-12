@@ -80,6 +80,9 @@ export function registerInteractionCreate(client: Client) {
         } else if (id === 'open_staff_request') {
           const { showStaffRolePicker } = await import('../../commands/staff')
           await showStaffRolePicker(interaction as ButtonInteraction)
+        } else if (id.startsWith('staff:request_open:')) {
+          const { handleStaffRequestOpenButton } = await import('../../commands/staff')
+          await handleStaffRequestOpenButton(interaction as ButtonInteraction)
         } else if (id.startsWith('staff:approve:') || id.startsWith('staff:deny:')) {
           const { handleStaffApprovalButton } = await import('../../interactions/buttons/staffApproval')
           await handleStaffApprovalButton(interaction as ButtonInteraction)
@@ -192,7 +195,14 @@ export function registerInteractionCreate(client: Client) {
         } else if (id === 'help:section') {
           const { handleHelpPanelSelect } = await import('../../interactions/selects/helpPanel')
           await handleHelpPanelSelect(interaction as StringSelectMenuInteraction)
+        } else if (id.startsWith('staff:dept_pick:')) {
+          const { handleStaffDeptPickSelect } = await import('../../commands/staff')
+          await handleStaffDeptPickSelect(interaction as StringSelectMenuInteraction)
+        } else if (id.startsWith('staff:tier_pick:')) {
+          const { handleStaffTierPickSelect } = await import('../../commands/staff')
+          await handleStaffTierPickSelect(interaction as StringSelectMenuInteraction)
         } else if (id === 'staff:role_pick') {
+          // Legacy single-pick select — older messages still in flight.
           const { handleStaffRolePickSelect } = await import('../../commands/staff')
           await handleStaffRolePickSelect(interaction as StringSelectMenuInteraction)
         } else if (id.startsWith('sudo:set:') && !id.startsWith('sudo:set:save:')) {

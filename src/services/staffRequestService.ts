@@ -1,9 +1,14 @@
 /**
- * Staff role request submission — shared between the slash modal
+ * Staff role request submission — shared between the slash bot flow
  * (`/settings → Staff Role`) and the panel's self-service editor at
- * `/me/edit`. Both paths must produce an identical Discord experience:
- * the same approval card layout, the same ping content, the same row
- * shape in `staff_approvals`. Centralizing here keeps that invariant.
+ * `/me/edit`. Both paths produce identical Discord output by routing
+ * through this one helper.
+ *
+ * A request can name AT MOST one department and AT MOST one tier; both
+ * are optional individually but at least one must be present (we don't
+ * accept empty requests — the IT CRI Staff base role is granted on
+ * approval regardless, so an empty request would just be "make me
+ * staff" which the approver can do via /sudo direct grant instead).
  */
 import {
   ContainerBuilder,
@@ -21,44 +26,60 @@ import { staffApprovals } from '../db/schema'
 import { env } from '../config/env'
 import { logger } from './logger'
 import { sep } from '../utils/cv2'
-import { findStaffRoleDefBySlug } from './staffRoles'
+import { findDepartmentBySlug, findTierBySlug } from './staffRoles'
 
 export type StaffRequestInput = {
   client: Client
   userId: string
-  slug: string
+  departmentSlug?: string | null
+  tierSlug?: string | null
   realName?: string | null
-  reason?: string | null
 }
+
+export type StaffRequestErrorCode =
+  | 'no-selection'
+  | 'unknown-department'
+  | 'unknown-tier'
+  | 'thread-unset'
+  | 'thread-not-thread'
+  | 'send-failed'
 
 export type StaffRequestResult =
   | {
       ok: true
       approvalId: string
       approvalMsgId: string | null
-      roleLabel: string
+      departmentLabel: string | null
+      tierLabel: string | null
     }
-  | { ok: false; error: 'unknown-role' | 'thread-unset' | 'thread-not-thread' | 'send-failed'; details?: string }
+  | { ok: false; error: StaffRequestErrorCode; details?: string }
 
-export async function submitStaffRequest({
-  client,
-  userId,
-  slug,
-  realName,
-  reason,
-}: StaffRequestInput): Promise<StaffRequestResult> {
-  const roleDef = findStaffRoleDefBySlug(slug)
-  if (!roleDef) return { ok: false, error: 'unknown-role' }
+export async function submitStaffRequest(input: StaffRequestInput): Promise<StaffRequestResult> {
+  const { client, userId } = input
 
-  if (!env.STAFF_APPROVAL_THREAD_ID) {
-    return { ok: false, error: 'thread-unset' }
-  }
+  // Normalize — empty strings collapse to null so we don't carry junk
+  // through to the JSON blob.
+  const deptSlug = input.departmentSlug && input.departmentSlug.length > 0 ? input.departmentSlug : null
+  const tierSlug = input.tierSlug && input.tierSlug.length > 0 ? input.tierSlug : null
+
+  if (!deptSlug && !tierSlug) return { ok: false, error: 'no-selection' }
+
+  const deptDef = deptSlug ? findDepartmentBySlug(deptSlug) : null
+  if (deptSlug && !deptDef) return { ok: false, error: 'unknown-department' }
+
+  const tierDef = tierSlug ? findTierBySlug(tierSlug) : null
+  if (tierSlug && !tierDef) return { ok: false, error: 'unknown-tier' }
+
+  if (!env.STAFF_APPROVAL_THREAD_ID) return { ok: false, error: 'thread-unset' }
+
+  const realName = input.realName?.trim() ? input.realName.trim() : null
 
   const data = {
-    role_key: roleDef.key,
-    role_label: roleDef.label,
-    real_name: realName?.trim() ? realName.trim() : null,
-    reason: reason?.trim() ? reason.trim() : null,
+    department_key: deptDef?.key ?? null,
+    department_label: deptDef?.label ?? null,
+    tier_key: tierDef?.key ?? null,
+    tier_label: tierDef?.label ?? null,
+    real_name: realName,
   }
 
   const [row] = await db
@@ -70,9 +91,11 @@ export async function submitStaffRequest({
     })
     .returning()
 
-  const detailLines: string[] = [`**Role:** ${data.role_label}`]
-  if (data.real_name) detailLines.push(`**Real / preferred name:** ${data.real_name}`)
-  if (data.reason) detailLines.push(`**Reason:** ${data.reason}`)
+  const detailLines: string[] = []
+  if (deptDef) detailLines.push(`**Department:** ${deptDef.label}`)
+  if (tierDef) detailLines.push(`**Tier:** ${tierDef.label}`)
+  if (realName) detailLines.push(`**Real / preferred name:** ${realName}`)
+  detailLines.push('', '_Approving also grants the **IT CRI Staff** base role._')
 
   const container = new ContainerBuilder()
     .setAccentColor(0xfee75c)
@@ -101,9 +124,14 @@ export async function submitStaffRequest({
       return { ok: false, error: 'thread-not-thread' }
     }
 
+    const pingLabel =
+      deptDef && tierDef
+        ? `${deptDef.label} · ${tierDef.label}`
+        : (deptDef?.label ?? tierDef?.label ?? 'staff')
+
     const pingContent = env.STAFF_APPROVAL_PING_USER_ID
-      ? `<@${env.STAFF_APPROVAL_PING_USER_ID}> new staff request — **${data.role_label}**`
-      : `New staff request — **${data.role_label}**`
+      ? `<@${env.STAFF_APPROVAL_PING_USER_ID}> new staff request — **${pingLabel}**`
+      : `New staff request — **${pingLabel}**`
 
     await thread.send({
       content: pingContent,
@@ -120,11 +148,18 @@ export async function submitStaffRequest({
       .set({ approvalMsgId: msg.id })
       .where(eq(staffApprovals.id, row.id))
 
-    logger.info(`Staff request submitted (id=${row.id}, role=${roleDef.key}, user=${userId})`)
-    return { ok: true, approvalId: row.id, approvalMsgId: msg.id, roleLabel: roleDef.label }
+    logger.info(
+      `Staff request submitted (id=${row.id}, dept=${deptDef?.key ?? '-'}, tier=${tierDef?.key ?? '-'}, user=${userId})`,
+    )
+    return {
+      ok: true,
+      approvalId: row.id,
+      approvalMsgId: msg.id,
+      departmentLabel: deptDef?.label ?? null,
+      tierLabel: tierDef?.label ?? null,
+    }
   } catch (err) {
     logger.error('Failed to post staff request card', err)
-    // Row is already saved — caller surfaces the partial-success.
     return {
       ok: false,
       error: 'send-failed',
