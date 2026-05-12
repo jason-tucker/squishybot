@@ -15,6 +15,7 @@ import { execute as manageUserExecute } from '../../commands/manageUser'
 import { execute as reportExecute } from '../../commands/report'
 import { execute as gamesExecute } from '../../commands/games'
 import { execute as playExecute, autocomplete as playAutocomplete } from '../../commands/play'
+import { execute as colorExecute } from '../../commands/color'
 import { isVcCustomId } from '../../utils/customId'
 import { recordActivity } from '../../services/presence'
 
@@ -26,6 +27,7 @@ const commandHandlers = new Map<string, (i: ChatInputCommandInteraction) => Prom
   ['report', reportExecute],
   ['games', gamesExecute],
   ['play', playExecute],
+  ['color', colorExecute],
 ])
 
 export function registerInteractionCreate(client: Client) {
@@ -168,6 +170,9 @@ export function registerInteractionCreate(client: Client) {
         if (id.startsWith('games:cat:role:')) {
           const { handleCatalogRoleSelect } = await import('../../interactions/gamesEditor')
           await handleCatalogRoleSelect(interaction)
+        } else if (id === 'sudo:set:auto_role:add' || id === 'sudo:set:color_role:add') {
+          const { handleSettingsRoleSelect } = await import('../../interactions/sudoSettings')
+          await handleSettingsRoleSelect(interaction)
         }
 
       } else if (interaction.isStringSelectMenu()) {
@@ -202,6 +207,9 @@ export function registerInteractionCreate(client: Client) {
         } else if (id.startsWith('games:prefs:pick:')) {
           const { handlePrefsPick } = await import('../../interactions/gamesEditor')
           await handlePrefsPick(interaction as StringSelectMenuInteraction)
+        } else if (id === 'color:pick') {
+          const { handleColorPick } = await import('../../commands/color')
+          await handleColorPick(interaction as StringSelectMenuInteraction)
         }
 
       } else if (interaction.isModalSubmit()) {

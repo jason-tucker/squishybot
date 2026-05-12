@@ -10,6 +10,7 @@ import { loadSocialFeeds } from '../../services/socialFeeds'
 import { startSocialPoller } from '../../services/social/poller'
 import { startBirthdayScheduler } from '../../services/birthdayScheduler'
 import { logResolvedBotOwners } from '../../services/botOwner'
+import { getBoolSetting } from '../../services/settings'
 
 export function registerReadyEvent(client: Client) {
   client.once('clientReady', async (c) => {
@@ -47,16 +48,51 @@ export function registerReadyEvent(client: Client) {
       await logger.errorAndDm('Reconciler failed on startup', err, c)
     }
 
-    const startupMsg =
-      `🟢 **SquishyBot started**\n` +
-      `Logged in as **${c.user.tag}**\n` +
-      `Primary guild (\`GUILD_ID\`): **${guildName}** (\`${env.GUILD_ID}\`)\n` +
-      (otherGuilds.length > 0 ? `Also in: ${otherGuilds.join(', ')}\n` : '') +
-      (result
-        ? `Reconciler: recovered=${result.recovered} cleaned=${result.cleaned} hubs=${result.hubs} panels=${result.panels}`
-        : '')
+    // Build a richer startup DM. Only the BOT_OWNER_ID env target gets this
+    // (logger.dmOwner reads env directly — not the dynamic isBotOwner set).
+    let version = '?'
+    try {
+      const pkg = await import('../../../package.json' as any)
+      version = (pkg as any).version ?? '?'
+    } catch {}
+    const sha = (process.env.GIT_SHA ?? process.env.SOURCE_COMMIT ?? '').slice(0, 7) || 'unset'
+    const nowSec = Math.floor(Date.now() / 1000)
+
+    // List disabled feature flags so a stale "off" isn't surprising.
+    const flagKeys: [string, string, boolean][] = [
+      ['feature.auto_voice',         'Auto Voice',        true],
+      ['feature.auto_threads',       'Auto Threads',      true],
+      ['feature.social_poller',      'Social Poller',     true],
+      ['feature.presence_renames',   'Presence Renames',  true],
+      ['feature.birthday_pings',     'Birthday Pings',    true],
+      ['feature.auto_role_on_join',  'Auto-role on join', false],
+      ['feature.color_roles',        'Color Roles',       false],
+    ]
+    const offFlags = flagKeys.filter(([k, , def]) => !getBoolSetting(k, def)).map(([, label]) => label)
+
+    const lines: string[] = [
+      '## 🟢 SquishyBot is up',
+      '',
+      `**${c.user.tag}** · booted <t:${nowSec}:R>`,
+      `**Version:** \`${version}\` · **Build:** \`${sha}\``,
+      `**Primary guild:** ${guildName} (\`${env.GUILD_ID}\`)`,
+    ]
+    if (otherGuilds.length > 0) lines.push(`**Also in:** ${otherGuilds.join(', ')}`)
+    lines.push('')
+    if (result) {
+      lines.push('### 🔧 Reconciler')
+      lines.push(`• Recovered: **${result.recovered}**`)
+      lines.push(`• Cleaned: **${result.cleaned}**`)
+      lines.push(`• Hubs: **${result.hubs}**`)
+      lines.push(`• Panels rebuilt: **${result.panels}**`)
+      lines.push('')
+    }
+    lines.push('### 🚦 Feature flags')
+    lines.push(offFlags.length === 0 ? '_All defaults active._' : `_Disabled:_ ${offFlags.join(', ')}`)
+    lines.push('')
+    lines.push('_Ready to roll. Run `/sudo` for the admin panel._')
 
     // Silent — successful boot is informational, not a notification.
-    await logger.dmOwner(startupMsg, c, { silent: true })
+    await logger.dmOwner(lines.join('\n'), c, { silent: true })
   })
 }

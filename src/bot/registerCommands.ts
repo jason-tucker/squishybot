@@ -8,6 +8,7 @@ import { data as manageUserData } from '../commands/manageUser'
 import { data as reportData } from '../commands/report'
 import { data as gamesData } from '../commands/games'
 import { data as playData } from '../commands/play'
+import { data as colorData } from '../commands/color'
 
 const commands = [
   voiceData.toJSON(),     // /voice    — voice channel control panel
@@ -17,6 +18,7 @@ const commands = [
   reportData.toJSON(),    // /report   — file a GitHub issue
   gamesData.toJSON(),     // /games    — pick games for View / Pings (self mode)
   playData.toJSON(),      // /play     — LFG ping for a game
+  colorData.toJSON(),     // /color    — pick a color role (feature-flagged off)
   manageUserData.toJSON(),// right-click → Manage (context menu, sudo only)
 ]
 

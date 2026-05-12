@@ -182,12 +182,17 @@ function renderHome() {
     new ButtonBuilder().setCustomId('sudo:set:nav:games').setLabel('Games').setEmoji('🎮').setStyle(ButtonStyle.Secondary),
     new ButtonBuilder().setCustomId('sudo:set:nav:profiles').setLabel('User Profiles').setEmoji('👤').setStyle(ButtonStyle.Secondary),
     new ButtonBuilder().setCustomId('sudo:set:nav:archive').setLabel('Archive').setEmoji('🗄️').setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder().setCustomId('sudo:set:nav:debug').setLabel('Debug').setEmoji('🛠️').setStyle(ButtonStyle.Secondary),
+  )
+  const row4 = new ActionRowBuilder<MessageActionRowComponentBuilder>().addComponents(
+    new ButtonBuilder().setCustomId('sudo:set:nav:auto_roles').setLabel('Auto Roles').setEmoji('🎟️').setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder().setCustomId('sudo:set:nav:color_roles').setLabel('Color Roles').setEmoji('🎨').setStyle(ButtonStyle.Secondary),
   )
   const navRow = new ActionRowBuilder<MessageActionRowComponentBuilder>().addComponents(
     new ButtonBuilder().setCustomId('sudo:home').setLabel('Back to /sudo').setEmoji('🏠').setStyle(ButtonStyle.Secondary),
   )
 
-  return { flags: MessageFlags.IsComponentsV2 as number, components: [container, row1, row2, row3, navRow] }
+  return { flags: MessageFlags.IsComponentsV2 as number, components: [container, row1, row2, row3, row4, navRow] }
 }
 
 async function renderSudoUsers() {
@@ -559,12 +564,13 @@ interface FeatureFlagDef {
   defaultOn: boolean
 }
 const FEATURE_FLAGS: FeatureFlagDef[] = [
-  { key: 'feature.auto_voice',       label: 'Auto Voice Channels',  description: 'Hub joins create auto-channels. Existing channels keep working when off.', defaultOn: true },
-  { key: 'feature.auto_threads',     label: 'Auto Threads',         description: 'messageCreate creates threads on media in auto-thread channels.',          defaultOn: true },
-  { key: 'feature.social_poller',    label: 'Social Poller',        description: 'RSS poller posts new feed items every 30 min.',                            defaultOn: true },
-  { key: 'feature.presence_renames', label: 'Presence Renames',     description: 'Rich presence drives auto-channel name updates.',                          defaultOn: true },
-  { key: 'feature.birthday_pings',   label: 'Birthday Pings',       description: 'Daily scheduler fires birthday messages.',                                  defaultOn: true },
-  { key: 'feature.color_roles',      label: 'Color Roles (/color)', description: 'User-selectable color role manager. Default OFF (#38).',                    defaultOn: false },
+  { key: 'feature.auto_voice',         label: 'Auto Voice Channels',  description: 'Hub joins create auto-channels. Existing channels keep working when off.', defaultOn: true },
+  { key: 'feature.auto_threads',       label: 'Auto Threads',         description: 'messageCreate creates threads on media in auto-thread channels.',          defaultOn: true },
+  { key: 'feature.social_poller',      label: 'Social Poller',        description: 'RSS poller posts new feed items every 30 min.',                            defaultOn: true },
+  { key: 'feature.presence_renames',   label: 'Presence Renames',     description: 'Rich presence drives auto-channel name updates.',                          defaultOn: true },
+  { key: 'feature.birthday_pings',     label: 'Birthday Pings',       description: 'Daily scheduler fires birthday messages.',                                  defaultOn: true },
+  { key: 'feature.auto_role_on_join',  label: 'Auto-role on join',    description: 'Apply configured roles to every new member. Default OFF (#36).',          defaultOn: false },
+  { key: 'feature.color_roles',        label: 'Color Roles (/color)', description: 'User-selectable color role manager. Default OFF (#38).',                    defaultOn: false },
 ]
 
 async function renderDebug(client: any, userId: string) {
@@ -711,6 +717,98 @@ async function renderUsageStats(guildId: string) {
     new ButtonBuilder().setCustomId('sudo:set:nav:debug').setLabel('Back to Debug').setStyle(ButtonStyle.Secondary),
   )
   return { flags: MessageFlags.IsComponentsV2 as number, components: [container, back] }
+}
+
+async function renderAutoRoles(guildId: string) {
+  const { db } = await import('../db/client')
+  const { autoJoinRoles } = await import('../db/schema')
+  const rows = await db.select().from(autoJoinRoles).where(eq(autoJoinRoles.guildId, guildId))
+  const featureOn = getBoolSetting('feature.auto_role_on_join', false)
+
+  const lines = [
+    '### 🎟️ Auto-role on join',
+    `_Roles applied to every new non-bot member when they join the server._`,
+    `_Feature flag (\`feature.auto_role_on_join\`): ${featureOn ? '🟢 **On**' : '⚪ Off'}_\n`,
+  ]
+  if (rows.length === 0) lines.push('_No roles configured. Pick one below to add._')
+  else for (const r of rows) lines.push(`• <@&${r.roleId}>`)
+
+  const container = new ContainerBuilder()
+    .setAccentColor(0x9b59b6)
+    .addTextDisplayComponents(new TextDisplayBuilder().setContent(lines.join('\n')))
+
+  const components: any[] = [container]
+  const { RoleSelectMenuBuilder } = await import('discord.js')
+  components.push(
+    new ActionRowBuilder<MessageActionRowComponentBuilder>().addComponents(
+      new RoleSelectMenuBuilder()
+        .setCustomId('sudo:set:auto_role:add')
+        .setPlaceholder('Add an auto-join role…')
+        .setMinValues(0).setMaxValues(1),
+    ),
+  )
+  if (rows.length > 0) {
+    components.push(
+      new ActionRowBuilder<MessageActionRowComponentBuilder>().addComponents(
+        new StringSelectMenuBuilder()
+          .setCustomId('sudo:set:auto_role:remove')
+          .setPlaceholder('Remove an auto-join role…')
+          .addOptions(rows.slice(0, 25).map(r => ({ label: r.roleId, value: r.roleId, emoji: '❌' }))),
+      ),
+    )
+  }
+  components.push(
+    new ActionRowBuilder<MessageActionRowComponentBuilder>().addComponents(
+      new ButtonBuilder().setCustomId('sudo:set:home').setLabel('Back').setStyle(ButtonStyle.Secondary),
+    ),
+  )
+  return { flags: MessageFlags.IsComponentsV2 as number, components }
+}
+
+async function renderColorRoles(guildId: string) {
+  const { db } = await import('../db/client')
+  const { colorRoles } = await import('../db/schema')
+  const rows = await db.select().from(colorRoles).where(eq(colorRoles.guildId, guildId))
+  const featureOn = getBoolSetting('feature.color_roles', false)
+
+  const lines = [
+    '### 🎨 Color roles',
+    `_Member-selectable color roles. Members run \`/color\` to pick one; bot swaps any existing pick._`,
+    `_Feature flag (\`feature.color_roles\`): ${featureOn ? '🟢 **On**' : '⚪ Off'} — toggle in Debug → Feature flags._\n`,
+  ]
+  if (rows.length === 0) lines.push('_No color roles configured. Add one below._')
+  else for (const r of rows) lines.push(`• <@&${r.roleId}> _${r.label}_`)
+
+  const container = new ContainerBuilder()
+    .setAccentColor(0x9b59b6)
+    .addTextDisplayComponents(new TextDisplayBuilder().setContent(lines.join('\n')))
+
+  const components: any[] = [container]
+  const { RoleSelectMenuBuilder } = await import('discord.js')
+  components.push(
+    new ActionRowBuilder<MessageActionRowComponentBuilder>().addComponents(
+      new RoleSelectMenuBuilder()
+        .setCustomId('sudo:set:color_role:add')
+        .setPlaceholder('Add a color role…')
+        .setMinValues(0).setMaxValues(1),
+    ),
+  )
+  if (rows.length > 0) {
+    components.push(
+      new ActionRowBuilder<MessageActionRowComponentBuilder>().addComponents(
+        new StringSelectMenuBuilder()
+          .setCustomId('sudo:set:color_role:remove')
+          .setPlaceholder('Remove a color role…')
+          .addOptions(rows.slice(0, 25).map(r => ({ label: r.label.slice(0, 100), value: r.roleId, emoji: '❌' }))),
+      ),
+    )
+  }
+  components.push(
+    new ActionRowBuilder<MessageActionRowComponentBuilder>().addComponents(
+      new ButtonBuilder().setCustomId('sudo:set:home').setLabel('Back').setStyle(ButtonStyle.Secondary),
+    ),
+  )
+  return { flags: MessageFlags.IsComponentsV2 as number, components }
 }
 
 async function renderStaffHistory(guildId: string) {
@@ -1547,6 +1645,10 @@ export async function handleSettingsButton(interaction: ButtonInteraction): Prom
       await interaction.editReply((await renderAuditLog()) as any)
     } else if (category === 'usage_stats') {
       await interaction.editReply((await renderUsageStats(interaction.guildId!)) as any)
+    } else if (category === 'auto_roles') {
+      await interaction.editReply((await renderAutoRoles(interaction.guildId!)) as any)
+    } else if (category === 'color_roles') {
+      await interaction.editReply((await renderColorRoles(interaction.guildId!)) as any)
     } else if (category === 'auto_threads') {
       await interaction.editReply(renderAutoThreads() as any)
     } else if (category === 'staff_roles') {
@@ -1952,6 +2054,33 @@ export async function handleSettingsChannelSelect(interaction: ChannelSelectMenu
   }
 }
 
+export async function handleSettingsRoleSelect(interaction: import('discord.js').RoleSelectMenuInteraction): Promise<void> {
+  if (!await requireSudo(interaction)) return
+  const id = interaction.customId
+  const roleId = interaction.values[0]
+  if (!roleId) {
+    await interaction.update(id === 'sudo:set:auto_role:add'
+      ? (await renderAutoRoles(interaction.guildId!)) as any
+      : (await renderColorRoles(interaction.guildId!)) as any)
+    return
+  }
+  const { db } = await import('../db/client')
+  if (id === 'sudo:set:auto_role:add') {
+    const { autoJoinRoles } = await import('../db/schema')
+    await db.insert(autoJoinRoles).values({ roleId, guildId: interaction.guildId!, addedByUserId: interaction.user.id }).onConflictDoNothing()
+    await interaction.update((await renderAutoRoles(interaction.guildId!)) as any)
+    return
+  }
+  if (id === 'sudo:set:color_role:add') {
+    const role = interaction.guild?.roles.cache.get(roleId)
+    const label = role?.name ?? roleId
+    const { colorRoles } = await import('../db/schema')
+    await db.insert(colorRoles).values({ roleId, guildId: interaction.guildId!, label }).onConflictDoNothing()
+    await interaction.update((await renderColorRoles(interaction.guildId!)) as any)
+    return
+  }
+}
+
 export async function handleSettingsUserSelect(interaction: UserSelectMenuInteraction): Promise<void> {
   if (!await requireSudo(interaction)) return
   const userId = interaction.values[0]
@@ -2128,6 +2257,26 @@ export async function handleSettingsStringSelect(interaction: StringSelectMenuIn
     const { unlockHub } = await import('../services/voice/hubLockdown')
     await unlockHub(interaction.client, interaction.guildId!, channelId)
     await interaction.update((await renderHubLockdown()) as any)
+    return
+  }
+  if (id === 'sudo:set:auto_role:remove') {
+    const roleId = interaction.values[0]
+    if (roleId) {
+      const { db } = await import('../db/client')
+      const { autoJoinRoles } = await import('../db/schema')
+      await db.delete(autoJoinRoles).where(eq(autoJoinRoles.roleId, roleId))
+    }
+    await interaction.update((await renderAutoRoles(interaction.guildId!)) as any)
+    return
+  }
+  if (id === 'sudo:set:color_role:remove') {
+    const roleId = interaction.values[0]
+    if (roleId) {
+      const { db } = await import('../db/client')
+      const { colorRoles } = await import('../db/schema')
+      await db.delete(colorRoles).where(eq(colorRoles.roleId, roleId))
+    }
+    await interaction.update((await renderColorRoles(interaction.guildId!)) as any)
     return
   }
   if (id === 'sudo:set:archive:remove_eligible') {
