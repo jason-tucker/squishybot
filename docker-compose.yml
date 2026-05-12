@@ -10,10 +10,16 @@ services:
       # Overrides DATABASE_URL from .env so the bot always connects to the
       # compose-managed postgres service, regardless of what's in .env.
       DATABASE_URL: "postgresql://squishybot:${POSTGRES_PASSWORD:-squishybot_dev}@db:5432/squishybot"
+      # Redis is the event bus and (V2+) command bus to botpanel.
+      # Lives in the botpanel compose stack on the shared network.
+      REDIS_URL: "${REDIS_URL:-redis://redis:6379}"
       NODE_ENV: production
     depends_on:
       db:
         condition: service_healthy
+    networks:
+      default: {}
+      botpanel-net: {}
     logging:
       driver: json-file
       options:
