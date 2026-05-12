@@ -28,6 +28,8 @@ import '../../services/rpc/handlers/games/refresh_cache'
 import '../../services/rpc/handlers/rxnroles/create'
 import '../../services/rpc/handlers/rxnroles/delete'
 import '../../services/rpc/handlers/rxnroles/expire'
+// Wave 7b: `hub.lockdown`, `hub.lockdown_all`, `hub.refresh_cache`.
+import '../../services/rpc/handlers/hubs'
 
 const SUPPRESS_NOTIFICATIONS = 1 << 12  // MessageFlags.SuppressNotifications
 
