@@ -188,6 +188,7 @@ function renderHome() {
     new ButtonBuilder().setCustomId('sudo:set:nav:auto_roles').setLabel('Auto Roles').setEmoji('🎟️').setStyle(ButtonStyle.Secondary),
     new ButtonBuilder().setCustomId('sudo:set:nav:color_roles').setLabel('Color Roles').setEmoji('🎨').setStyle(ButtonStyle.Secondary),
     new ButtonBuilder().setCustomId('sudo:set:nav:welcome').setLabel('Welcome/Goodbye').setEmoji('👋').setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder().setCustomId('sudo:set:nav:reaction_roles').setLabel('Reaction Roles').setEmoji('🎭').setStyle(ButtonStyle.Secondary),
   )
   const navRow = new ActionRowBuilder<MessageActionRowComponentBuilder>().addComponents(
     new ButtonBuilder().setCustomId('sudo:home').setLabel('Back to /sudo').setEmoji('🏠').setStyle(ButtonStyle.Secondary),
@@ -838,6 +839,53 @@ async function renderReportTriage(guildId: string) {
     new ButtonBuilder().setCustomId('sudo:set:nav:debug').setLabel('Back to Debug').setStyle(ButtonStyle.Secondary),
   )
   return { flags: MessageFlags.IsComponentsV2 as number, components: [container, back] }
+}
+
+async function renderReactionRoles() {
+  const { listReactionRoles } = await import('../services/reactionRoles')
+  const rows = listReactionRoles()
+  const lines = [
+    '### 🎭 Reaction Roles',
+    '_Each entry is a Discord message the bot watches. Click emoji on the message → bot toggles the mapped role on you._\n',
+  ]
+  if (rows.length === 0) lines.push('_No reaction-role messages yet. Use **Create** to make one._')
+  else {
+    for (const r of rows) {
+      const exp = r.expiresAt ? ` · expires <t:${Math.floor(r.expiresAt.getTime() / 1000)}:R>` : ''
+      lines.push(`• <#${r.channelId}> · \`${r.messageId.slice(-6)}\` · ${r.mappings.length} mapping${r.mappings.length === 1 ? '' : 's'}${exp}`)
+    }
+  }
+  const container = new ContainerBuilder()
+    .setAccentColor(0x9b59b6)
+    .addTextDisplayComponents(new TextDisplayBuilder().setContent(lines.join('\n')))
+
+  const components: any[] = [container]
+  components.push(
+    new ActionRowBuilder<MessageActionRowComponentBuilder>().addComponents(
+      new ButtonBuilder().setCustomId('sudo:set:reaction_roles:create').setLabel('Create reaction-role message').setEmoji('➕').setStyle(ButtonStyle.Primary),
+    ),
+  )
+  if (rows.length > 0) {
+    components.push(
+      new ActionRowBuilder<MessageActionRowComponentBuilder>().addComponents(
+        new StringSelectMenuBuilder()
+          .setCustomId('sudo:set:reaction_roles:delete')
+          .setPlaceholder('Delete a reaction-role message…')
+          .addOptions(rows.slice(0, 25).map(r => ({
+            label: `${r.messageId.slice(-12)} · ${r.mappings.length} mapping(s)`.slice(0, 100),
+            value: r.messageId,
+            emoji: '🗑️',
+            description: `in <#${r.channelId}>`.slice(0, 100),
+          }))),
+      ),
+    )
+  }
+  components.push(
+    new ActionRowBuilder<MessageActionRowComponentBuilder>().addComponents(
+      new ButtonBuilder().setCustomId('sudo:set:home').setLabel('Back').setStyle(ButtonStyle.Secondary),
+    ),
+  )
+  return { flags: MessageFlags.IsComponentsV2 as number, components }
 }
 
 async function renderWelcome() {
@@ -1604,6 +1652,30 @@ export async function handleSettingsButton(interaction: ButtonInteraction): Prom
     return
   }
 
+  // #37 — Reaction-role create modal
+  if (id === 'sudo:set:reaction_roles:create') {
+    if (!await requireSudo(interaction)) return
+    const modal = new ModalBuilder()
+      .setCustomId('sudo:set:reaction_roles:create_submit')
+      .setTitle('Create reaction-role message')
+      .addComponents(
+        new ActionRowBuilder<TextInputBuilder>().addComponents(
+          new TextInputBuilder().setCustomId('channel_id').setLabel('Channel ID').setStyle(TextInputStyle.Short).setRequired(true).setMinLength(15).setMaxLength(25),
+        ),
+        new ActionRowBuilder<TextInputBuilder>().addComponents(
+          new TextInputBuilder().setCustomId('body').setLabel('Message body').setStyle(TextInputStyle.Paragraph).setRequired(true).setMinLength(1).setMaxLength(1900).setPlaceholder('Pick your team!\n\n🟢 = green-team\n🔴 = red-team'),
+        ),
+        new ActionRowBuilder<TextInputBuilder>().addComponents(
+          new TextInputBuilder().setCustomId('mappings').setLabel('Mappings: emoji=roleId per line').setStyle(TextInputStyle.Paragraph).setRequired(true).setMaxLength(500).setPlaceholder('🟢=123456789012345678\n🔴=234567890123456789'),
+        ),
+        new ActionRowBuilder<TextInputBuilder>().addComponents(
+          new TextInputBuilder().setCustomId('expires_minutes').setLabel('Expires in N minutes (blank = permanent)').setStyle(TextInputStyle.Short).setRequired(false).setMaxLength(5),
+        ),
+      )
+    await interaction.showModal(modal)
+    return
+  }
+
   // #20 — Edit welcome/goodbye template (modal)
   if (id === 'sudo:set:welcome:edit_welcome' || id === 'sudo:set:welcome:edit_goodbye') {
     if (!await requireSudo(interaction)) return
@@ -1751,6 +1823,8 @@ export async function handleSettingsButton(interaction: ButtonInteraction): Prom
       await interaction.editReply((await renderColorRoles(interaction.guildId!)) as any)
     } else if (category === 'welcome') {
       await interaction.editReply((await renderWelcome()) as any)
+    } else if (category === 'reaction_roles') {
+      await interaction.editReply((await renderReactionRoles()) as any)
     } else if (category === 'report_triage') {
       const { isBotOwner } = await import('../services/botOwner')
       if (!await isBotOwner(interaction.client, interaction.user.id)) {
@@ -2388,6 +2462,15 @@ export async function handleSettingsStringSelect(interaction: StringSelectMenuIn
     await interaction.update((await renderHubLockdown()) as any)
     return
   }
+  if (id === 'sudo:set:reaction_roles:delete') {
+    const messageId = interaction.values[0]
+    if (messageId) {
+      const { deleteReactionRoleMessage } = await import('../services/reactionRoles')
+      await deleteReactionRoleMessage(interaction.client, messageId)
+    }
+    await interaction.update((await renderReactionRoles()) as any)
+    return
+  }
   if (id === 'sudo:set:auto_role:remove') {
     const roleId = interaction.values[0]
     if (roleId) {
@@ -2447,6 +2530,69 @@ export async function handleSettingsStringSelect(interaction: StringSelectMenuIn
 
 export async function handleSettingsModalSubmit(interaction: ModalSubmitInteraction): Promise<void> {
   if (!await requireSudo(interaction)) return
+
+  // #37 — Create reaction-role message
+  if (interaction.customId === 'sudo:set:reaction_roles:create_submit') {
+    const channelId = interaction.fields.getTextInputValue('channel_id').trim()
+    const body = interaction.fields.getTextInputValue('body')
+    const mappingsRaw = interaction.fields.getTextInputValue('mappings').trim()
+    const expiresRaw = interaction.fields.getTextInputValue('expires_minutes').trim()
+
+    if (!/^\d{15,25}$/.test(channelId)) {
+      await interaction.reply({ content: '❌ Channel ID must be a Discord snowflake.', ephemeral: true })
+      return
+    }
+    const channel = await interaction.guild?.channels.fetch(channelId).catch(() => null)
+    if (!channel?.isTextBased()) {
+      await interaction.reply({ content: '❌ That channel is not text-based or not accessible.', ephemeral: true })
+      return
+    }
+
+    const mappings: { emoji: string; roleId: string }[] = []
+    for (const line of mappingsRaw.split(/\r?\n/).map(l => l.trim()).filter(Boolean)) {
+      const eqIdx = line.indexOf('=')
+      if (eqIdx < 1) {
+        await interaction.reply({ content: `❌ Bad mapping line: \`${line}\` (use \`emoji=roleId\`).`, ephemeral: true })
+        return
+      }
+      const emojiRaw = line.slice(0, eqIdx).trim()
+      const roleId = line.slice(eqIdx + 1).trim()
+      if (!/^\d{15,25}$/.test(roleId)) {
+        await interaction.reply({ content: `❌ Bad roleId: \`${roleId}\`.`, ephemeral: true })
+        return
+      }
+      // For custom emojis in <a?:name:id> form, extract just the id.
+      const customMatch = emojiRaw.match(/<a?:[^:]+:(\d+)>/)
+      mappings.push({ emoji: customMatch ? customMatch[1] : emojiRaw, roleId })
+    }
+    if (mappings.length === 0) {
+      await interaction.reply({ content: '❌ At least one mapping is required.', ephemeral: true })
+      return
+    }
+
+    let expiresAt: Date | null = null
+    if (expiresRaw) {
+      const n = Number(expiresRaw)
+      if (!Number.isFinite(n) || n < 1 || n > 60 * 24 * 30) {
+        await interaction.reply({ content: '❌ Expires must be 1–43200 minutes (30 days).', ephemeral: true })
+        return
+      }
+      expiresAt = new Date(Date.now() + n * 60_000)
+    }
+
+    await interaction.deferReply({ ephemeral: true })
+    const { createReactionRoleMessage } = await import('../services/reactionRoles')
+    try {
+      const cfg = await createReactionRoleMessage(channel as any, body, mappings, {
+        expiresAt,
+        createdByUserId: interaction.user.id,
+      })
+      await interaction.editReply({ content: `✅ Created reaction-role message \`${cfg.messageId}\` in <#${channelId}> with ${mappings.length} mapping(s)${expiresAt ? ` — expires <t:${Math.floor(expiresAt.getTime() / 1000)}:R>` : ''}.` })
+    } catch (err) {
+      await interaction.editReply({ content: `❌ Failed: ${(err as Error).message}` })
+    }
+    return
+  }
 
   // #20 — Welcome/goodbye template submit
   if (interaction.customId === 'sudo:set:welcome:welcome_submit' || interaction.customId === 'sudo:set:welcome:goodbye_submit') {

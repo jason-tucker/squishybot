@@ -8,8 +8,12 @@ export const client = new Client({
     GatewayIntentBits.GuildMessages,
     GatewayIntentBits.MessageContent,  // privileged — enable in Dev Portal → Bot → Message Content Intent (needed for auto-thread name templating)
     GatewayIntentBits.GuildPresences, // privileged — enable in Dev Portal → Bot → Presence Intent
+    GatewayIntentBits.GuildMessageReactions,  // #37 reaction-role messages
   ],
-  partials: [Partials.GuildMember],
+  // Partials.Message + Partials.Reaction so reaction events fire for messages
+  // that aren't in the in-memory message cache (anything older than process
+  // start, basically — including all reaction-role messages after a restart).
+  partials: [Partials.GuildMember, Partials.Message, Partials.Reaction],
   // Default every reply / send / followUp to "no mentions resolve". Individual
   // call sites that legitimately need to ping (e.g. /play LFG ping role,
   // birthday channel ping) override this explicitly with `allowedMentions:

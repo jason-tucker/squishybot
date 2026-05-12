@@ -38,6 +38,9 @@ export function registerReadyEvent(client: Client) {
     startSocialPoller(c)
     const { startGameAutoArchiver } = await import('../../services/gameAutoArchive')
     startGameAutoArchiver(c, env.GUILD_ID)
+    const { loadReactionRoles, startReactionRoleCleanup } = await import('../../services/reactionRoles')
+    await loadReactionRoles().catch(err => logger.error('Failed to load reaction roles on startup', err))
+    startReactionRoleCleanup(c)
 
     const guild = c.guilds.cache.get(env.GUILD_ID)
     const guildName = guild?.name ?? '(not a member)'
