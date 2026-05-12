@@ -53,7 +53,7 @@ export async function handleReportSubmit(interaction: ModalSubmitInteraction): P
   // The review handler will look up the most-recent pending row for this user
   // by sessionKey-derived heuristics; for simplicity, the row stores the
   // reporter's user_id and title, and the review handler matches on that.
-  let reportRowId: number | null = null
+  let reportRowId: string | null = null
   try {
     const { db } = await import('../../db/client')
     const { reportLog } = await import('../../db/schema')

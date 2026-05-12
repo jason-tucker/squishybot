@@ -23,7 +23,7 @@ async function markReportLogStatus(
   status: 'filed' | 'dropped',
   githubIssueUrl: string | null,
   decidedByUserId: string,
-): Promise<number | null> {
+): Promise<string | null> {
   // Match the most-recent pending row by (user, title). Each /report submit
   // inserts exactly one row, so the latest pending one is the right target.
   const [latest] = await db.select({ id: reportLog.id }).from(reportLog)
