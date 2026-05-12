@@ -2,7 +2,7 @@ services:
   squishybot:
     # CI sets BOT_IMAGE to ghcr.io/<owner>/squishybot:<sha>.
     # Locally, omit BOT_IMAGE and use `docker compose up -d --build` to build from source.
-    image: ${BOT_IMAGE:-squishybot:latest}
+    image: ${BOT_IMAGE:-ghcr.io/jason-tucker/squishybot:latest}
     build: .
     restart: unless-stopped
     env_file: .env
@@ -20,6 +20,8 @@ services:
     networks:
       default: {}
       botpanel-net: {}
+    labels:
+      com.centurylinklabs.watchtower.enable: "true"
     logging:
       driver: json-file
       options:
