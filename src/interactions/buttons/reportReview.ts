@@ -1,11 +1,12 @@
 import type { ButtonInteraction } from 'discord.js'
 import { env } from '../../config/env'
+import { isBotOwner } from '../../services/botOwner'
 import { logger } from '../../services/logger'
 import { getReportSession, deleteReportSession } from '../../services/reportCache'
 
 export async function handleReportReview(interaction: ButtonInteraction): Promise<void> {
-  if (interaction.user.id !== env.BOT_OWNER_ID) {
-    await interaction.reply({ content: '❌ Only the bot owner can review reports.', ephemeral: true })
+  if (!await isBotOwner(interaction.client, interaction.user.id)) {
+    await interaction.reply({ content: '❌ Only a bot owner can review reports.', ephemeral: true })
     return
   }
 

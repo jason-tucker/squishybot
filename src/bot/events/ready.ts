@@ -9,6 +9,7 @@ import { loadGames } from '../../services/games'
 import { loadSocialFeeds } from '../../services/socialFeeds'
 import { startSocialPoller } from '../../services/social/poller'
 import { startBirthdayScheduler } from '../../services/birthdayScheduler'
+import { logResolvedBotOwners } from '../../services/botOwner'
 
 export function registerReadyEvent(client: Client) {
   client.once('clientReady', async (c) => {
@@ -30,6 +31,7 @@ export function registerReadyEvent(client: Client) {
     await Promise.all([
       loadGames().catch(err => logger.error('Failed to load games on startup', err)),
       loadSocialFeeds().catch(err => logger.error('Failed to load social feeds on startup', err)),
+      logResolvedBotOwners(c).catch(err => logger.warn('Bot-owner resolution failed on startup', err)),
     ])
     startBirthdayScheduler(c)
     startSocialPoller(c)
