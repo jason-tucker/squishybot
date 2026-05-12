@@ -30,6 +30,9 @@ import '../../services/rpc/handlers/rxnroles/delete'
 import '../../services/rpc/handlers/rxnroles/expire'
 // Wave 7b: `hub.lockdown`, `hub.lockdown_all`, `hub.refresh_cache`.
 import '../../services/rpc/handlers/hubs'
+// Voice-control verbs (rename / lock / hide / disconnect / transfer / delete).
+// The barrel side-effect-imports each handler module.
+import '../../services/rpc/handlers/voice'
 
 const SUPPRESS_NOTIFICATIONS = 1 << 12  // MessageFlags.SuppressNotifications
 
