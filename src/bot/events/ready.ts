@@ -31,6 +31,8 @@ import '../../services/rpc/handlers/hubs'
 // Voice-control verbs (rename / lock / hide / disconnect / transfer / delete).
 // The barrel side-effect-imports each handler module.
 import '../../services/rpc/handlers/voice'
+// Wave 7d — meta verbs for panel pickers (roles/channels/members).
+import '../../services/rpc/handlers/meta'
 
 const SUPPRESS_NOTIFICATIONS = 1 << 12  // MessageFlags.SuppressNotifications
 
