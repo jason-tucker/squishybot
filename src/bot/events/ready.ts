@@ -19,8 +19,6 @@ import '../../services/rpc/handlers/echo'
 // Wave 7b — staff role grant/revoke verbs.
 import '../../services/rpc/handlers/staff'
 // Wave 7b — welcome/goodbye preview verb (read-only render of live templates).
-import '../../services/rpc/handlers/welcome/preview'
-// Wave 7b — admin verbs: reload-caches, orphan-scan, reconciler-run.
 import '../../services/rpc/handlers/admin'
 // Wave 7b — games.refresh_cache verb (post-write cache reload hook).
 import '../../services/rpc/handlers/games/refresh_cache'
