@@ -591,6 +591,8 @@ async function renderDebug(client: any, userId: string) {
   components.push(
     new ActionRowBuilder<MessageActionRowComponentBuilder>().addComponents(
       new ButtonBuilder().setCustomId('sudo:set:nav:staff_history').setLabel('Staff request history').setEmoji('📜').setStyle(ButtonStyle.Secondary),
+      new ButtonBuilder().setCustomId('sudo:set:nav:audit_log').setLabel('Audit log').setEmoji('📝').setStyle(ButtonStyle.Secondary),
+      new ButtonBuilder().setCustomId('sudo:set:nav:usage_stats').setLabel('Usage stats').setEmoji('📊').setStyle(ButtonStyle.Secondary),
       new ButtonBuilder().setCustomId('sudo:set:home').setLabel('Back').setStyle(ButtonStyle.Secondary),
     ),
   )
@@ -641,6 +643,71 @@ async function renderHeartbeat(client: any) {
     .addTextDisplayComponents(new TextDisplayBuilder().setContent(lines.join('\n')))
   const back = new ActionRowBuilder<MessageActionRowComponentBuilder>().addComponents(
     new ButtonBuilder().setCustomId('sudo:set:nav:heartbeat').setLabel('Refresh').setEmoji('♻️').setStyle(ButtonStyle.Primary),
+    new ButtonBuilder().setCustomId('sudo:set:nav:debug').setLabel('Back to Debug').setStyle(ButtonStyle.Secondary),
+  )
+  return { flags: MessageFlags.IsComponentsV2 as number, components: [container, back] }
+}
+
+async function renderAuditLog() {
+  const { db } = await import('../db/client')
+  const { settingChanges } = await import('../db/schema')
+  const { desc } = await import('drizzle-orm')
+  const rows = await db.select().from(settingChanges).orderBy(desc(settingChanges.changedAt)).limit(20)
+
+  const lines = ['### 📝 Audit log — recent settings changes', `_Showing the most recent ${rows.length} change(s)._\n`]
+  if (rows.length === 0) {
+    lines.push('_No setting changes recorded yet._')
+  } else {
+    for (const r of rows) {
+      const when = `<t:${Math.floor(r.changedAt.getTime() / 1000)}:R>`
+      const who = r.changedByUserId ? `<@${r.changedByUserId}>` : '_(unknown)_'
+      const old = r.oldValue === null ? '_(unset)_' : `\`${r.oldValue.slice(0, 40)}\``
+      const next = r.newValue === null ? '_(cleared)_' : `\`${r.newValue.slice(0, 40)}\``
+      lines.push(`• ${when} · ${who} · \`${r.key}\` · ${old} → ${next}`)
+    }
+  }
+
+  const container = new ContainerBuilder()
+    .setAccentColor(0x9b59b6)
+    .addTextDisplayComponents(new TextDisplayBuilder().setContent(lines.join('\n').slice(0, 3900)))
+  const back = new ActionRowBuilder<MessageActionRowComponentBuilder>().addComponents(
+    new ButtonBuilder().setCustomId('sudo:set:nav:audit_log').setLabel('Refresh').setEmoji('♻️').setStyle(ButtonStyle.Primary),
+    new ButtonBuilder().setCustomId('sudo:set:nav:debug').setLabel('Back to Debug').setStyle(ButtonStyle.Secondary),
+  )
+  return { flags: MessageFlags.IsComponentsV2 as number, components: [container, back] }
+}
+
+async function renderUsageStats(guildId: string) {
+  const { db } = await import('../db/client')
+  const { autoChannels, staffApprovals, settingChanges } = await import('../db/schema')
+  const { gte, and: andOp, count, sql } = await import('drizzle-orm')
+  const dayAgo = new Date(Date.now() - 24 * 60 * 60 * 1000)
+  const weekAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000)
+
+  const [autoToday, autoWeek, reportsToday, reportsWeek, settingsToday, settingsWeek] = await Promise.all([
+    db.select({ n: count() }).from(autoChannels).where(andOp(eq(autoChannels.guildId, guildId), gte(autoChannels.createdAt, dayAgo))),
+    db.select({ n: count() }).from(autoChannels).where(andOp(eq(autoChannels.guildId, guildId), gte(autoChannels.createdAt, weekAgo))),
+    db.select({ n: count() }).from(staffApprovals).where(andOp(eq(staffApprovals.guildId, guildId), gte(staffApprovals.createdAt, dayAgo))),
+    db.select({ n: count() }).from(staffApprovals).where(andOp(eq(staffApprovals.guildId, guildId), gte(staffApprovals.createdAt, weekAgo))),
+    db.select({ n: count() }).from(settingChanges).where(gte(settingChanges.changedAt, dayAgo)),
+    db.select({ n: count() }).from(settingChanges).where(gte(settingChanges.changedAt, weekAgo)),
+  ])
+
+  void sql  // satisfy linter — kept for future row-level stats
+
+  const lines = [
+    '### 📊 Usage stats',
+    '| Feature | Today | This week |',
+    '|---|---|---|',
+    `| Auto channels created | ${autoToday[0]?.n ?? 0} | ${autoWeek[0]?.n ?? 0} |`,
+    `| Staff requests filed | ${reportsToday[0]?.n ?? 0} | ${reportsWeek[0]?.n ?? 0} |`,
+    `| Settings changes | ${settingsToday[0]?.n ?? 0} | ${settingsWeek[0]?.n ?? 0} |`,
+  ]
+  const container = new ContainerBuilder()
+    .setAccentColor(0x57f287)
+    .addTextDisplayComponents(new TextDisplayBuilder().setContent(lines.join('\n')))
+  const back = new ActionRowBuilder<MessageActionRowComponentBuilder>().addComponents(
+    new ButtonBuilder().setCustomId('sudo:set:nav:usage_stats').setLabel('Refresh').setEmoji('♻️').setStyle(ButtonStyle.Primary),
     new ButtonBuilder().setCustomId('sudo:set:nav:debug').setLabel('Back to Debug').setStyle(ButtonStyle.Secondary),
   )
   return { flags: MessageFlags.IsComponentsV2 as number, components: [container, back] }
@@ -1435,6 +1502,10 @@ export async function handleSettingsButton(interaction: ButtonInteraction): Prom
       await interaction.editReply((await renderHeartbeat(interaction.client)) as any)
     } else if (category === 'staff_history') {
       await interaction.editReply((await renderStaffHistory(interaction.guildId!)) as any)
+    } else if (category === 'audit_log') {
+      await interaction.editReply((await renderAuditLog()) as any)
+    } else if (category === 'usage_stats') {
+      await interaction.editReply((await renderUsageStats(interaction.guildId!)) as any)
     } else if (category === 'auto_threads') {
       await interaction.editReply(renderAutoThreads() as any)
     } else if (category === 'staff_roles') {

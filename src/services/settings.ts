@@ -99,6 +99,7 @@ export function getSetting(key: string): string | null {
 }
 
 export async function setSetting(key: string, value: string, byDiscordId?: string): Promise<void> {
+  const oldValue = settingsCache.get(key) ?? null
   await db.insert(botSettings)
     .values({ key, value, updatedByDiscordId: byDiscordId ?? null, updatedAt: new Date() })
     .onConflictDoUpdate({
@@ -106,11 +107,21 @@ export async function setSetting(key: string, value: string, byDiscordId?: strin
       set: { value, updatedByDiscordId: byDiscordId ?? null, updatedAt: new Date() },
     })
   settingsCache.set(key, value)
+  // Audit log (#31) — only when the value actually changed, to avoid noise.
+  if (oldValue !== value) {
+    const { settingChanges } = await import('../db/schema')
+    await db.insert(settingChanges).values({ key, oldValue, newValue: value, changedByUserId: byDiscordId ?? null }).catch(() => {})
+  }
 }
 
-export async function clearSetting(key: string): Promise<void> {
+export async function clearSetting(key: string, byDiscordId?: string): Promise<void> {
+  const oldValue = settingsCache.get(key) ?? null
   await db.delete(botSettings).where(eq(botSettings.key, key))
   settingsCache.delete(key)
+  if (oldValue !== null) {
+    const { settingChanges } = await import('../db/schema')
+    await db.insert(settingChanges).values({ key, oldValue, newValue: null, changedByUserId: byDiscordId ?? null }).catch(() => {})
+  }
 }
 
 export function listSettings(): { key: string; value: string }[] {
