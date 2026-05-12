@@ -1,4 +1,4 @@
-import { pgTable, text, uuid, boolean, timestamp, index } from 'drizzle-orm/pg-core'
+import { pgTable, text, uuid, boolean, integer, timestamp, index } from 'drizzle-orm/pg-core'
 
 /**
  * RSS-backed social feeds the bot polls and reposts into a Discord channel.
@@ -19,6 +19,9 @@ export const socialFeeds = pgTable('social_feeds', {
   lastSeenId: text('last_seen_id'),
   lastPolledAt: timestamp('last_polled_at'),
   lastError: text('last_error'),
+  // #29 — Max items per poll. 0 (default) means "post only the single latest
+  // new item per poll". 1–3 allowed for sudo; bot owner can set higher.
+  maxItemsPerPoll: integer('max_items_per_poll').notNull().default(0),
   createdByDiscordId: text('created_by_discord_id'),
   createdAt: timestamp('created_at').notNull().defaultNow(),
 }, t => ({

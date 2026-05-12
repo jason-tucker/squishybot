@@ -1298,6 +1298,7 @@ async function renderSocialDetail(feedId: string) {
   if (feed.lastPolledAt) lines.push(`**Last polled:** <t:${Math.floor(feed.lastPolledAt.getTime() / 1000)}:R>`)
   if (feed.lastSeenId)   lines.push(`**Last item GUID seen:** \`${feed.lastSeenId.slice(0, 60)}${feed.lastSeenId.length > 60 ? '…' : ''}\``)
   if (feed.lastError)    lines.push(`**Last error:** \`${feed.lastError.slice(0, 200)}\``)
+  lines.push(`**Max items per poll:** ${feed.maxItemsPerPoll === 0 ? '_0 (latest only, default)_' : `\`${feed.maxItemsPerPoll}\``}`)
 
   const container = new ContainerBuilder()
     .setAccentColor(feed.lastError ? 0xed4245 : 0x57f287)
@@ -1314,6 +1315,16 @@ async function renderSocialDetail(feedId: string) {
       .setLabel('Test (post latest now)')
       .setEmoji('🧪')
       .setStyle(ButtonStyle.Primary),
+    new ButtonBuilder()
+      .setCustomId(`sudo:set:social:preview:${feed.id}`)
+      .setLabel('Preview style')
+      .setEmoji('🎨')
+      .setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder()
+      .setCustomId(`sudo:set:social:throttle:${feed.id}`)
+      .setLabel('Max items')
+      .setEmoji('⚙️')
+      .setStyle(ButtonStyle.Secondary),
     new ButtonBuilder()
       .setCustomId(`sudo:set:social:remove:${feed.id}`)
       .setLabel('Remove')
@@ -1388,6 +1399,36 @@ export async function handleSettingsButton(interaction: ButtonInteraction): Prom
     await interaction.showModal(buildSocialAddModal())
     return
   }
+  // #29 — Modal for setting the per-feed max items per poll
+  if (id.startsWith('sudo:set:social:throttle:')) {
+    if (!await requireSudo(interaction)) return
+    const feedId = id.slice('sudo:set:social:throttle:'.length)
+    const { getSocialFeed } = await import('../services/socialFeeds')
+    const feed = getSocialFeed(feedId)
+    if (!feed) {
+      await interaction.reply({ content: '❌ Feed not found.', ephemeral: true })
+      return
+    }
+    const modal = new ModalBuilder()
+      .setCustomId(`sudo:set:social:throttle_submit:${feedId}`)
+      .setTitle('Feed: max items per poll')
+      .addComponents(
+        new ActionRowBuilder<TextInputBuilder>().addComponents(
+          new TextInputBuilder()
+            .setCustomId('n')
+            .setLabel('Max items per poll (0 = latest only)')
+            .setStyle(TextInputStyle.Short)
+            .setRequired(true)
+            .setMinLength(1)
+            .setMaxLength(3)
+            .setPlaceholder('0 = latest only · sudo cap is 3 · bot owner unlimited')
+            .setValue(String(feed.maxItemsPerPoll)),
+        ),
+      )
+    await interaction.showModal(modal)
+    return
+  }
+
   if (id === 'sudo:set:profiles:csv_import') {
     if (!await requireSudo(interaction)) return
     const modal = new ModalBuilder()
@@ -1608,6 +1649,30 @@ export async function handleSettingsButton(interaction: ButtonInteraction): Prom
     const { updateAutoThreadChannel } = await import('../services/settings')
     await updateAutoThreadChannel(channelId, { archiveDuration })
     await interaction.editReply(renderAutoThreads() as any)
+    return
+  }
+
+  // #28 — Preview a feed's render style using its last actual item (no post)
+  if (id.startsWith('sudo:set:social:preview:')) {
+    const feedId = id.slice('sudo:set:social:preview:'.length)
+    const { getSocialFeed } = await import('../services/socialFeeds')
+    const { fetchAndParse, buildSocialPostPayload } = await import('../services/social/poller')
+    const feed = getSocialFeed(feedId)
+    if (!feed) {
+      await interaction.followUp({ content: '❌ Feed not found.', flags: MessageFlags.Ephemeral })
+      return
+    }
+    try {
+      const items = await fetchAndParse(feed.sourceUrl)
+      if (items.length === 0) {
+        await interaction.followUp({ content: '⚠️ Feed parsed but contained no items.', flags: MessageFlags.Ephemeral })
+        return
+      }
+      const payload = buildSocialPostPayload(feed, items[0])
+      await interaction.followUp({ ...payload, flags: MessageFlags.Ephemeral | MessageFlags.IsComponentsV2 } as any)
+    } catch (err) {
+      await interaction.followUp({ content: `⚠️ Preview failed: ${(err as Error).message}`, flags: MessageFlags.Ephemeral })
+    }
     return
   }
 
@@ -2104,6 +2169,27 @@ export async function handleSettingsStringSelect(interaction: StringSelectMenuIn
 
 export async function handleSettingsModalSubmit(interaction: ModalSubmitInteraction): Promise<void> {
   if (!await requireSudo(interaction)) return
+
+  // #29 — Save per-feed throttle
+  if (interaction.customId.startsWith('sudo:set:social:throttle_submit:')) {
+    const feedId = interaction.customId.slice('sudo:set:social:throttle_submit:'.length)
+    const raw = interaction.fields.getTextInputValue('n').trim()
+    const n = Number(raw)
+    if (!Number.isInteger(n) || n < 0 || n > 50) {
+      await interaction.reply({ content: '❌ Must be an integer 0–50.', ephemeral: true })
+      return
+    }
+    // Sudo cap is 3 per spec; bot owner can go higher.
+    const { isBotOwner } = await import('../services/botOwner')
+    if (n > 3 && !await isBotOwner(interaction.client, interaction.user.id)) {
+      await interaction.reply({ content: '❌ Sudo cap on max items is 3. Only a bot owner can set higher.', ephemeral: true })
+      return
+    }
+    const { setSocialFeedMaxItems } = await import('../services/socialFeeds')
+    await setSocialFeedMaxItems(feedId, n)
+    await interaction.reply({ content: `✅ Max items per poll set to **${n}**.`, ephemeral: true })
+    return
+  }
 
   // #18 — Bulk-import birthdays CSV
   if (interaction.customId === 'sudo:set:profiles:csv_submit') {

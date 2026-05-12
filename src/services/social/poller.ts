@@ -96,16 +96,25 @@ async function pollFeed(client: Client, feed: SocialFeed): Promise<void> {
     return
   }
 
+  // Apply per-feed throttle (#29). 0 = post only the single latest new item.
+  // Any other value caps the number of items posted this round; the rest get
+  // their `lastSeenId` bumped to the latest so they're not replayed but also
+  // don't flood the channel mid-life.
+  const max = feed.maxItemsPerPoll
+  const sliced = max === 0 ? fresh.slice(0, 1) : fresh.slice(0, max)
+
   // Post oldest-first so chronology in the channel matches the source.
   const channel = await resolveChannel(client, feed.channelId)
   if (!channel) {
     throw new Error(`channel ${feed.channelId} unavailable or not text-based`)
   }
-  for (const it of [...fresh].reverse()) {
+  for (const it of [...sliced].reverse()) {
     await channel.send(buildSocialPostPayload(feed, it) as any).catch((err: unknown) => {
       logger.warn(`Failed to send social post for "${feed.label}" item=${it.guid}:`, err)
     })
   }
+  // Mark the newest fresh item as seen even if it wasn't posted — otherwise
+  // the throttled-off items would resurface on every subsequent poll.
   await markSocialFeedSeen(feed.id, fresh[0].guid)
 }
 

@@ -19,6 +19,7 @@ export interface SocialFeed {
   lastSeenId: string | null
   lastPolledAt: Date | null
   lastError: string | null
+  maxItemsPerPoll: number
   createdByDiscordId: string | null
   createdAt: Date
 }
@@ -42,9 +43,16 @@ function toSocialFeed(r: typeof socialFeeds.$inferSelect): SocialFeed {
     lastSeenId: r.lastSeenId,
     lastPolledAt: r.lastPolledAt,
     lastError: r.lastError,
+    maxItemsPerPoll: r.maxItemsPerPoll,
     createdByDiscordId: r.createdByDiscordId,
     createdAt: r.createdAt,
   }
+}
+
+export async function setSocialFeedMaxItems(id: string, n: number): Promise<void> {
+  await db.update(socialFeeds).set({ maxItemsPerPoll: n }).where(eq(socialFeeds.id, id))
+  const cur = cache.get(id)
+  if (cur) cache.set(id, { ...cur, maxItemsPerPoll: n })
 }
 
 export function listSocialFeeds(): SocialFeed[] {
