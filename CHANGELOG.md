@@ -8,6 +8,8 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ## [Unreleased]
 
 ### Added
+- **`/sudo → Settings → Auto Threads` — per-channel thread name template editor (#26).** Channels in the list now show their template inline. New "Edit thread name template…" StringSelect opens a modal pre-filled with the current value; tokens `{author}` and `{content}` are supported. Blank submission resets to default (`{author} — {first line}`).
+- **`/sudo → Settings → Auto Threads` — per-channel thread archive duration (#27).** New "Set thread archive duration…" StringSelect routes to a sub-panel with four preset buttons (1h / 24h / 3d / 1w) plus Reset. Channel rows show the current setting; the currently-selected button is rendered in Success-green. Persisted as `archive_duration` minutes on `auto_thread_channels`; consumed by `messageCreate.ts` via the existing `archiveDuration` read.
 - **`/report` is locked for Discord accounts younger than 6 months (#17).** Common throwaway-account spam mitigation. Computes `createdAt + 6 months`, and if that's still in the future, replies ephemerally with the exact unlock time as a relative timestamp: _"Your Discord account is too new to file reports. /report unlocks for accounts older than 6 months — yours unlocks `<t:N:R>`."_ Sudo isn't bypass-special — they can request normally via the staff-request flow if their account is new enough.
 - **`/sudo → Settings → Archive` — in-depth manual channel-archive workflow (#15).** Manual, sudo-driven, opt-in safety model:
   - **Opt-in categories.** Nothing is scannable unless its parent category is explicitly opt-in via the Archive panel. Auto-channel text channels, hub voice channels, and already-archived channels are unconditionally excluded.

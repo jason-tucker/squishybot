@@ -205,6 +205,23 @@ export async function addAutoThreadChannel(
   autoThreadCache.set(channelId, cfg)
 }
 
+export async function updateAutoThreadChannel(
+  channelId: string,
+  patch: { nameTemplate?: string | null; archiveDuration?: number | null },
+): Promise<void> {
+  const existing = autoThreadCache.get(channelId)
+  if (!existing) return
+  const next: AutoThreadConfig = {
+    ...existing,
+    nameTemplate: patch.nameTemplate !== undefined ? patch.nameTemplate : existing.nameTemplate,
+    archiveDuration: patch.archiveDuration !== undefined ? patch.archiveDuration : existing.archiveDuration,
+  }
+  await db.update(autoThreadChannels)
+    .set({ nameTemplate: next.nameTemplate, archiveDuration: next.archiveDuration })
+    .where(eq(autoThreadChannels.channelId, channelId))
+  autoThreadCache.set(channelId, next)
+}
+
 export async function removeAutoThreadChannel(channelId: string): Promise<void> {
   await db.delete(autoThreadChannels).where(eq(autoThreadChannels.channelId, channelId))
   autoThreadCache.delete(channelId)

@@ -695,19 +695,28 @@ async function renderArchiveScanResults(client: any, guildId: string) {
   return { flags: MessageFlags.IsComponentsV2 as number, components }
 }
 
+const ARCHIVE_DURATION_LABEL: Record<number, string> = {
+  60: '1 hour',
+  1440: '24 hours',
+  4320: '3 days',
+  10080: '1 week',
+}
+
 function renderAutoThreads() {
   const channels = listAutoThreadChannels()
 
   const lines: string[] = [
     '### 🧵 Auto Threads',
     '_Channels in this list get an auto-created public thread on every non-bot message._',
-    '_Default thread name: `{author} — {first line of message}`._\n',
+    '_Default thread name: `{author} — {first line of message}`. Default archive: 24h._\n',
   ]
   if (channels.length === 0) {
     lines.push('_No channels configured. Pick one below to start auto-threading._')
   } else {
     for (const c of channels) {
-      lines.push(`• <#${c.channelId}>`)
+      const tpl = c.nameTemplate ? `\`${c.nameTemplate}\`` : '_default_'
+      const archive = c.archiveDuration ? ARCHIVE_DURATION_LABEL[c.archiveDuration] ?? `${c.archiveDuration}m` : '_default (24h)_'
+      lines.push(`• <#${c.channelId}> · template ${tpl} · archive ${archive}`)
     }
   }
 
@@ -740,6 +749,38 @@ function renderAutoThreads() {
           .setCustomId('sudo:set:autothread:remove')
           .setPlaceholder('Remove an auto-thread channel…')
           .addOptions(removeOptions)
+      )
+    )
+
+    // #26 — Edit name template
+    const editOptions = channels.slice(0, 25).map(c => ({
+      label: `<#${c.channelId}> — edit template`.slice(0, 100),
+      value: c.channelId,
+      emoji: '✏️',
+      description: (c.nameTemplate ?? 'default: {author} — {content}').slice(0, 100),
+    }))
+    components.push(
+      new ActionRowBuilder<MessageActionRowComponentBuilder>().addComponents(
+        new StringSelectMenuBuilder()
+          .setCustomId('sudo:set:autothread:edit_template')
+          .setPlaceholder('Edit thread name template…')
+          .addOptions(editOptions)
+      )
+    )
+
+    // #27 — Set archive duration (per channel)
+    const archiveOptions = channels.slice(0, 25).map(c => ({
+      label: `<#${c.channelId}> — archive duration`.slice(0, 100),
+      value: c.channelId,
+      emoji: '⏳',
+      description: (c.archiveDuration ? ARCHIVE_DURATION_LABEL[c.archiveDuration] ?? `${c.archiveDuration}m` : 'default (24h)').slice(0, 100),
+    }))
+    components.push(
+      new ActionRowBuilder<MessageActionRowComponentBuilder>().addComponents(
+        new StringSelectMenuBuilder()
+          .setCustomId('sudo:set:autothread:pick_for_archive')
+          .setPlaceholder('Set thread archive duration…')
+          .addOptions(archiveOptions)
       )
     )
   }
@@ -1220,6 +1261,23 @@ export async function handleSettingsButton(interaction: ButtonInteraction): Prom
     return
   }
 
+  // sudo:set:autothread:set_archive:{channelId}:{minutes|reset} — #27
+  if (id.startsWith('sudo:set:autothread:set_archive:')) {
+    const rest = id.slice('sudo:set:autothread:set_archive:'.length)
+    const lastColon = rest.lastIndexOf(':')
+    const channelId = rest.slice(0, lastColon)
+    const arg = rest.slice(lastColon + 1)
+    const archiveDuration = arg === 'reset' ? null : Number(arg)
+    if (arg !== 'reset' && (!Number.isFinite(archiveDuration) || ![60, 1440, 4320, 10080].includes(archiveDuration as number))) {
+      await interaction.followUp({ content: '❌ Invalid duration.', flags: MessageFlags.Ephemeral })
+      return
+    }
+    const { updateAutoThreadChannel } = await import('../services/settings')
+    await updateAutoThreadChannel(channelId, { archiveDuration })
+    await interaction.editReply(renderAutoThreads() as any)
+    return
+  }
+
   // sudo:set:archive:scan — run the scanner and switch to results panel
   if (id === 'sudo:set:archive:scan') {
     await interaction.editReply((await renderArchiveScanResults(interaction.client, interaction.guildId!)) as any)
@@ -1489,6 +1547,66 @@ export async function handleSettingsStringSelect(interaction: StringSelectMenuIn
     await interaction.showModal(modal)
     return
   }
+  if (id === 'sudo:set:autothread:edit_template') {
+    const channelId = interaction.values[0]
+    if (!channelId) return
+    const cfg = listAutoThreadChannels().find(c => c.channelId === channelId)
+    const modal = new ModalBuilder()
+      .setCustomId(`sudo:set:autothread:template_submit:${channelId}`)
+      .setTitle('Auto-thread name template')
+      .addComponents(
+        new ActionRowBuilder<TextInputBuilder>().addComponents(
+          new TextInputBuilder()
+            .setCustomId('template')
+            .setLabel('Template (blank to reset to default)')
+            .setStyle(TextInputStyle.Short)
+            .setRequired(false)
+            .setMaxLength(100)
+            .setPlaceholder('{author} — {content}')
+            .setValue(cfg?.nameTemplate ?? ''),
+        ),
+      )
+    await interaction.showModal(modal)
+    return
+  }
+  if (id === 'sudo:set:autothread:pick_for_archive') {
+    const channelId = interaction.values[0]
+    if (!channelId) return
+    const cfg = listAutoThreadChannels().find(c => c.channelId === channelId)
+    const current = cfg?.archiveDuration
+    const lines = [
+      '### ⏳ Thread archive duration',
+      `Channel: <#${channelId}>`,
+      `Current: ${current ? ARCHIVE_DURATION_LABEL[current] ?? `${current}m` : '_default (24h)_'}`,
+    ]
+    const container = new ContainerBuilder()
+      .setAccentColor(0x57f287)
+      .addTextDisplayComponents(new TextDisplayBuilder().setContent(lines.join('\n')))
+    const presets = [
+      { label: '1 hour',   minutes: 60 },
+      { label: '24 hours', minutes: 1440 },
+      { label: '3 days',   minutes: 4320 },
+      { label: '1 week',   minutes: 10080 },
+    ]
+    const row = new ActionRowBuilder<MessageActionRowComponentBuilder>().addComponents(
+      ...presets.map(p =>
+        new ButtonBuilder()
+          .setCustomId(`sudo:set:autothread:set_archive:${channelId}:${p.minutes}`)
+          .setLabel(p.label)
+          .setStyle(current === p.minutes ? ButtonStyle.Success : ButtonStyle.Secondary),
+      ),
+      new ButtonBuilder()
+        .setCustomId(`sudo:set:autothread:set_archive:${channelId}:reset`)
+        .setLabel('Reset')
+        .setEmoji('♻️')
+        .setStyle(ButtonStyle.Secondary),
+    )
+    const back = new ActionRowBuilder<MessageActionRowComponentBuilder>().addComponents(
+      new ButtonBuilder().setCustomId('sudo:set:nav:auto_threads').setLabel('Back to Auto Threads').setStyle(ButtonStyle.Secondary),
+    )
+    await interaction.update({ flags: MessageFlags.IsComponentsV2, components: [container, row, back] } as any)
+    return
+  }
   if (id === 'sudo:set:hub_lockdown:unlock_one') {
     const channelId = interaction.values[0]
     if (!channelId) return
@@ -1536,6 +1654,17 @@ export async function handleSettingsStringSelect(interaction: StringSelectMenuIn
 
 export async function handleSettingsModalSubmit(interaction: ModalSubmitInteraction): Promise<void> {
   if (!await requireSudo(interaction)) return
+
+  // #26 Auto-thread template editor — modal submit
+  if (interaction.customId.startsWith('sudo:set:autothread:template_submit:')) {
+    const channelId = interaction.customId.slice('sudo:set:autothread:template_submit:'.length)
+    const raw = interaction.fields.getTextInputValue('template').trim()
+    const nameTemplate = raw.length > 0 ? raw : null
+    const { updateAutoThreadChannel } = await import('../services/settings')
+    await updateAutoThreadChannel(channelId, { nameTemplate })
+    await interaction.reply({ content: nameTemplate ? `✅ Template set to \`${nameTemplate}\`.` : '✅ Template reset to default.', ephemeral: true })
+    return
+  }
 
   // Archive: set the stale-threshold (days)
   if (interaction.customId === 'sudo:set:archive:edit_threshold_submit') {
