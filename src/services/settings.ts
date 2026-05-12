@@ -345,6 +345,36 @@ export async function unregisterHubChannel(channelId: string): Promise<void> {
   hubsCache.delete(channelId)
 }
 
+/**
+ * Re-read every `hub_channels` row from the DB and rebuild the in-memory
+ * `hubsCache`. Used by the `hub.refresh_cache` RPC verb so panel-side
+ * DB-only CRUD takes effect immediately without redeploying.
+ *
+ * Unlike `loadSettings()` this only touches the hubs cache — settings,
+ * sudo users, auto threads, etc. stay put so we don't accidentally clear
+ * other state on a hub-only refresh.
+ *
+ * Returns the new hub count so callers can confirm what landed.
+ */
+export async function reloadHubsCache(): Promise<number> {
+  const hubs = await db.select().from(hubChannels)
+  hubsCache.clear()
+  for (const h of hubs) {
+    hubsCache.set(h.channelId, {
+      id: h.id,
+      channelId: h.channelId,
+      guildId: h.guildId,
+      categoryId: h.categoryId,
+      position: h.position,
+      label: h.label,
+      defaultTemplateKey: h.defaultTemplateKey,
+      defaultManualName: h.defaultManualName,
+      defaultUserLimit: h.defaultUserLimit,
+    })
+  }
+  return hubs.length
+}
+
 /** Update the cached hub's tracked channelId after the reconciler creates a replacement. */
 export function updateHubChannelId(oldChannelId: string, newChannelId: string): void {
   const hub = hubsCache.get(oldChannelId)
