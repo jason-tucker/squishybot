@@ -7,6 +7,12 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### Changed
+- **Startup DM is now a Components V2 card** instead of a markdown blob. Same content (bot tag, booted-relative timestamp, version + git SHA, primary guild, reconciler results, disabled feature flags) but rendered in a green-accented `ContainerBuilder` with separators between sections. Still env-only target (`BOT_OWNER_ID`).
+
+### Security
+- **Postgres host port closed.** `5434` is no longer bound to `0.0.0.0`; the DB is reachable only over the new shared `botpanel-net` external docker network (alias `db-squishy`) and through `docker exec` from the VPS host. External port scans now show `5434/tcp` as closed/filtered.
+
 ### Added
 - **`/sudo → Settings → Debug` sub-panel — bot-owner diagnostic surfaces (#16, #33, #34).** New navigation tile on the Settings home. Three actions on the panel:
   - **Feature flags (#33)** — bot-owner-only toggles for `feature.auto_voice`, `feature.auto_threads`, `feature.social_poller`, `feature.presence_renames`, `feature.birthday_pings`, `feature.color_roles`. Each gates the relevant entry point at runtime (`handleHubJoin`, `maybeAutoThread`, social `runPoll`, `presenceUpdate`, birthday `runForDate`). Existing in-flight state isn't disturbed — flipping `feature.auto_voice` off just makes new hub joins no-op.

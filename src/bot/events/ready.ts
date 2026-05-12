@@ -1,4 +1,4 @@
-import type { Client } from 'discord.js'
+import { ContainerBuilder, MessageFlags, SeparatorBuilder, SeparatorSpacingSize, TextDisplayBuilder, type Client } from 'discord.js'
 import { startHealthPush } from '../healthPush'
 import { runReconciler } from '../../services/voice/reconciler'
 import { logger, attachClientToLogger } from '../../services/logger'
@@ -11,6 +11,12 @@ import { startSocialPoller } from '../../services/social/poller'
 import { startBirthdayScheduler } from '../../services/birthdayScheduler'
 import { logResolvedBotOwners } from '../../services/botOwner'
 import { getBoolSetting } from '../../services/settings'
+
+const SUPPRESS_NOTIFICATIONS = 1 << 12  // MessageFlags.SuppressNotifications
+
+function sep() {
+  return new SeparatorBuilder().setSpacing(SeparatorSpacingSize.Small).setDivider(true)
+}
 
 export function registerReadyEvent(client: Client) {
   client.once('clientReady', async (c) => {
@@ -75,29 +81,50 @@ export function registerReadyEvent(client: Client) {
     ]
     const offFlags = flagKeys.filter(([k, , def]) => !getBoolSetting(k, def)).map(([, label]) => label)
 
-    const lines: string[] = [
-      '## 🟢 SquishyBot is up',
-      '',
+    // Build a Components V2 card. Visually richer than markdown — colored
+    // accent bar on the side, distinct sections separated by dividers.
+    const headerLines = [
       `**${c.user.tag}** · booted <t:${nowSec}:R>`,
-      `**Version:** \`${version}\` · **Build:** \`${sha}\``,
-      `**Primary guild:** ${guildName} (\`${env.GUILD_ID}\`)`,
+      `**Version** \`${version}\` · **Build** \`${sha}\``,
+      `**Primary guild** ${guildName} (\`${env.GUILD_ID}\`)`,
     ]
-    if (otherGuilds.length > 0) lines.push(`**Also in:** ${otherGuilds.join(', ')}`)
-    lines.push('')
+    if (otherGuilds.length > 0) headerLines.push(`**Also in** ${otherGuilds.join(', ')}`)
+
+    const container = new ContainerBuilder()
+      .setAccentColor(0x57f287)  // green = healthy boot
+      .addTextDisplayComponents(new TextDisplayBuilder().setContent('## 🟢 SquishyBot is up'))
+      .addSeparatorComponents(sep())
+      .addTextDisplayComponents(new TextDisplayBuilder().setContent(headerLines.join('\n')))
+
     if (result) {
-      lines.push('### 🔧 Reconciler')
-      lines.push(`• Recovered: **${result.recovered}**`)
-      lines.push(`• Cleaned: **${result.cleaned}**`)
-      lines.push(`• Hubs: **${result.hubs}**`)
-      lines.push(`• Panels rebuilt: **${result.panels}**`)
-      lines.push('')
+      container.addSeparatorComponents(sep()).addTextDisplayComponents(new TextDisplayBuilder().setContent(
+        '### 🔧 Reconciler\n' +
+        `• Recovered **${result.recovered}**\n` +
+        `• Cleaned **${result.cleaned}**\n` +
+        `• Hubs **${result.hubs}**\n` +
+        `• Panels rebuilt **${result.panels}**`
+      ))
     }
-    lines.push('### 🚦 Feature flags')
-    lines.push(offFlags.length === 0 ? '_All defaults active._' : `_Disabled:_ ${offFlags.join(', ')}`)
-    lines.push('')
-    lines.push('_Ready to roll. Run `/sudo` for the admin panel._')
+
+    container.addSeparatorComponents(sep()).addTextDisplayComponents(new TextDisplayBuilder().setContent(
+      '### 🚦 Feature flags\n' +
+      (offFlags.length === 0 ? '_All defaults active._' : `_Disabled:_ ${offFlags.join(', ')}`)
+    ))
+
+    container.addSeparatorComponents(sep()).addTextDisplayComponents(new TextDisplayBuilder().setContent(
+      '_Ready to roll. Run `/sudo` for the admin panel._'
+    ))
 
     // Silent — successful boot is informational, not a notification.
-    await logger.dmOwner(lines.join('\n'), c, { silent: true })
+    // logger.dmOwner only supports plain content; send the CV2 payload directly.
+    if (env.BOT_OWNER_ID) {
+      const owner = await c.users.fetch(env.BOT_OWNER_ID).catch(() => null)
+      if (owner) {
+        await owner.send({
+          flags: (MessageFlags.IsComponentsV2 as number) | SUPPRESS_NOTIFICATIONS,
+          components: [container],
+        } as any).catch(() => {})
+      }
+    }
   })
 }
