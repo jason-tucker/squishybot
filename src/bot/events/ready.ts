@@ -11,6 +11,7 @@ import { startSocialPoller } from '../../services/social/poller'
 import { startBirthdayScheduler } from '../../services/birthdayScheduler'
 import { logResolvedBotOwners } from '../../services/botOwner'
 import { getBoolSetting } from '../../services/settings'
+import { publishHeartbeat, publishReady } from '../../services/eventBus'
 
 const SUPPRESS_NOTIFICATIONS = 1 << 12  // MessageFlags.SuppressNotifications
 
@@ -47,6 +48,13 @@ export function registerReadyEvent(client: Client) {
     const { loadReactionRoles, startReactionRoleCleanup } = await import('../../services/reactionRoles')
     await loadReactionRoles().catch(err => logger.error('Failed to load reaction roles on startup', err))
     startReactionRoleCleanup(c)
+
+    // Redis fan-out — one-shot ready event + 60s heartbeat. Both go on
+    // bot.squishy.bot.{ready,heartbeat}. publishHeartbeat is non-blocking
+    // and never throws (eventBus.publish wraps errors in logger.warn), so
+    // a downed Redis won't impact the bot.
+    void publishReady(c)
+    setInterval(() => { void publishHeartbeat(c) }, 60_000)
 
     const guild = c.guilds.cache.get(env.GUILD_ID)
     const guildName = guild?.name ?? '(not a member)'
