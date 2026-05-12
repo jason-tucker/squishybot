@@ -443,9 +443,109 @@ function renderHubs() {
 
   components.push(
     new ActionRowBuilder<MessageActionRowComponentBuilder>().addComponents(
-      new ButtonBuilder().setCustomId('sudo:set:home').setLabel('Back').setStyle(ButtonStyle.Secondary)
+      new ButtonBuilder().setCustomId('sudo:set:home').setLabel('Back').setStyle(ButtonStyle.Secondary),
+      new ButtonBuilder().setCustomId('sudo:set:nav:hub_lockdown').setLabel('Lockdown').setEmoji('🚨').setStyle(ButtonStyle.Danger),
     )
   )
+  return { flags: MessageFlags.IsComponentsV2 as number, components }
+}
+
+async function renderHubLockdown() {
+  const { getServerLockUntil } = await import('../services/voice/hubLockdown')
+  const hubs = listHubs()
+  const now = Date.now()
+  const serverUntil = getServerLockUntil()
+  const lockedHubs = hubs.filter(h => {
+    // Cache doesn't know lockdown_until — read fresh from DB.
+    return false  // placeholder; filled below
+  })
+
+  // Read fresh lockdown state from DB for these hubs.
+  const { db } = await import('../db/client')
+  const { hubChannels } = await import('../db/schema')
+  const rows = await db.select().from(hubChannels)
+  const lockMap = new Map<string, Date | null>(rows.map(r => [r.channelId, r.lockdownUntil]))
+
+  const lines: string[] = [
+    '### 🚨 Hub Lockdown',
+    '_Temporarily deny `Connect` on hub voice channels so nobody can join._',
+    '_Server-wide lockdown is **bot-owner-only**. Per-hub is sudo-accessible._\n',
+  ]
+  if (serverUntil) {
+    lines.push(`🔴 **Server-wide lockdown active** — expires <t:${Math.floor(serverUntil.getTime() / 1000)}:R>`)
+  } else {
+    lines.push('🟢 Server-wide: not locked')
+  }
+  lines.push('')
+  for (const h of hubs) {
+    const until = lockMap.get(h.channelId)
+    if (until && until.getTime() > now) {
+      lines.push(`🔴 <#${h.channelId}> _${h.label}_ — locked until <t:${Math.floor(until.getTime() / 1000)}:R>`)
+    } else {
+      lines.push(`🟢 <#${h.channelId}> _${h.label}_`)
+    }
+  }
+
+  const container = new ContainerBuilder()
+    .setAccentColor(0xed4245)
+    .addTextDisplayComponents(new TextDisplayBuilder().setContent(lines.join('\n')))
+
+  const components: any[] = [container]
+
+  // Lock-all (bot-owner-only — enforced in handler) — preset durations.
+  components.push(
+    new ActionRowBuilder<MessageActionRowComponentBuilder>().addComponents(
+      new ButtonBuilder().setCustomId('sudo:set:hub_lockdown:lock_all:15').setLabel('Lock all 15m').setEmoji('🔒').setStyle(ButtonStyle.Danger),
+      new ButtonBuilder().setCustomId('sudo:set:hub_lockdown:lock_all:60').setLabel('Lock all 1h').setEmoji('🔒').setStyle(ButtonStyle.Danger),
+      new ButtonBuilder().setCustomId('sudo:set:hub_lockdown:lock_all:240').setLabel('Lock all 4h').setEmoji('🔒').setStyle(ButtonStyle.Danger),
+      new ButtonBuilder().setCustomId('sudo:set:hub_lockdown:unlock_all').setLabel('Unlock all').setEmoji('🔓').setStyle(ButtonStyle.Success).setDisabled(!serverUntil),
+    )
+  )
+
+  if (hubs.length > 0) {
+    const lockOptions = hubs.slice(0, 25).map(h => ({
+      label: (h.label || h.channelId).slice(0, 100),
+      value: h.channelId,
+      emoji: '🔒',
+      description: `<#${h.channelId}>`.slice(0, 100),
+    }))
+    components.push(
+      new ActionRowBuilder<MessageActionRowComponentBuilder>().addComponents(
+        new StringSelectMenuBuilder()
+          .setCustomId('sudo:set:hub_lockdown:lock_one_pick')
+          .setPlaceholder('Lock an individual hub…')
+          .addOptions(lockOptions)
+      )
+    )
+
+    const currentlyLocked = hubs.filter(h => {
+      const u = lockMap.get(h.channelId)
+      return u && u.getTime() > now
+    })
+    if (currentlyLocked.length > 0) {
+      const unlockOptions = currentlyLocked.slice(0, 25).map(h => ({
+        label: (h.label || h.channelId).slice(0, 100),
+        value: h.channelId,
+        emoji: '🔓',
+        description: `<#${h.channelId}>`.slice(0, 100),
+      }))
+      components.push(
+        new ActionRowBuilder<MessageActionRowComponentBuilder>().addComponents(
+          new StringSelectMenuBuilder()
+            .setCustomId('sudo:set:hub_lockdown:unlock_one')
+            .setPlaceholder('Unlock an individual hub…')
+            .addOptions(unlockOptions)
+        )
+      )
+    }
+  }
+
+  components.push(
+    new ActionRowBuilder<MessageActionRowComponentBuilder>().addComponents(
+      new ButtonBuilder().setCustomId('sudo:set:nav:hubs').setLabel('Back to Hubs').setStyle(ButtonStyle.Secondary)
+    )
+  )
+
   return { flags: MessageFlags.IsComponentsV2 as number, components }
 }
 
@@ -858,6 +958,8 @@ export async function handleSettingsButton(interaction: ButtonInteraction): Prom
       await interaction.editReply(renderVoice() as any)
     } else if (category === 'hubs') {
       await interaction.editReply(renderHubs() as any)
+    } else if (category === 'hub_lockdown') {
+      await interaction.editReply((await renderHubLockdown()) as any)
     } else if (category === 'auto_threads') {
       await interaction.editReply(renderAutoThreads() as any)
     } else if (category === 'staff_roles') {
@@ -943,6 +1045,38 @@ export async function handleSettingsButton(interaction: ButtonInteraction): Prom
     const { removeSocialFeed } = await import('../services/socialFeeds')
     await removeSocialFeed(feedId)
     await interaction.editReply((await renderSocials()) as any)
+    return
+  }
+
+  // sudo:set:hub_lockdown:lock_all:{minutes} — bot-owner-only guild-wide hub lock
+  if (id.startsWith('sudo:set:hub_lockdown:lock_all:')) {
+    const { isBotOwner } = await import('../services/botOwner')
+    if (!await isBotOwner(interaction.client, interaction.user.id)) {
+      await interaction.followUp({ content: '❌ Server-wide hub lockdown is bot-owner-only.', flags: MessageFlags.Ephemeral })
+      return
+    }
+    const minutes = Number(id.slice('sudo:set:hub_lockdown:lock_all:'.length))
+    if (!Number.isFinite(minutes) || minutes <= 0) {
+      await interaction.followUp({ content: '❌ Invalid duration.', flags: MessageFlags.Ephemeral })
+      return
+    }
+    const { lockAllHubs } = await import('../services/voice/hubLockdown')
+    const until = new Date(Date.now() + minutes * 60_000)
+    await lockAllHubs(interaction.client, interaction.guildId!, until)
+    await interaction.editReply((await renderHubLockdown()) as any)
+    return
+  }
+
+  // sudo:set:hub_lockdown:unlock_all — bot-owner-only
+  if (id === 'sudo:set:hub_lockdown:unlock_all') {
+    const { isBotOwner } = await import('../services/botOwner')
+    if (!await isBotOwner(interaction.client, interaction.user.id)) {
+      await interaction.followUp({ content: '❌ Server-wide hub lockdown is bot-owner-only.', flags: MessageFlags.Ephemeral })
+      return
+    }
+    const { unlockAllHubs } = await import('../services/voice/hubLockdown')
+    await unlockAllHubs(interaction.client, interaction.guildId!)
+    await interaction.editReply((await renderHubLockdown()) as any)
     return
   }
 
@@ -1133,10 +1267,55 @@ export async function handleSettingsStringSelect(interaction: StringSelectMenuIn
     if (feedId) await interaction.update((await renderSocialDetail(feedId)) as any)
     return
   }
+  if (id === 'sudo:set:hub_lockdown:lock_one_pick') {
+    const channelId = interaction.values[0]
+    if (!channelId) return
+    const modal = new ModalBuilder()
+      .setCustomId(`sudo:set:hub_lockdown:lock_one_submit:${channelId}`)
+      .setTitle('Lock hub')
+      .addComponents(
+        new ActionRowBuilder<TextInputBuilder>().addComponents(
+          new TextInputBuilder()
+            .setCustomId('minutes')
+            .setLabel('Duration in minutes (1–1440)')
+            .setStyle(TextInputStyle.Short)
+            .setRequired(true)
+            .setMinLength(1)
+            .setMaxLength(4)
+            .setPlaceholder('60')
+        ),
+      )
+    await interaction.showModal(modal)
+    return
+  }
+  if (id === 'sudo:set:hub_lockdown:unlock_one') {
+    const channelId = interaction.values[0]
+    if (!channelId) return
+    const { unlockHub } = await import('../services/voice/hubLockdown')
+    await unlockHub(interaction.client, interaction.guildId!, channelId)
+    await interaction.update((await renderHubLockdown()) as any)
+    return
+  }
 }
 
 export async function handleSettingsModalSubmit(interaction: ModalSubmitInteraction): Promise<void> {
   if (!await requireSudo(interaction)) return
+
+  // Per-hub lockdown modal — sets lockdown_until on a single hub.
+  if (interaction.customId.startsWith('sudo:set:hub_lockdown:lock_one_submit:')) {
+    const channelId = interaction.customId.slice('sudo:set:hub_lockdown:lock_one_submit:'.length)
+    const raw = interaction.fields.getTextInputValue('minutes').trim()
+    const minutes = Number(raw)
+    if (!Number.isInteger(minutes) || minutes < 1 || minutes > 1440) {
+      await interaction.reply({ content: '❌ Duration must be an integer 1–1440 (minutes).', ephemeral: true })
+      return
+    }
+    const { lockHub } = await import('../services/voice/hubLockdown')
+    const until = new Date(Date.now() + minutes * 60_000)
+    await lockHub(interaction.client, interaction.guildId!, channelId, until)
+    await interaction.reply({ content: `✅ Hub locked until <t:${Math.floor(until.getTime() / 1000)}:R>.`, ephemeral: true })
+    return
+  }
 
   // Per-hub defaults editor modal — sets template / manual name / user limit on hub_channels.
   if (interaction.customId.startsWith('sudo:set:hub:defaults_submit:')) {
