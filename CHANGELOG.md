@@ -9,6 +9,14 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ### Added
 
+- **`staff.request` RPC verb** — panel-side self-service "Request a staff role" flow. Mirrors the `/settings → Staff Role` modal exactly: inserts a `staff_approvals` row and posts the same Components V2 approval card (with Approve/Deny buttons) to `STAFF_APPROVAL_THREAD_ID`, pinging `STAFF_APPROVAL_PING_USER_ID` if set. The submit logic is extracted to a shared `staffRequestService.ts` so modal + RPC produce byte-identical Discord output. Returns `{approvalId, approvalMsgId, roleLabel}`; structured errors for `unknown-role` / `thread-unset` / `thread-not-thread` / `send-failed` (in which case the row is still saved and the panel surfaces a "saved but post failed" message).
+
+### Changed
+
+- **`interactions/modals/staffRequest.ts` now delegates to `staffRequestService.submitStaffRequest()`.** No behavior change — same row shape, same card, same ping. Refactor exists so the new `staff.request` verb shares one canonical implementation.
+
+### Added
+
 - **Three meta RPC verbs (`meta.list_roles`, `meta.list_channels`, `meta.list_members`)** — read-only listings powering panel-side pickers. Pure cache reads; zero Discord API hits. Members verb supports query+limit for typeahead.
 - **`users.resolve` RPC verb** — batch lookup of `[{id, username, displayName, avatarUrl}]` for up to 100 snowflakes. Pure cache read; returns null fields for users the bot doesn't have cached so the panel can fall back to displaying the raw id.
 
