@@ -10,3 +10,4 @@
  */
 import './grant'
 import './revoke'
+import './request'
