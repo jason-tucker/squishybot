@@ -4,7 +4,7 @@ import { db } from '../../db/client'
 import { autoChannels } from '../../db/schema'
 import { eq } from 'drizzle-orm'
 import { env } from '../../config/env'
-import { getSetting, trackAutoChannelText, trackAutoChannelVoice, untrackAutoChannelText, untrackAutoChannelVoice } from '../settings'
+import { getHubInfo, getSetting, trackAutoChannelText, trackAutoChannelVoice, untrackAutoChannelText, untrackAutoChannelVoice } from '../settings'
 import type { AutoChannelRecord } from '../../types/voice'
 import { postOrUpdateControlPanel, clearPanelHash } from './controlPanel'
 import { postOrUpdateSticky } from './sticky'
@@ -25,13 +25,24 @@ export async function createAutoChannel(
 ): Promise<AutoChannelRecord | null> {
   const botId = client.user!.id
 
-  // 1. Rename the existing hub voice channel and move it to position 0 (top of category)
-  await existingVoiceChannel.edit({ name: channelName, position: 0 }).catch(err =>
+  // Per-hub defaults override the bot's built-in defaults. {member} in the
+  // manual name template substitutes to the joiner's display name. Each
+  // field is independent: any combination can be null.
+  const hubDefaults = getHubInfo(sourceHubId)
+  const overrideManualName = hubDefaults?.defaultManualName
+    ? hubDefaults.defaultManualName.replace(/\{member\}/gi, owner.displayName).slice(0, 100)
+    : null
+  const effectiveName = overrideManualName ?? channelName
+  const effectiveUserLimit = hubDefaults?.defaultUserLimit ?? 0
+
+  // 1. Rename the existing hub voice channel and move it to position 0 (top of category).
+  // userLimit is bundled into this edit so it takes effect immediately if a hub default applies.
+  await existingVoiceChannel.edit({ name: effectiveName, position: 0, userLimit: effectiveUserLimit }).catch(err =>
     logger.warn('Failed to rename/reposition hub channel in place:', err)
   )
 
   // 2. Create the attached text channel at position 0 (top of category, same name as voice)
-  const textChannelName = channelName.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'voice-chat'
+  const textChannelName = effectiveName.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'voice-chat'
   let textChannel
   try {
     textChannel = await guild.channels.create({
@@ -67,7 +78,15 @@ export async function createAutoChannel(
       textChannelId: textChannel.id,
       ownerUserId: owner.id,
       sourceHubId,
-      fallbackName: channelName,
+      fallbackName: effectiveName,
+      // Per-hub defaults flow into the auto-channel record so they survive
+      // reboots and panel renders show the right template + state.
+      nameTemplate: hubDefaults?.defaultTemplateKey ?? null,
+      manualName: overrideManualName,
+      userLimit: effectiveUserLimit,
+      // Hub-pinned manual name implies the user picked their fixed name —
+      // auto-rename shouldn't churn it on presence changes.
+      autoNameEnabled: !overrideManualName,
     }).returning()
     record = row
   } catch (err: any) {

@@ -32,6 +32,9 @@ export interface HubInfo {
   categoryId: string
   position: number
   label: string
+  defaultTemplateKey: string | null
+  defaultManualName: string | null
+  defaultUserLimit: number | null
 }
 const hubsCache = new Map<string, HubInfo>()  // keyed by channelId
 
@@ -76,6 +79,9 @@ export async function loadSettings(): Promise<void> {
       categoryId: h.categoryId,
       position: h.position,
       label: h.label,
+      defaultTemplateKey: h.defaultTemplateKey,
+      defaultManualName: h.defaultManualName,
+      defaultUserLimit: h.defaultUserLimit,
     })
   }
   for (const a of autos) {
@@ -248,7 +254,36 @@ export async function registerHubChannel(input: {
     categoryId: final.categoryId,
     position: final.position,
     label: final.label,
+    defaultTemplateKey: final.defaultTemplateKey,
+    defaultManualName: final.defaultManualName,
+    defaultUserLimit: final.defaultUserLimit,
   })
+}
+
+/**
+ * Update the per-hub auto-channel defaults. Pass null for any field to clear
+ * that override (bot falls back to built-in defaults).
+ */
+export async function setHubDefaults(
+  channelId: string,
+  defaults: { templateKey: string | null; manualName: string | null; userLimit: number | null },
+): Promise<void> {
+  await db.update(hubChannels)
+    .set({
+      defaultTemplateKey: defaults.templateKey,
+      defaultManualName: defaults.manualName,
+      defaultUserLimit: defaults.userLimit,
+    })
+    .where(eq(hubChannels.channelId, channelId))
+  const cached = hubsCache.get(channelId)
+  if (cached) {
+    hubsCache.set(channelId, {
+      ...cached,
+      defaultTemplateKey: defaults.templateKey,
+      defaultManualName: defaults.manualName,
+      defaultUserLimit: defaults.userLimit,
+    })
+  }
 }
 
 export async function unregisterHubChannel(channelId: string): Promise<void> {

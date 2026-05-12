@@ -381,7 +381,12 @@ function renderHubs() {
     lines.push('_No hubs registered. Pick a voice channel below to register one._')
   } else {
     for (const h of hubs) {
-      lines.push(`• <#${h.channelId}>  _${h.label}_  · category <#${h.categoryId}>`)
+      const def: string[] = []
+      if (h.defaultTemplateKey) def.push(`template \`${h.defaultTemplateKey}\``)
+      if (h.defaultManualName) def.push(`name \`${h.defaultManualName}\``)
+      if (h.defaultUserLimit && h.defaultUserLimit > 0) def.push(`limit \`${h.defaultUserLimit}\``)
+      const defaultsLine = def.length > 0 ? `  · defaults: ${def.join(', ')}` : ''
+      lines.push(`• <#${h.channelId}>  _${h.label}_  · category <#${h.categoryId}>${defaultsLine}`)
     }
   }
   if (env.HUB_CHANNEL_IDS.length > 0) {
@@ -417,6 +422,21 @@ function renderHubs() {
           .setCustomId('sudo:set:hub:remove')
           .setPlaceholder('Unregister a hub…')
           .addOptions(removeOptions)
+      )
+    )
+
+    const editOptions = hubs.slice(0, 25).map(h => ({
+      label: (h.label || h.channelId).slice(0, 100),
+      value: h.channelId,
+      emoji: '✏️',
+      description: 'Edit defaults: template, name, user limit'.slice(0, 100),
+    }))
+    components.push(
+      new ActionRowBuilder<MessageActionRowComponentBuilder>().addComponents(
+        new StringSelectMenuBuilder()
+          .setCustomId('sudo:set:hub:edit_defaults')
+          .setPlaceholder('Edit defaults for a hub…')
+          .addOptions(editOptions)
       )
     )
   }
@@ -1062,6 +1082,52 @@ export async function handleSettingsStringSelect(interaction: StringSelectMenuIn
     await interaction.update(renderHubs() as any)
     return
   }
+  if (id === 'sudo:set:hub:edit_defaults') {
+    const channelId = interaction.values[0]
+    if (!channelId) return
+    const hub = listHubs().find(h => h.channelId === channelId)
+    if (!hub) {
+      await interaction.reply({ content: '❌ Hub not found.', ephemeral: true })
+      return
+    }
+    const modal = new ModalBuilder()
+      .setCustomId(`sudo:set:hub:defaults_submit:${channelId}`)
+      .setTitle(`Hub defaults — ${hub.label.slice(0, 30)}`)
+      .addComponents(
+        new ActionRowBuilder<TextInputBuilder>().addComponents(
+          new TextInputBuilder()
+            .setCustomId('template')
+            .setLabel('Template (blank = bot default)')
+            .setStyle(TextInputStyle.Short)
+            .setRequired(false)
+            .setMaxLength(20)
+            .setPlaceholder('auto, counter, squad, detail, state, party, stealth')
+            .setValue(hub.defaultTemplateKey ?? '')
+        ),
+        new ActionRowBuilder<TextInputBuilder>().addComponents(
+          new TextInputBuilder()
+            .setCustomId('manual_name')
+            .setLabel('Manual name (blank = auto-generated)')
+            .setStyle(TextInputStyle.Short)
+            .setRequired(false)
+            .setMaxLength(100)
+            .setPlaceholder('{member}\'s lounge — supports {member} token')
+            .setValue(hub.defaultManualName ?? '')
+        ),
+        new ActionRowBuilder<TextInputBuilder>().addComponents(
+          new TextInputBuilder()
+            .setCustomId('user_limit')
+            .setLabel('User limit (0 or blank = no limit)')
+            .setStyle(TextInputStyle.Short)
+            .setRequired(false)
+            .setMaxLength(2)
+            .setPlaceholder('0–99')
+            .setValue(hub.defaultUserLimit && hub.defaultUserLimit > 0 ? String(hub.defaultUserLimit) : '')
+        ),
+      )
+    await interaction.showModal(modal)
+    return
+  }
   if (id === 'sudo:set:social:pick') {
     const feedId = interaction.values[0]
     if (feedId) await interaction.update((await renderSocialDetail(feedId)) as any)
@@ -1071,6 +1137,38 @@ export async function handleSettingsStringSelect(interaction: StringSelectMenuIn
 
 export async function handleSettingsModalSubmit(interaction: ModalSubmitInteraction): Promise<void> {
   if (!await requireSudo(interaction)) return
+
+  // Per-hub defaults editor modal — sets template / manual name / user limit on hub_channels.
+  if (interaction.customId.startsWith('sudo:set:hub:defaults_submit:')) {
+    const channelId = interaction.customId.slice('sudo:set:hub:defaults_submit:'.length)
+    const rawTemplate = interaction.fields.getTextInputValue('template').trim().toLowerCase()
+    const rawName     = interaction.fields.getTextInputValue('manual_name').trim()
+    const rawLimit    = interaction.fields.getTextInputValue('user_limit').trim()
+
+    const ALLOWED_TEMPLATES = new Set(['auto', 'counter', 'squad', 'detail', 'state', 'party', 'stealth'])
+    if (rawTemplate && !ALLOWED_TEMPLATES.has(rawTemplate)) {
+      await interaction.reply({ content: `❌ Template must be one of: ${[...ALLOWED_TEMPLATES].join(', ')}. Got: \`${rawTemplate}\``, ephemeral: true })
+      return
+    }
+    let parsedLimit: number | null = null
+    if (rawLimit) {
+      const n = Number(rawLimit)
+      if (!Number.isInteger(n) || n < 0 || n > 99) {
+        await interaction.reply({ content: '❌ User limit must be an integer 0–99.', ephemeral: true })
+        return
+      }
+      parsedLimit = n
+    }
+
+    const { setHubDefaults } = await import('../services/settings')
+    await setHubDefaults(channelId, {
+      templateKey: rawTemplate || null,
+      manualName: rawName || null,
+      userLimit: parsedLimit,
+    })
+    await interaction.reply({ content: '✅ Hub defaults saved. They\'ll apply on the next hub join.', ephemeral: true })
+    return
+  }
 
   // Social feed Add Feed modal — separate code path (not a generic key/value setting).
   if (interaction.customId === 'sudo:set:social:add_submit') {
