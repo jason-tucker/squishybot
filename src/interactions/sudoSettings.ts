@@ -181,6 +181,7 @@ function renderHome() {
     new ButtonBuilder().setCustomId('sudo:set:nav:socials').setLabel('Socials').setEmoji('📡').setStyle(ButtonStyle.Primary),
     new ButtonBuilder().setCustomId('sudo:set:nav:games').setLabel('Games').setEmoji('🎮').setStyle(ButtonStyle.Secondary),
     new ButtonBuilder().setCustomId('sudo:set:nav:profiles').setLabel('User Profiles').setEmoji('👤').setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder().setCustomId('sudo:set:nav:archive').setLabel('Archive').setEmoji('🗄️').setStyle(ButtonStyle.Secondary),
   )
   const navRow = new ActionRowBuilder<MessageActionRowComponentBuilder>().addComponents(
     new ButtonBuilder().setCustomId('sudo:home').setLabel('Back to /sudo').setEmoji('🏠').setStyle(ButtonStyle.Secondary),
@@ -549,6 +550,151 @@ async function renderHubLockdown() {
   return { flags: MessageFlags.IsComponentsV2 as number, components }
 }
 
+async function renderArchive(client: any, guildId: string) {
+  const {
+    listEligibleCategories,
+    listArchived,
+    getStaleDays,
+    getArchiveDestinationCategoryId,
+  } = await import('../services/archive')
+
+  const [eligible, archived] = await Promise.all([
+    listEligibleCategories(guildId),
+    listArchived(guildId),
+  ])
+  const destinationId = getArchiveDestinationCategoryId()
+  const staleDays = getStaleDays()
+
+  const lines: string[] = [
+    '### 🗄️ Channel Archive',
+    '_Manual, sudo-driven. Only channels inside **opt-in** categories are scannable. Archive moves the channel to a destination category, denies @everyone Send, and prepends 🗄️ to the name. Reversible._\n',
+    `**Destination category:** ${destinationId ? `<#${destinationId}>` : '`unset` _(required before archiving)_'}`,
+    `**Stale threshold:** \`${staleDays}\` days`,
+    `**Eligible categories (${eligible.length}):**`,
+    eligible.length === 0 ? '_None yet. Pick one below to opt in._' : eligible.map(id => `• <#${id}>`).join('\n'),
+    '',
+    `**Currently archived (${archived.length}):**`,
+    archived.length === 0 ? '_None._' : archived.slice(0, 10).map(a => `• <#${a.channelId}> _${a.originalName}_ · <t:${Math.floor(a.archivedAt.getTime() / 1000)}:R>`).join('\n'),
+  ]
+
+  const container = new ContainerBuilder()
+    .setAccentColor(0x9b59b6)
+    .addTextDisplayComponents(new TextDisplayBuilder().setContent(lines.join('\n')))
+
+  const components: any[] = [container]
+
+  // Destination category picker
+  components.push(
+    new ActionRowBuilder<MessageActionRowComponentBuilder>().addComponents(
+      new ChannelSelectMenuBuilder()
+        .setCustomId('sudo:set:channel:channel.archive_destination')
+        .setPlaceholder('Set archive destination category…')
+        .setChannelTypes([ChannelType.GuildCategory])
+        .setMinValues(0).setMaxValues(1),
+    ),
+  )
+
+  // Eligible-category add (channel select on categories)
+  components.push(
+    new ActionRowBuilder<MessageActionRowComponentBuilder>().addComponents(
+      new ChannelSelectMenuBuilder()
+        .setCustomId('sudo:set:archive:add_eligible')
+        .setPlaceholder('Add an opt-in category…')
+        .setChannelTypes([ChannelType.GuildCategory])
+        .setMinValues(0).setMaxValues(1),
+    ),
+  )
+
+  // Eligible-category remove
+  if (eligible.length > 0) {
+    components.push(
+      new ActionRowBuilder<MessageActionRowComponentBuilder>().addComponents(
+        new StringSelectMenuBuilder()
+          .setCustomId('sudo:set:archive:remove_eligible')
+          .setPlaceholder('Remove an opt-in category…')
+          .addOptions(eligible.slice(0, 25).map(id => ({ label: id, value: id, emoji: '❌' }))),
+      ),
+    )
+  }
+
+  // Action buttons
+  components.push(
+    new ActionRowBuilder<MessageActionRowComponentBuilder>().addComponents(
+      new ButtonBuilder().setCustomId('sudo:set:archive:edit_threshold').setLabel(`Stale: ${staleDays}d`).setEmoji('✏️').setStyle(ButtonStyle.Secondary),
+      new ButtonBuilder().setCustomId('sudo:set:archive:scan').setLabel('Scan stale channels').setEmoji('🔎').setStyle(ButtonStyle.Primary).setDisabled(eligible.length === 0 || !destinationId),
+    ),
+  )
+
+  // Unarchive
+  if (archived.length > 0) {
+    components.push(
+      new ActionRowBuilder<MessageActionRowComponentBuilder>().addComponents(
+        new StringSelectMenuBuilder()
+          .setCustomId('sudo:set:archive:unarchive')
+          .setPlaceholder('Unarchive a channel…')
+          .addOptions(archived.slice(0, 25).map(a => ({ label: a.originalName.slice(0, 100), value: a.channelId, emoji: '🔓', description: `<#${a.channelId}>`.slice(0, 100) }))),
+      ),
+    )
+  }
+
+  components.push(
+    new ActionRowBuilder<MessageActionRowComponentBuilder>().addComponents(
+      new ButtonBuilder().setCustomId('sudo:set:home').setLabel('Back').setStyle(ButtonStyle.Secondary),
+    ),
+  )
+
+  return { flags: MessageFlags.IsComponentsV2 as number, components }
+}
+
+async function renderArchiveScanResults(client: any, guildId: string) {
+  const { scanStaleChannels } = await import('../services/archive')
+  const stale = await scanStaleChannels(client, guildId)
+
+  const lines: string[] = [
+    '### 🔎 Stale channel scan',
+    stale.length === 0
+      ? '_No stale channels found in opt-in categories._'
+      : `_Found **${stale.length}** stale channel${stale.length === 1 ? '' : 's'}. Pick which to archive._`,
+  ]
+  for (const s of stale.slice(0, 25)) {
+    const ts = s.lastMessageAt ? `<t:${Math.floor(s.lastMessageAt.getTime() / 1000)}:R>` : '_no messages ever_'
+    lines.push(`• <#${s.channelId}> — last message ${ts} · category <#${s.categoryId}>`)
+  }
+
+  const container = new ContainerBuilder()
+    .setAccentColor(0xfee75c)
+    .addTextDisplayComponents(new TextDisplayBuilder().setContent(lines.join('\n')))
+
+  const components: any[] = [container]
+
+  if (stale.length > 0) {
+    const options = stale.slice(0, 25).map(s => ({
+      label: s.name.slice(0, 100),
+      value: s.channelId,
+      emoji: '🗄️',
+      description: (s.lastMessageAt ? `last ${s.lastMessageAt.toISOString().slice(0, 10)}` : 'no messages ever').slice(0, 100),
+    }))
+    components.push(
+      new ActionRowBuilder<MessageActionRowComponentBuilder>().addComponents(
+        new StringSelectMenuBuilder()
+          .setCustomId('sudo:set:archive:scan_pick')
+          .setPlaceholder('Pick channels to archive…')
+          .setMinValues(1)
+          .setMaxValues(Math.min(stale.length, 25))
+          .addOptions(options),
+      ),
+    )
+  }
+
+  components.push(
+    new ActionRowBuilder<MessageActionRowComponentBuilder>().addComponents(
+      new ButtonBuilder().setCustomId('sudo:set:nav:archive').setLabel('Back to Archive').setStyle(ButtonStyle.Secondary),
+    ),
+  )
+
+  return { flags: MessageFlags.IsComponentsV2 as number, components }
+}
+
 function renderAutoThreads() {
   const channels = listAutoThreadChannels()
 
@@ -901,6 +1047,28 @@ export async function handleSettingsButton(interaction: ButtonInteraction): Prom
     await interaction.showModal(buildSocialAddModal())
     return
   }
+  if (id === 'sudo:set:archive:edit_threshold') {
+    if (!await requireSudo(interaction)) return
+    const { getStaleDays } = await import('../services/archive')
+    const modal = new ModalBuilder()
+      .setCustomId('sudo:set:archive:edit_threshold_submit')
+      .setTitle('Stale threshold')
+      .addComponents(
+        new ActionRowBuilder<TextInputBuilder>().addComponents(
+          new TextInputBuilder()
+            .setCustomId('days')
+            .setLabel('Days of silence before a channel is stale')
+            .setStyle(TextInputStyle.Short)
+            .setRequired(true)
+            .setMinLength(1)
+            .setMaxLength(4)
+            .setValue(String(getStaleDays()))
+            .setPlaceholder('90'),
+        ),
+      )
+    await interaction.showModal(modal)
+    return
+  }
   if (id.startsWith('sudo:set:edit_modal:')) {
     if (!await requireSudo(interaction)) return
     const key = id.slice('sudo:set:edit_modal:'.length)
@@ -960,6 +1128,10 @@ export async function handleSettingsButton(interaction: ButtonInteraction): Prom
       await interaction.editReply(renderHubs() as any)
     } else if (category === 'hub_lockdown') {
       await interaction.editReply((await renderHubLockdown()) as any)
+    } else if (category === 'archive') {
+      await interaction.editReply((await renderArchive(interaction.client, interaction.guildId!)) as any)
+    } else if (category === 'archive_scan_results') {
+      await interaction.editReply((await renderArchiveScanResults(interaction.client, interaction.guildId!)) as any)
     } else if (category === 'auto_threads') {
       await interaction.editReply(renderAutoThreads() as any)
     } else if (category === 'staff_roles') {
@@ -1047,6 +1219,17 @@ export async function handleSettingsButton(interaction: ButtonInteraction): Prom
     await interaction.editReply((await renderSocials()) as any)
     return
   }
+
+  // sudo:set:archive:scan — run the scanner and switch to results panel
+  if (id === 'sudo:set:archive:scan') {
+    await interaction.editReply((await renderArchiveScanResults(interaction.client, interaction.guildId!)) as any)
+    return
+  }
+
+  // sudo:set:archive:edit_threshold — modal to set archive.stale_days (numeric setting)
+  // The button handler defers first, but showModal can't follow a defer.
+  // We handle this BEFORE the deferUpdate at the top — done in a separate
+  // branch earlier in the function. See the modal-show branch below if added.
 
   // sudo:set:hub_lockdown:lock_all:{minutes} — bot-owner-only guild-wide hub lock
   if (id.startsWith('sudo:set:hub_lockdown:lock_all:')) {
@@ -1138,6 +1321,24 @@ export async function handleSettingsChannelSelect(interaction: ChannelSelectMenu
     if (warning) {
       await interaction.followUp({ content: warning, flags: MessageFlags.Ephemeral })
     }
+    return
+  }
+
+  if (id === 'sudo:set:archive:add_eligible') {
+    const categoryId = interaction.values[0]
+    if (categoryId) {
+      const { addEligibleCategory } = await import('../services/archive')
+      await addEligibleCategory(interaction.guildId!, categoryId, interaction.user.id)
+    }
+    await interaction.update((await renderArchive(interaction.client, interaction.guildId!)) as any)
+    return
+  }
+
+  if (id === 'sudo:set:channel:channel.archive_destination') {
+    const channelId = interaction.values[0]
+    if (channelId) await setSetting('channel.archive_destination', channelId, interaction.user.id)
+    else           await clearSetting('channel.archive_destination')
+    await interaction.update((await renderArchive(interaction.client, interaction.guildId!)) as any)
     return
   }
 
@@ -1296,10 +1497,58 @@ export async function handleSettingsStringSelect(interaction: StringSelectMenuIn
     await interaction.update((await renderHubLockdown()) as any)
     return
   }
+  if (id === 'sudo:set:archive:remove_eligible') {
+    const categoryId = interaction.values[0]
+    if (categoryId) {
+      const { removeEligibleCategory } = await import('../services/archive')
+      await removeEligibleCategory(categoryId)
+    }
+    await interaction.update((await renderArchive(interaction.client, interaction.guildId!)) as any)
+    return
+  }
+  if (id === 'sudo:set:archive:unarchive') {
+    const channelId = interaction.values[0]
+    if (!channelId) return
+    const { unarchiveChannel } = await import('../services/archive')
+    const result = await unarchiveChannel(interaction.client, channelId)
+    await interaction.update((await renderArchive(interaction.client, interaction.guildId!)) as any)
+    if (!result.ok) {
+      await interaction.followUp({ content: `⚠️ Unarchive failed: ${result.reason}`, flags: MessageFlags.Ephemeral })
+    }
+    return
+  }
+  if (id === 'sudo:set:archive:scan_pick') {
+    await interaction.deferUpdate()
+    const { archiveChannel } = await import('../services/archive')
+    const results: { id: string; ok: boolean; reason?: string }[] = []
+    for (const channelId of interaction.values) {
+      const r = await archiveChannel(interaction.client, interaction.guildId!, channelId, interaction.user.id)
+      results.push({ id: channelId, ok: r.ok, reason: r.ok ? undefined : r.reason })
+    }
+    const ok = results.filter(r => r.ok).length
+    const fail = results.filter(r => !r.ok)
+    await interaction.editReply((await renderArchive(interaction.client, interaction.guildId!)) as any)
+    const summary = `Archived **${ok}**${fail.length > 0 ? ` · Failed **${fail.length}**:\n` + fail.map(f => `<#${f.id}> — ${f.reason}`).join('\n') : ''}`
+    await interaction.followUp({ content: summary, flags: MessageFlags.Ephemeral })
+    return
+  }
 }
 
 export async function handleSettingsModalSubmit(interaction: ModalSubmitInteraction): Promise<void> {
   if (!await requireSudo(interaction)) return
+
+  // Archive: set the stale-threshold (days)
+  if (interaction.customId === 'sudo:set:archive:edit_threshold_submit') {
+    const raw = interaction.fields.getTextInputValue('days').trim()
+    const n = Number(raw)
+    if (!Number.isInteger(n) || n < 1 || n > 3650) {
+      await interaction.reply({ content: '❌ Days must be an integer 1–3650 (10 years max).', ephemeral: true })
+      return
+    }
+    await setSetting('archive.stale_days', String(n), interaction.user.id)
+    await interaction.reply({ content: `✅ Stale threshold set to **${n}** days.`, ephemeral: true })
+    return
+  }
 
   // Per-hub lockdown modal — sets lockdown_until on a single hub.
   if (interaction.customId.startsWith('sudo:set:hub_lockdown:lock_one_submit:')) {
