@@ -16,6 +16,8 @@ import { startRpcServer } from '../../services/rpcServer'
 // Side-effect import: registers the `echo` verb on the RPC registry.
 // Follow-up PRs add more handlers; each one is a side-effect import too.
 import '../../services/rpc/handlers/echo'
+// Side-effect import: registers `staff.grant` + `staff.revoke` (Wave 7b).
+import '../../services/rpc/handlers/staff'
 
 const SUPPRESS_NOTIFICATIONS = 1 << 12  // MessageFlags.SuppressNotifications
 
