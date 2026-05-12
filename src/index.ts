@@ -7,6 +7,7 @@ import { registerVoiceStateUpdate } from './bot/events/voiceStateUpdate'
 import { registerMessageCreate } from './bot/events/messageCreate'
 import { registerPresenceUpdate } from './bot/events/presenceUpdate'
 import { registerGuildMemberAdd } from './bot/events/guildMemberAdd'
+import { registerGuildMemberRemove } from './bot/events/guildMemberRemove'
 import { logger } from './services/logger'
 import { setDnd, shutdownPresence } from './services/presence'
 
@@ -16,6 +17,7 @@ registerVoiceStateUpdate(client)
 registerMessageCreate(client)
 registerPresenceUpdate(client)
 registerGuildMemberAdd(client)
+registerGuildMemberRemove(client)
 
 process.on('unhandledRejection', async (reason) => {
   setDnd('Unhandled error — check logs')

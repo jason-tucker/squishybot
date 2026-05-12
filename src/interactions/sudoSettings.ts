@@ -187,6 +187,7 @@ function renderHome() {
   const row4 = new ActionRowBuilder<MessageActionRowComponentBuilder>().addComponents(
     new ButtonBuilder().setCustomId('sudo:set:nav:auto_roles').setLabel('Auto Roles').setEmoji('🎟️').setStyle(ButtonStyle.Secondary),
     new ButtonBuilder().setCustomId('sudo:set:nav:color_roles').setLabel('Color Roles').setEmoji('🎨').setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder().setCustomId('sudo:set:nav:welcome').setLabel('Welcome/Goodbye').setEmoji('👋').setStyle(ButtonStyle.Secondary),
   )
   const navRow = new ActionRowBuilder<MessageActionRowComponentBuilder>().addComponents(
     new ButtonBuilder().setCustomId('sudo:home').setLabel('Back to /sudo').setEmoji('🏠').setStyle(ButtonStyle.Secondary),
@@ -805,6 +806,54 @@ async function renderColorRoles(guildId: string) {
   }
   components.push(
     new ActionRowBuilder<MessageActionRowComponentBuilder>().addComponents(
+      new ButtonBuilder().setCustomId('sudo:set:home').setLabel('Back').setStyle(ButtonStyle.Secondary),
+    ),
+  )
+  return { flags: MessageFlags.IsComponentsV2 as number, components }
+}
+
+async function renderWelcome() {
+  const welcomeOn = getBoolSetting('welcome.enabled', false)
+  const goodbyeOn = getBoolSetting('goodbye.enabled', false)
+  const welcomeCh = getSetting('welcome.channel_id')
+  const goodbyeCh = getSetting('goodbye.channel_id')
+  const welcomeTpl = getSetting('welcome.template')
+  const goodbyeTpl = getSetting('goodbye.template')
+
+  const lines = [
+    '### 👋 Welcome / Goodbye',
+    '_Posts a message when members join or leave. Supported tokens: `{user}`, `{server}`, `{member_count}`, `{account_age}`. Both are default OFF._\n',
+    `**Welcome:** ${welcomeOn ? '🟢 On' : '⚪ Off'} · channel ${welcomeCh ? `<#${welcomeCh}>` : '_unset_'}`,
+    `> ${welcomeTpl ? `\`${welcomeTpl.slice(0, 100)}\`` : '_(default)_'}`,
+    '',
+    `**Goodbye:** ${goodbyeOn ? '🟢 On' : '⚪ Off'} · channel ${goodbyeCh ? `<#${goodbyeCh}>` : '_unset_'}`,
+    `> ${goodbyeTpl ? `\`${goodbyeTpl.slice(0, 100)}\`` : '_(default)_'}`,
+  ]
+  const container = new ContainerBuilder()
+    .setAccentColor(0x5865f2)
+    .addTextDisplayComponents(new TextDisplayBuilder().setContent(lines.join('\n')))
+
+  const components: any[] = [container]
+  components.push(
+    new ActionRowBuilder<MessageActionRowComponentBuilder>().addComponents(
+      new ChannelSelectMenuBuilder().setCustomId('sudo:set:channel:welcome.channel_id').setPlaceholder('Welcome channel…').setChannelTypes([ChannelType.GuildText]).setMinValues(0).setMaxValues(1),
+    ),
+  )
+  components.push(
+    new ActionRowBuilder<MessageActionRowComponentBuilder>().addComponents(
+      new ChannelSelectMenuBuilder().setCustomId('sudo:set:channel:goodbye.channel_id').setPlaceholder('Goodbye channel…').setChannelTypes([ChannelType.GuildText]).setMinValues(0).setMaxValues(1),
+    ),
+  )
+  components.push(
+    new ActionRowBuilder<MessageActionRowComponentBuilder>().addComponents(
+      new ButtonBuilder().setCustomId('sudo:set:welcome:edit_welcome').setLabel('Edit welcome template').setEmoji('✏️').setStyle(ButtonStyle.Primary),
+      new ButtonBuilder().setCustomId('sudo:set:welcome:edit_goodbye').setLabel('Edit goodbye template').setEmoji('✏️').setStyle(ButtonStyle.Primary),
+    ),
+  )
+  components.push(
+    new ActionRowBuilder<MessageActionRowComponentBuilder>().addComponents(
+      new ButtonBuilder().setCustomId('sudo:set:bool_toggle:welcome.enabled').setLabel(welcomeOn ? 'Disable welcome' : 'Enable welcome').setEmoji(welcomeOn ? '🔕' : '🔔').setStyle(welcomeOn ? ButtonStyle.Secondary : ButtonStyle.Success),
+      new ButtonBuilder().setCustomId('sudo:set:bool_toggle:goodbye.enabled').setLabel(goodbyeOn ? 'Disable goodbye' : 'Enable goodbye').setEmoji(goodbyeOn ? '🔕' : '🔔').setStyle(goodbyeOn ? ButtonStyle.Secondary : ButtonStyle.Success),
       new ButtonBuilder().setCustomId('sudo:set:home').setLabel('Back').setStyle(ButtonStyle.Secondary),
     ),
   )
@@ -1527,6 +1576,29 @@ export async function handleSettingsButton(interaction: ButtonInteraction): Prom
     return
   }
 
+  // #20 — Edit welcome/goodbye template (modal)
+  if (id === 'sudo:set:welcome:edit_welcome' || id === 'sudo:set:welcome:edit_goodbye') {
+    if (!await requireSudo(interaction)) return
+    const which = id === 'sudo:set:welcome:edit_welcome' ? 'welcome' : 'goodbye'
+    const current = getSetting(`${which}.template`) ?? ''
+    const modal = new ModalBuilder()
+      .setCustomId(`sudo:set:welcome:${which}_submit`)
+      .setTitle(`Edit ${which} template`)
+      .addComponents(
+        new ActionRowBuilder<TextInputBuilder>().addComponents(
+          new TextInputBuilder()
+            .setCustomId('template')
+            .setLabel('Template (blank = reset to default)')
+            .setStyle(TextInputStyle.Paragraph)
+            .setRequired(false)
+            .setMaxLength(2000)
+            .setValue(current)
+            .setPlaceholder('Tokens: {user} {server} {member_count} {account_age}'),
+        ),
+      )
+    await interaction.showModal(modal)
+    return
+  }
   if (id === 'sudo:set:profiles:csv_import') {
     if (!await requireSudo(interaction)) return
     const modal = new ModalBuilder()
@@ -1649,6 +1721,8 @@ export async function handleSettingsButton(interaction: ButtonInteraction): Prom
       await interaction.editReply((await renderAutoRoles(interaction.guildId!)) as any)
     } else if (category === 'color_roles') {
       await interaction.editReply((await renderColorRoles(interaction.guildId!)) as any)
+    } else if (category === 'welcome') {
+      await interaction.editReply((await renderWelcome()) as any)
     } else if (category === 'auto_threads') {
       await interaction.editReply(renderAutoThreads() as any)
     } else if (category === 'staff_roles') {
@@ -1941,14 +2015,25 @@ export async function handleSettingsButton(interaction: ButtonInteraction): Prom
   // sudo:set:bool_toggle:{key} — flip a boolean setting; currently all live in Voice
   if (id.startsWith('sudo:set:bool_toggle:')) {
     const key = id.slice('sudo:set:bool_toggle:'.length)
-    const def = VOICE_BOOL_SETTINGS.find(d => d.key === key)
-    if (!def) {
+    // Look up the toggle in the known list; #20 welcome/goodbye keys also flow through here.
+    const voiceDef = VOICE_BOOL_SETTINGS.find(d => d.key === key)
+    const KNOWN_BOOL_KEYS = new Set<string>([
+      ...VOICE_BOOL_SETTINGS.map(d => d.key),
+      'welcome.enabled',
+      'goodbye.enabled',
+    ])
+    if (!KNOWN_BOOL_KEYS.has(key)) {
       await interaction.followUp({ content: `Unknown toggle: ${key}`, flags: MessageFlags.Ephemeral })
       return
     }
-    const next = !getBoolSetting(def.key, def.defaultValue)
-    await setSetting(def.key, next ? 'true' : 'false', interaction.user.id)
-    await interaction.editReply(renderVoice() as any)
+    const fallback = voiceDef?.defaultValue ?? false
+    const next = !getBoolSetting(key, fallback)
+    await setSetting(key, next ? 'true' : 'false', interaction.user.id)
+    if (key === 'welcome.enabled' || key === 'goodbye.enabled') {
+      await interaction.editReply((await renderWelcome()) as any)
+    } else {
+      await interaction.editReply(renderVoice() as any)
+    }
     return
   }
 
@@ -2006,6 +2091,15 @@ export async function handleSettingsChannelSelect(interaction: ChannelSelectMenu
       await addEligibleCategory(interaction.guildId!, categoryId, interaction.user.id)
     }
     await interaction.update((await renderArchive(interaction.client, interaction.guildId!)) as any)
+    return
+  }
+
+  if (id === 'sudo:set:channel:welcome.channel_id' || id === 'sudo:set:channel:goodbye.channel_id') {
+    const key = id.slice('sudo:set:channel:'.length)
+    const channelId = interaction.values[0]
+    if (channelId) await setSetting(key, channelId, interaction.user.id)
+    else           await clearSetting(key, interaction.user.id)
+    await interaction.update((await renderWelcome()) as any)
     return
   }
 
@@ -2318,6 +2412,19 @@ export async function handleSettingsStringSelect(interaction: StringSelectMenuIn
 
 export async function handleSettingsModalSubmit(interaction: ModalSubmitInteraction): Promise<void> {
   if (!await requireSudo(interaction)) return
+
+  // #20 — Welcome/goodbye template submit
+  if (interaction.customId === 'sudo:set:welcome:welcome_submit' || interaction.customId === 'sudo:set:welcome:goodbye_submit') {
+    const which = interaction.customId === 'sudo:set:welcome:welcome_submit' ? 'welcome' : 'goodbye'
+    const raw = interaction.fields.getTextInputValue('template').trim()
+    if (raw === '') {
+      await clearSetting(`${which}.template`, interaction.user.id)
+    } else {
+      await setSetting(`${which}.template`, raw, interaction.user.id)
+    }
+    await interaction.reply({ content: raw === '' ? `✅ ${which} template reset to default.` : `✅ ${which} template saved.`, ephemeral: true })
+    return
+  }
 
   // #29 — Save per-feed throttle
   if (interaction.customId.startsWith('sudo:set:social:throttle_submit:')) {
