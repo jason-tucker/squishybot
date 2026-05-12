@@ -209,5 +209,4 @@ async function handleVoiceStateUpdate(oldState: VoiceState, newState: VoiceState
         await maybeRenameChannel(client, updatedRecord).catch(() => {})
       }
     }
-  })
 }
