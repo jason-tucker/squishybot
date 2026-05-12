@@ -17,6 +17,23 @@ import { publish, voiceCh, type VoiceOwnerChangedEvent } from '../../services/ev
 
 export function registerVoiceStateUpdate(client: Client): void {
   client.on('voiceStateUpdate', async (oldState: VoiceState, newState: VoiceState) => {
+    // Catch ANY error in this handler so a transient DB blip (e.g. a pool
+    // connection failing SCRAM mid-burst) doesn't surface as an
+    // uncaughtException. The user-visible effect of a swallowed error is
+    // "I joined a channel but nothing happened" — same as if Discord had
+    // dropped the gateway event. We retry naturally on the user's next
+    // state change. Discord.js's listener executes async handlers via
+    // Promise.then with no error boundary; without this wrap a rejected
+    // promise crashes the worker.
+    try {
+      await handleVoiceStateUpdate(oldState, newState)
+    } catch (err) {
+      logger.error('voiceStateUpdate handler threw — swallowed', err)
+    }
+  })
+}
+
+async function handleVoiceStateUpdate(oldState: VoiceState, newState: VoiceState): Promise<void> {
     // Only handle the configured guild
     if (newState.guild.id !== env.GUILD_ID && oldState.guild.id !== env.GUILD_ID) return
 
