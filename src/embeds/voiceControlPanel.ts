@@ -88,9 +88,13 @@ export function buildControlPanelPayload(
     headerLines.push(`💡 ${nameContext.reason}`)
   }
 
+  // Hard cap on text content. CV2 TextDisplay accepts a lot but very large
+  // member rosters with rich-presence sub-lines can push past 4000 chars
+  // (Discord rejects the whole edit). 3500 leaves headroom for future fields.
+  const headerText = headerLines.join('\n').slice(0, 3500)
   const container = new ContainerBuilder()
     .addTextDisplayComponents(
-      new TextDisplayBuilder().setContent(headerLines.join('\n')),
+      new TextDisplayBuilder().setContent(headerText),
     )
 
   const vcId = record.voiceChannelId

@@ -24,6 +24,37 @@ export function clearPanelHash(voiceChannelId: string): void {
   lastPanelInputHash.delete(voiceChannelId)
 }
 
+// Debounced panel refresh — presenceUpdate can fire many times per second
+// when a user's rich presence changes rapidly (game state ticks, party
+// updates). We coalesce into one re-render per channel per debounce window;
+// the existing hash dedup inside postOrUpdateControlPanel then skips if
+// nothing visible actually changed.
+const pendingPanelRefresh = new Map<string, NodeJS.Timeout>()
+const PANEL_DEBOUNCE_MS = 1500
+
+export function debouncedPanelRefresh(client: Client, record: AutoChannelRecord): void {
+  const key = record.voiceChannelId
+  const existing = pendingPanelRefresh.get(key)
+  if (existing) clearTimeout(existing)
+  pendingPanelRefresh.set(key, setTimeout(async () => {
+    pendingPanelRefresh.delete(key)
+    // Re-fetch in case the record changed during the debounce window
+    // (rename / host changes / lock toggle / etc). Cheap: at most one query
+    // per debounce window per channel.
+    const [fresh] = await db.select().from(autoChannels).where(eq(autoChannels.voiceChannelId, key)).catch(() => [])
+    if (!fresh) return
+    await postOrUpdateControlPanel(client, fresh).catch(() => {})
+  }, PANEL_DEBOUNCE_MS))
+}
+
+export function cancelPanelRefresh(voiceChannelId: string): void {
+  const t = pendingPanelRefresh.get(voiceChannelId)
+  if (t) {
+    clearTimeout(t)
+    pendingPanelRefresh.delete(voiceChannelId)
+  }
+}
+
 export async function buildPanelPayloadForRecord(client: Client, record: AutoChannelRecord) {
   const [{ ownerTag, hostTags }, members] = await Promise.all([
     resolveDisplayTags(client, record),

@@ -14,6 +14,7 @@ import type { Client } from 'discord.js'
 import { db } from '../../db/client'
 import { autoChannels } from '../../db/schema'
 import { eq } from 'drizzle-orm'
+import type { AutoChannelRecord } from '../../types/voice'
 import { logger } from '../logger'
 import { computeAutoName, ALL_TEMPLATES } from './autoNaming'
 
@@ -38,10 +39,23 @@ export function clearRenameState(voiceChannelId: string): void {
 /**
  * Re-evaluate the channel name. No-op when nothing needs to change. When
  * throttled, schedules itself to retry as soon as the bucket allows.
+ *
+ * Accepts either a voiceChannelId (we'll look up the record) or a
+ * pre-fetched record. Callers in voiceStateUpdate / presenceUpdate already
+ * have the record in hand; passing it directly avoids a second DB select.
  */
-export async function maybeRenameChannel(client: Client, voiceChannelId: string): Promise<void> {
-  const [record] = await db.select().from(autoChannels).where(eq(autoChannels.voiceChannelId, voiceChannelId))
+export async function maybeRenameChannel(
+  client: Client,
+  voiceChannelIdOrRecord: string | AutoChannelRecord,
+): Promise<void> {
+  let record: AutoChannelRecord | undefined
+  if (typeof voiceChannelIdOrRecord === 'string') {
+    [record] = await db.select().from(autoChannels).where(eq(autoChannels.voiceChannelId, voiceChannelIdOrRecord))
+  } else {
+    record = voiceChannelIdOrRecord
+  }
   if (!record) return
+  const voiceChannelId = record.voiceChannelId
   if (!record.autoNameEnabled) return
   if (!PRESENCE_TEMPLATES.has(record.nameTemplate)) return
 

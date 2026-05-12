@@ -73,7 +73,7 @@ export function registerVoiceStateUpdate(client: Client): void {
         await postOrUpdateControlPanel(client, updatedRecord).catch(() => {})
         // New member arrived — they may be playing something that should
         // change the channel name. Re-evaluate (handles throttle internally).
-        await maybeRenameChannel(client, joinedChannelId).catch(() => {})
+        await maybeRenameChannel(client, updatedRecord).catch(() => {})
         return
       }
 
@@ -176,7 +176,7 @@ export function registerVoiceStateUpdate(client: Client): void {
         await postOrUpdateControlPanel(client, updatedRecord).catch(() => {})
         // Member who left may have been the one whose game was driving the
         // channel name — re-evaluate so the fallback kicks in.
-        await maybeRenameChannel(client, leftChannelId).catch(() => {})
+        await maybeRenameChannel(client, updatedRecord).catch(() => {})
       }
     }
   })
