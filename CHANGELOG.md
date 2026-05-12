@@ -8,6 +8,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ## [Unreleased]
 
 ### Changed
+- **Deploy pipeline now uses GHCR + watchtower** (matches the botpanel pattern). `BOT_IMAGE` defaults to `ghcr.io/jason-tucker/squishybot:latest` and the container gets the `com.centurylinklabs.watchtower.enable=true` label so the shared watchtower picks it up. Closes the gap that left squishybot running a stale local image for 4 days. After merging, the user needs to `docker login ghcr.io` (once) so watchtower can pull the private package, then `docker compose pull && up -d` to switch from the local image to the GHCR floating tag.
 - **Startup DM is now a Components V2 card** instead of a markdown blob. Same content (bot tag, booted-relative timestamp, version + git SHA, primary guild, reconciler results, disabled feature flags) but rendered in a green-accented `ContainerBuilder` with separators between sections. Still env-only target (`BOT_OWNER_ID`).
 
 ### Security
