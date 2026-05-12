@@ -27,10 +27,19 @@ services:
       POSTGRES_USER: squishybot
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-squishybot_dev}
       POSTGRES_DB: squishybot
-    ports:
-      - "5434:5432"
+    # No host port mapping (security). The bot reaches the DB at "db:5432"
+    # over the default compose network; botpanel reaches it at "db-squishy:5432"
+    # over the shared botpanel-net network (alias below). If you need psql
+    # from the VPS host, use `docker exec -it squishybot-db-1 psql -U squishybot`.
+    expose:
+      - "5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
+    networks:
+      default: {}
+      botpanel-net:
+        aliases:
+          - db-squishy
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U squishybot"]
       interval: 5s
@@ -42,6 +51,12 @@ services:
       options:
         max-size: "5m"
         max-file: "2"
+
+networks:
+  # Shared external network so botpanel can reach this DB without exposing
+  # any host port. Create once on the host:  `docker network create botpanel-net`
+  botpanel-net:
+    external: true
 
 volumes:
   postgres_data:
