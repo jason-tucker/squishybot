@@ -41,7 +41,7 @@ function renderPickerComponents(deptSlug: string | null, tierSlug: string | null
     'Pick a department, a tier, or both. At least one is required.',
     '',
     "After you submit, we'll ask for an optional real / preferred name.",
-    'Approving sudo will also grant the **IT CRI Staff** base role automatically.',
+    'Approving sudo will also grant the **ITSRI Staff** base role automatically.',
   ]
 
   const deptSelect = new StringSelectMenuBuilder()

@@ -62,6 +62,6 @@ export async function handleStaffRequestModal(interaction: ModalSubmitInteractio
       : (result.departmentLabel ?? result.tierLabel ?? 'staff role')
 
   await interaction.editReply({
-    content: `✅ Your request for **${what}** has been submitted. An admin will review it shortly. (Approving will also grant the **IT CRI Staff** base role.)`,
+    content: `✅ Your request for **${what}** has been submitted. An admin will review it shortly. (Approving will also grant the **ITSRI Staff** base role.)`,
   })
 }

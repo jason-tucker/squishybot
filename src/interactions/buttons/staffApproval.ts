@@ -50,7 +50,7 @@ export async function handleStaffApprovalButton(interaction: ButtonInteraction):
   // shapes:
   //   - NEW: { department_key?, tier_key?, real_name? }
   //   - LEGACY: { role_key, role_label, ... } (single role per request).
-  // Legacy rows skip the IT CRI Staff base grant (that's a new addition
+  // Legacy rows skip the ITSRI Staff base grant (that's a new addition
   // — the original flow didn't promise it). New rows always include it.
   const departmentKey = typeof data.department_key === 'string' ? data.department_key : null
   const tierKey = typeof data.tier_key === 'string' ? data.tier_key : null
@@ -220,7 +220,7 @@ async function tryGrantRoles(
 
   if (opts.isLegacy) {
     lines.push(
-      '_(Legacy request — IT CRI Staff base role was NOT auto-granted; new requests get it.)_',
+      '_(Legacy request — ITSRI Staff base role was NOT auto-granted; new requests get it.)_',
     )
   }
 
