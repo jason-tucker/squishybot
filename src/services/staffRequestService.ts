@@ -6,7 +6,7 @@
  *
  * A request can name AT MOST one department and AT MOST one tier; both
  * are optional individually but at least one must be present (we don't
- * accept empty requests — the IT CRI Staff base role is granted on
+ * accept empty requests — the ITSRI Staff base role is granted on
  * approval regardless, so an empty request would just be "make me
  * staff" which the approver can do via /sudo direct grant instead).
  */
@@ -95,7 +95,7 @@ export async function submitStaffRequest(input: StaffRequestInput): Promise<Staf
   if (deptDef) detailLines.push(`**Department:** ${deptDef.label}`)
   if (tierDef) detailLines.push(`**Tier:** ${tierDef.label}`)
   if (realName) detailLines.push(`**Real / preferred name:** ${realName}`)
-  detailLines.push('', '_Approving also grants the **IT CRI Staff** base role._')
+  detailLines.push('', '_Approving also grants the **ITSRI Staff** base role._')
 
   const container = new ContainerBuilder()
     .setAccentColor(0xfee75c)

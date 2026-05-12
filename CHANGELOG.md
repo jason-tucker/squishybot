@@ -7,11 +7,15 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### Fixed
+
+- **Staff base-role rename: `it_cri_staff` → `itsri_staff`, "IT CRI Staff" → "ITSRI Staff".** The actual Discord role name is **ITSRI Staff**, not IT CRI Staff. Renamed slug + key + label + name in `STAFF_ROLE_DEFS` and every user-facing string referencing it. Safe rename — no `staff_approvals` rows or `bot_settings` entries with the old slug/key exist yet (original entry shipped a few hours earlier and `/sudo → Provision & link` hadn't been run). Provision & Link will now match the existing "ITSRI Staff" Discord role by name.
+
 ### Changed
 
 - **Staff request flow now picks Department + Tier separately, both optional, in one submission.** The previous single-role picker forced you to file two requests if you wanted Tier 2 + Help Desk. The new flow ships an ephemeral message with TWO selects (department / tier) plus a "Continue" button — picking any value updates the message state in place (state rides in customIds so it survives the round-trip), and Continue opens a one-field modal for the optional real / preferred name. The free-text **"Why are you requesting this role?"** field is removed entirely; pickers + name are the whole form. New `staff_approvals.requestedData` shape: `{department_key?, department_label?, tier_key?, tier_label?, real_name?}`. Legacy single-role rows still render in the approval card and DM correctly — see the "Approval" entry below for how they're granted.
-- **Approval now grants up to 3 roles at once.** For new requests: the picked department (if any) + the picked tier (if any) + the new **IT CRI Staff** base role (always). Each grant gets its own line in the approval card so a partial failure (one role unlinked, another missing in Discord) is visible to the reviewer. Legacy single-role rows continue to grant exactly the one role they originally requested — they do NOT auto-pick up the new IT CRI Staff base role (it wasn't promised when those rows were filed; the card mentions this explicitly).
-- **`bot_settings` keys for staff roles now include `staff.role.it_cri_staff`.** The role is provisioned and linked by the existing `/sudo → Settings → Staff Roles → Provision & link` flow — same registry, just one more entry. Color `#3B88C3`. If you have an existing "IT CRI Staff" role in Discord it will be linked by name (no duplicate created).
+- **Approval now grants up to 3 roles at once.** For new requests: the picked department (if any) + the picked tier (if any) + the new **ITSRI Staff** base role (always). Each grant gets its own line in the approval card so a partial failure (one role unlinked, another missing in Discord) is visible to the reviewer. Legacy single-role rows continue to grant exactly the one role they originally requested — they do NOT auto-pick up the new ITSRI Staff base role (it wasn't promised when those rows were filed; the card mentions this explicitly).
+- **`bot_settings` keys for staff roles now include `staff.role.itsri_staff`.** The role is provisioned and linked by the existing `/sudo → Settings → Staff Roles → Provision & link` flow — same registry, just one more entry. Color `#3B88C3`. If you have an existing "ITSRI Staff" role in Discord it will be linked by name (no duplicate created).
 
 ### Added
 

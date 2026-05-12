@@ -4,7 +4,7 @@
  * 9 roles split across three categories:
  *   - `tier`       (3) — Tier 1 / Tier 2 / Tier 3 (seniority hierarchy).
  *   - `department` (5) — Help Desk / Onsites / Security / Sales / Leadership.
- *   - `base`       (1) — IT CRI Staff. Granted automatically on every
+ *   - `base`       (1) — ITSRI Staff. Granted automatically on every
  *                        approval so anyone marked staff carries the umbrella
  *                        role too — useful for staff-only channel access.
  *
@@ -49,7 +49,7 @@ export const STAFF_ROLE_DEFS: StaffRoleDef[] = [
   { key: 'staff.role.sales',        slug: 'sales',        label: 'Sales',        name: 'Sales',        color: 0xf1c40f, category: 'department' },
   { key: 'staff.role.leadership',   slug: 'leadership',   label: 'Leadership',   name: 'Leadership',   color: 0x9b59b6, category: 'department' },
   // Base — auto-granted on every approval.
-  { key: 'staff.role.it_cri_staff', slug: 'it_cri_staff', label: 'IT CRI Staff', name: 'IT CRI Staff', color: 0x3b88c3, category: 'base' },
+  { key: 'staff.role.itsri_staff', slug: 'itsri_staff', label: 'ITSRI Staff', name: 'ITSRI Staff', color: 0x3b88c3, category: 'base' },
 ]
 
 export const DEPARTMENT_DEFS: StaffRoleDef[] = STAFF_ROLE_DEFS.filter((d) => d.category === 'department')
