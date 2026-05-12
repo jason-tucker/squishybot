@@ -24,6 +24,10 @@ import '../../services/rpc/handlers/welcome/preview'
 import '../../services/rpc/handlers/admin'
 // Wave 7b — games.refresh_cache verb (post-write cache reload hook).
 import '../../services/rpc/handlers/games/refresh_cache'
+// Wave 7b — reaction-role builder verbs (create/delete/expire).
+import '../../services/rpc/handlers/rxnroles/create'
+import '../../services/rpc/handlers/rxnroles/delete'
+import '../../services/rpc/handlers/rxnroles/expire'
 
 const SUPPRESS_NOTIFICATIONS = 1 << 12  // MessageFlags.SuppressNotifications
 
