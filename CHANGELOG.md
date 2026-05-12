@@ -13,6 +13,9 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ### Security
 - **Postgres host port closed.** `5434` is no longer bound to `0.0.0.0`; the DB is reachable only over the new shared `botpanel-net` external docker network (alias `db-squishy`) and through `docker exec` from the VPS host. External port scans now show `5434/tcp` as closed/filtered.
 
+### Changed
+- **`squishybot` service now joins `botpanel-net`** in addition to the default compose network, so the event publisher can reach the panel-stack `redis:6379`. `REDIS_URL` env defaults to `redis://redis:6379` (override via `.env`). The default network is still where the bot reaches its own `db:5432`.
+
 ### Added
 - **Redis event publisher (botpanel #14).** New `src/services/eventBus.ts` fans out bot-state mutations to Redis pub/sub on typed `bot.squishy.<domain>.<event>` channels. Lazy-singleton `ioredis` connection (env `REDIS_URL`, default `redis://redis:6379`), `lazyConnect: true` + capped exponential retry, never throws upstream (`publish()` is fire-and-forget; errors land in `logger.warn`). Inline TS interfaces define every payload shape; we'll dedupe with the panel's vendored copy later. Hook points:
   - **Voice** — `voiceMembers.recordMemberJoin / Leave` (`voice.member_join` / `member_leave` with `{guildId, userId, channelId, ts}`), `autoChannel.createAutoChannel / deleteAutoChannel` (`voice.channel_created` / `channel_deleted` with `{voiceChannelId, textChannelId, ownerUserId, name, ts}`), voice control panel button handler (`voice.lock_toggled`, `voice.hidden_toggled`, `voice.owner_changed` on Claim), hosts select (`voice.hosts_changed` with `{voiceChannelId, op, userId, ts}`), and `voiceStateUpdate` owner instant-transfer + acting-owner promotion paths (`voice.owner_changed`).
