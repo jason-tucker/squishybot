@@ -184,7 +184,10 @@ export function registerInteractionCreate(client: Client) {
         } else if (id === 'staff:role_pick') {
           const { handleStaffRolePickSelect } = await import('../../commands/staff')
           await handleStaffRolePickSelect(interaction as StringSelectMenuInteraction)
-        } else if (id === 'sudo:set:removeuser' || id === 'sudo:set:reset_channel' || id === 'sudo:set:autothread:remove' || id === 'sudo:set:hub:remove' || id === 'sudo:set:social:pick') {
+        } else if (id.startsWith('sudo:set:') && !id.startsWith('sudo:set:save:')) {
+          // All Settings string-selects funnel through one handler. We
+          // intentionally exclude `sudo:set:save:*` (those are modal submits
+          // with the same prefix — handled in the modal branch below).
           const { handleSettingsStringSelect } = await import('../../interactions/sudoSettings')
           await handleSettingsStringSelect(interaction as StringSelectMenuInteraction)
         } else if (id === 'games:cat:select') {
@@ -206,7 +209,12 @@ export function registerInteractionCreate(client: Client) {
         } else if (id === 'report:submit') {
           const { handleReportSubmit } = await import('../../interactions/modals/reportSubmit')
           await handleReportSubmit(interaction as ModalSubmitInteraction)
-        } else if (id.startsWith('sudo:set:save:') || id === 'sudo:set:social:add_submit') {
+        } else if (id.startsWith('sudo:set:')) {
+          // All Settings modal submits funnel through one handler:
+          //   sudo:set:save:{key}                           — numeric setting modal
+          //   sudo:set:social:add_submit                    — social feed add
+          //   sudo:set:hub:defaults_submit:{channelId}      — per-hub defaults
+          //   sudo:set:hub_lockdown:lock_one_submit:{cid}   — per-hub lockdown
           const { handleSettingsModalSubmit } = await import('../../interactions/sudoSettings')
           await handleSettingsModalSubmit(interaction as ModalSubmitInteraction)
         } else if (id.startsWith('profile:save:')) {
