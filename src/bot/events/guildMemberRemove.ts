@@ -2,6 +2,7 @@ import type { Client, GuildMember, PartialGuildMember } from 'discord.js'
 import { env } from '../../config/env'
 import { getBoolSetting, getSetting } from '../../services/settings'
 import { logger } from '../../services/logger'
+import { publish, memberCh, type MemberLeftGuildEvent } from '../../services/eventBus'
 
 /**
  * #20 — Goodbye message on guildMemberRemove. Default OFF.
@@ -12,6 +13,11 @@ export function registerGuildMemberRemove(client: Client): void {
   client.on('guildMemberRemove', async (member: GuildMember | PartialGuildMember) => {
     if (member.guild.id !== env.GUILD_ID) return
     if (member.user?.bot) return
+
+    void publish<MemberLeftGuildEvent>(memberCh('left_guild'), {
+      userId: member.id, ts: new Date().toISOString(),
+    })
+
     if (!getBoolSetting('goodbye.enabled', false)) return
 
     const channelId = getSetting('goodbye.channel_id')

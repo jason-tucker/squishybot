@@ -6,6 +6,7 @@ import { db } from '../../db/client'
 import { autoJoinRoles } from '../../db/schema'
 import { eq } from 'drizzle-orm'
 import { getBoolSetting, getSetting } from '../../services/settings'
+import { publish, memberCh, type MemberJoinedGuildEvent } from '../../services/eventBus'
 
 /**
  * On guildMemberAdd we re-apply every persisted game pref for the member.
@@ -20,6 +21,10 @@ export function registerGuildMemberAdd(client: Client): void {
   client.on('guildMemberAdd', async (member: GuildMember) => {
     if (member.guild.id !== env.GUILD_ID) return
     if (member.user.bot) return
+
+    void publish<MemberJoinedGuildEvent>(memberCh('joined_guild'), {
+      userId: member.id, ts: new Date().toISOString(),
+    })
 
     // #20 — Welcome message. Default OFF.
     if (getBoolSetting('welcome.enabled', false)) {

@@ -7,6 +7,7 @@ import {
 import { env } from '../../config/env'
 import { logger } from '../../services/logger'
 import { createReportSession } from '../../services/reportCache'
+import { publish, reportCh, type ReportCreatedEvent } from '../../services/eventBus'
 
 export async function handleReportSubmit(interaction: ModalSubmitInteraction): Promise<void> {
   await interaction.deferReply({ ephemeral: true })
@@ -52,10 +53,11 @@ export async function handleReportSubmit(interaction: ModalSubmitInteraction): P
   // The review handler will look up the most-recent pending row for this user
   // by sessionKey-derived heuristics; for simplicity, the row stores the
   // reporter's user_id and title, and the review handler matches on that.
+  let reportRowId: number | null = null
   try {
     const { db } = await import('../../db/client')
     const { reportLog } = await import('../../db/schema')
-    await db.insert(reportLog).values({
+    const [row] = await db.insert(reportLog).values({
       guildId: interaction.guildId!,
       userId: interaction.user.id,
       title,
@@ -63,9 +65,16 @@ export async function handleReportSubmit(interaction: ModalSubmitInteraction): P
       description,
       steps: steps || null,
       status: 'pending',
-    })
+    }).returning({ id: reportLog.id })
+    reportRowId = row?.id ?? null
   } catch (err) {
     logger.warn('report_log insert failed', err)
+  }
+
+  if (reportRowId !== null) {
+    void publish<ReportCreatedEvent>(reportCh('created'), {
+      id: reportRowId, status: 'pending', ts: new Date().toISOString(),
+    })
   }
 
   // DM the bot owner with Approve / Reject buttons
