@@ -127,6 +127,7 @@ function renderGameDetail(g: Game) {
   lines.push(`**View channel** — ${g.channelId ? `<#${g.channelId}>` : '_unset_'} _(toggling "View" adds/removes a member overwrite here)_`)
   lines.push(`**Ping role** — ${g.pingRoleId ? `<@&${g.pingRoleId}>` : '_unset (will name-match)_'} _(toggling "Pings" adds/removes this role)_`)
   lines.push(`**Sort order** — \`${g.sortOrder}\``)
+  lines.push(`**/play cooldown** — ${g.playCooldownSeconds === null || g.playCooldownSeconds === undefined ? '_default (1800s = 30 min)_' : g.playCooldownSeconds === 0 ? '🟢 disabled' : `\`${g.playCooldownSeconds}s\``}`)
   lines.push(`**Visible** — ${g.isVisible ? '🟢 yes' : '🔴 hidden'}`)
   lines.push(`**Archived** — ${g.isArchived ? '📦 yes' : '🟢 no'}`)
 
@@ -142,6 +143,7 @@ function renderGameDetail(g: Game) {
       new ButtonBuilder().setCustomId(`games:cat:edit:${g.id}:name`).setLabel('Name').setEmoji('✏️').setStyle(ButtonStyle.Primary),
       new ButtonBuilder().setCustomId(`games:cat:edit:${g.id}:aliases`).setLabel('Aliases').setEmoji('🔤').setStyle(ButtonStyle.Primary),
       new ButtonBuilder().setCustomId(`games:cat:edit:${g.id}:sortOrder`).setLabel('Sort').setEmoji('🔢').setStyle(ButtonStyle.Primary),
+      new ButtonBuilder().setCustomId(`games:cat:edit:${g.id}:cooldown`).setLabel('/play cooldown').setEmoji('⏱️').setStyle(ButtonStyle.Primary),
     )
   )
 
@@ -487,6 +489,11 @@ export async function handleCatalogButton(interaction: ButtonInteraction): Promi
     if (field === 'name') { label = 'Name'; value = g.name }
     else if (field === 'aliases') { label = 'Aliases (comma-separated)'; value = g.aliases.join(', ') }
     else if (field === 'sortOrder') { label = 'Sort order (integer)'; value = String(g.sortOrder); placeholder = 'lower = appears first' }
+    else if (field === 'cooldown') {
+      label = '/play cooldown (seconds)'
+      value = g.playCooldownSeconds === null || g.playCooldownSeconds === undefined ? '' : String(g.playCooldownSeconds)
+      placeholder = 'blank = default 1800s · 0 = no cooldown'
+    }
 
     const modal = new ModalBuilder()
       .setCustomId(`games:cat:save:${gid}:${field}`)
@@ -634,6 +641,17 @@ export async function handleCatalogModal(interaction: ModalSubmitInteraction): P
       const n = Number(raw)
       if (!Number.isInteger(n)) { await interaction.reply({ content: '❌ Must be an integer.', ephemeral: true }); return }
       patch.sortOrder = n
+    } else if (field === 'cooldown') {
+      if (raw === '') {
+        patch.playCooldownSeconds = null
+      } else {
+        const n = Number(raw)
+        if (!Number.isInteger(n) || n < 0 || n > 86400) {
+          await interaction.reply({ content: '❌ Cooldown must be an integer 0–86400 (24h max). Blank to reset to default.', ephemeral: true })
+          return
+        }
+        patch.playCooldownSeconds = n
+      }
     } else {
       await interaction.reply({ content: `❌ Unknown field: \`${field}\``, ephemeral: true })
       return
@@ -687,8 +705,11 @@ export async function handlePrefsSet(interaction: ButtonInteraction): Promise<vo
     editorDiscordId: interaction.user.id,
     mode: mode as PrefsMode,
   })
-  if (!result) {
-    await interaction.reply({ content: '❌ Game not found.', ephemeral: true })
+  if (!result.ok) {
+    const message = result.reason === 'game-not-found'
+      ? '❌ Game not found.'
+      : '❌ You need the **view** role for this game before you can opt into pings. Toggle View on first.'
+    await interaction.reply({ content: message, ephemeral: true })
     return
   }
 

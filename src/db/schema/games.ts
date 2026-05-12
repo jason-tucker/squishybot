@@ -12,5 +12,8 @@ export const games = pgTable('games', {
   isVisible: boolean('is_visible').notNull().default(true),
   sortOrder: integer('sort_order').notNull().default(0),
   aliases: text('aliases').array().notNull().default([]),
+  // #22 — per-game /play cooldown in seconds. Null = use the global default
+  // (1800 = 30 min). 0 = no cooldown.
+  playCooldownSeconds: integer('play_cooldown_seconds'),
   createdAt: timestamp('created_at').notNull().defaultNow(),
 })

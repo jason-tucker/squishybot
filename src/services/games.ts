@@ -341,15 +341,34 @@ export async function resolvePrefs(guildOrId: Guild | string, userOrMember: stri
  * The DB row is always written so that prefs persist across the user leaving
  * and rejoining the server (see `restoreMemberPrefs` for the rejoin path).
  */
+export type SetPrefResult =
+  | { ok: true; wantsView: boolean; wantsPing: boolean }
+  | { ok: false; reason: 'game-not-found' | 'view-required-for-ping' }
+
 export async function setPref(
   member: GuildMember,
   gameId: string,
   which: 'view' | 'ping',
   value: boolean,
   editor: { editorDiscordId: string; mode: 'self' | 'sudo' }
-): Promise<{ wantsView: boolean; wantsPing: boolean } | null> {
+): Promise<SetPrefResult> {
   const game = getGame(gameId)
-  if (!game) return null
+  if (!game) return { ok: false, reason: 'game-not-found' }
+
+  // #23 — Ping role requires the View role. A user can't opt into pings
+  // for a game they haven't opted into viewing. Sudo can still set on
+  // behalf via the View toggle first; we don't bypass this for sudo because
+  // the rule is about the target member's preferences, not the editor's.
+  if (which === 'ping' && value === true) {
+    const [existing] = await db.select().from(userGamePrefs).where(
+      and(
+        eq(userGamePrefs.guildId, member.guild.id),
+        eq(userGamePrefs.userId, member.id),
+        eq(userGamePrefs.gameId, gameId),
+      ),
+    )
+    if (!existing?.wantsView) return { ok: false, reason: 'view-required-for-ping' }
+  }
 
   const [row] = await db.insert(userGamePrefs).values({
     guildId: member.guild.id,
@@ -363,14 +382,29 @@ export async function setPref(
   }).returning()
 
   const reason = `game-pref set by=${editor.editorDiscordId} mode=${editor.mode}`
+  let finalRow = row
   if (which === 'view') {
     await applyViewAccess(member, game, value, reason)
+    // Cascade: turning View off must turn Ping off too — otherwise the user
+    // ends up holding the ping role for a channel they can no longer see.
+    if (value === false && row.wantsPing) {
+      const [pinged] = await db.update(userGamePrefs)
+        .set({ wantsPing: false })
+        .where(and(
+          eq(userGamePrefs.guildId, member.guild.id),
+          eq(userGamePrefs.userId, member.id),
+          eq(userGamePrefs.gameId, gameId),
+        ))
+        .returning()
+      finalRow = pinged ?? row
+      await applyPingRole(member, game, false, `${reason} (cascade from view=false)`)
+    }
   } else {
     await applyPingRole(member, game, value, reason)
   }
 
   logger.info(`game-pref-set by=${editor.editorDiscordId} target=${member.id} mode=${editor.mode} game=${game.name} which=${which} now=${value}`)
-  return { wantsView: row.wantsView, wantsPing: row.wantsPing }
+  return { ok: true, wantsView: finalRow.wantsView, wantsPing: finalRow.wantsPing }
 }
 
 async function applyViewAccess(member: GuildMember, game: Game, value: boolean, reason: string): Promise<void> {
@@ -507,20 +541,34 @@ export async function gameInterestCounts(guild: Guild): Promise<Map<string, Game
 // /play rate limit — in-memory map keyed by (guildId:userId:gameId)
 // ---------------------------------------------------------------------------
 
-const PLAY_COOLDOWN_MS = 10 * 60_000  // 10 min — sudo bypasses entirely (see /play)
+// Default /play cooldown (1800s = 30 min) per CLAUDE.md spec. Per-game
+// overrides live in games.play_cooldown_seconds (#22) — null falls back here,
+// 0 disables cooldown entirely.
+const DEFAULT_PLAY_COOLDOWN_SEC = 1800
 const lastPlayAt = new Map<string, number>()
 
-/** Lazy sweep: drop entries past their cooldown window. Without this the Map
- *  grows monotonically with unique (user × game) tuples over the bot's life. */
+function cooldownSecondsFor(gameId: string): number {
+  const g = getGame(gameId)
+  if (!g) return DEFAULT_PLAY_COOLDOWN_SEC
+  return g.playCooldownSeconds === null || g.playCooldownSeconds === undefined
+    ? DEFAULT_PLAY_COOLDOWN_SEC
+    : g.playCooldownSeconds
+}
+
+/** Lazy sweep: drop entries past the longest possible cooldown window. */
 function sweepPlayCooldowns(): void {
-  const cutoff = Date.now() - PLAY_COOLDOWN_MS
+  // Use 2h as a generous upper bound; any longer per-game cooldown still bounds
+  // the map via the per-tuple checkPlayCooldown read.
+  const cutoff = Date.now() - 2 * 60 * 60 * 1000
   for (const [k, t] of lastPlayAt) if (t < cutoff) lastPlayAt.delete(k)
 }
 
 export function checkPlayCooldown(guildId: string, userId: string, gameId: string): { ok: true } | { ok: false; remainingSec: number } {
+  const cooldownMs = cooldownSecondsFor(gameId) * 1000
+  if (cooldownMs <= 0) return { ok: true }
   const key = `${guildId}:${userId}:${gameId}`
   const last = lastPlayAt.get(key) ?? 0
-  const remaining = PLAY_COOLDOWN_MS - (Date.now() - last)
+  const remaining = cooldownMs - (Date.now() - last)
   if (remaining > 0) return { ok: false, remainingSec: Math.ceil(remaining / 1000) }
   return { ok: true }
 }
