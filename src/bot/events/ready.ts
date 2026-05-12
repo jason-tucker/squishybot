@@ -12,6 +12,10 @@ import { startBirthdayScheduler } from '../../services/birthdayScheduler'
 import { logResolvedBotOwners } from '../../services/botOwner'
 import { getBoolSetting } from '../../services/settings'
 import { publishHeartbeat, publishReady } from '../../services/eventBus'
+import { startRpcServer } from '../../services/rpcServer'
+// Side-effect import: registers the `echo` verb on the RPC registry.
+// Follow-up PRs add more handlers; each one is a side-effect import too.
+import '../../services/rpc/handlers/echo'
 
 const SUPPRESS_NOTIFICATIONS = 1 << 12  // MessageFlags.SuppressNotifications
 
@@ -66,6 +70,14 @@ export function registerReadyEvent(client: Client) {
     } catch (err) {
       await logger.errorAndDm('Reconciler failed on startup', err, c)
     }
+
+    // Wave 7 command bus — bot-side RPC subscriber. Lazy ioredis client
+    // psubscribes to `cmd.squishy.*` and dispatches HMAC-verified
+    // envelopes to verb handlers from `services/rpc/registry`. Non-
+    // blocking: if `BOTPANEL_RPC_SECRET` is unset or Redis is down the
+    // bot still boots normally. Runs after the reconciler so handlers
+    // see a settled channel state.
+    startRpcServer(c)
 
     // Build a richer startup DM. Only the BOT_OWNER_ID env target gets this
     // (logger.dmOwner reads env directly — not the dynamic isBotOwner set).

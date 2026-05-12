@@ -47,6 +47,12 @@ const envSchema = z.object({
   // /report — files GitHub issues from inside Discord
   GITHUB_TOKEN: z.string().min(1).optional().or(z.literal('').transform(() => undefined)),
   GITHUB_REPO: z.string().min(1).optional().or(z.literal('').transform(() => undefined)),
+
+  // Wave 7 command bus — shared secret with botpanel for HMAC-signed
+  // RPC envelopes on `cmd.squishy.<verb>`. Optional: if unset,
+  // `startRpcServer` logs a warning and does not subscribe, so the bot
+  // still runs in environments without the panel wired up.
+  BOTPANEL_RPC_SECRET: z.string().min(1).optional().or(z.literal('').transform(() => undefined)),
 })
 
 const parsed = envSchema.safeParse(process.env)
