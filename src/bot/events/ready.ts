@@ -16,10 +16,12 @@ import { startRpcServer } from '../../services/rpcServer'
 // Side-effect import: registers the `echo` verb on the RPC registry.
 // Follow-up PRs add more handlers; each one is a side-effect import too.
 import '../../services/rpc/handlers/echo'
-// Side-effect import: registers `staff.grant` + `staff.revoke` (Wave 7b).
+// Wave 7b — staff role grant/revoke verbs.
 import '../../services/rpc/handlers/staff'
 // Wave 7b — welcome/goodbye preview verb (read-only render of live templates).
 import '../../services/rpc/handlers/welcome/preview'
+// Wave 7b — admin verbs: reload-caches, orphan-scan, reconciler-run.
+import '../../services/rpc/handlers/admin'
 
 const SUPPRESS_NOTIFICATIONS = 1 << 12  // MessageFlags.SuppressNotifications
 
