@@ -18,6 +18,8 @@ import { startRpcServer } from '../../services/rpcServer'
 import '../../services/rpc/handlers/echo'
 // Side-effect import: registers `staff.grant` + `staff.revoke` (Wave 7b).
 import '../../services/rpc/handlers/staff'
+// Wave 7b — welcome/goodbye preview verb (read-only render of live templates).
+import '../../services/rpc/handlers/welcome/preview'
 
 const SUPPRESS_NOTIFICATIONS = 1 << 12  // MessageFlags.SuppressNotifications
 
