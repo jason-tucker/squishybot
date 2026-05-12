@@ -55,6 +55,9 @@ export function startSocialPoller(client: Client): void {
 }
 
 export async function runPoll(client: Client): Promise<void> {
+  // Feature flag (#33).
+  const { getBoolSetting } = await import('../settings')
+  if (!getBoolSetting('feature.social_poller', true)) return
   const feeds = listSocialFeeds().filter(f => f.enabled)
   for (const feed of feeds) {
     try {

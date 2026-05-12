@@ -68,6 +68,9 @@ async function tick(client: Client): Promise<void> {
 
 /** Public entry — used by tick() and exported for manual /sudo trigger. */
 export async function runForDate(client: Client, date: Date): Promise<{ posted: number; skipped: number }> {
+  // Feature flag (#33).
+  const { getBoolSetting } = await import('./settings')
+  if (!getBoolSetting('feature.birthday_pings', true)) return { posted: 0, skipped: 0 }
   const guildId = env.GUILD_ID
   const guild = client.guilds.cache.get(guildId)
   if (!guild) {

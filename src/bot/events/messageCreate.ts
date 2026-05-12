@@ -54,6 +54,8 @@ export function registerMessageCreate(client: Client): void {
 async function maybeAutoThread(msg: Message): Promise<void> {
   if (msg.author.bot) return
   if (msg.system) return
+  // Feature flag (#33).
+  if (!getBoolSetting('feature.auto_threads', true)) return
   if (!isAutoThreadChannel(msg.channelId)) return
   // Only text and announcement channels support startThread on a parent message.
   // Forums/media channels create posts-as-threads natively; voice/stage text-in-voice doesn't.

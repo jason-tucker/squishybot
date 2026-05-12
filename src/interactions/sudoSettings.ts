@@ -37,7 +37,7 @@ import {
   UserSelectMenuBuilder,
   type MessageActionRowComponentBuilder,
 } from 'discord.js'
-import { isNotNull, or } from 'drizzle-orm'
+import { eq, isNotNull, or } from 'drizzle-orm'
 import { db } from '../db/client'
 import { games } from '../db/schema'
 import { env } from '../config/env'
@@ -547,6 +547,156 @@ async function renderHubLockdown() {
     )
   )
 
+  return { flags: MessageFlags.IsComponentsV2 as number, components }
+}
+
+// Feature flags — bot-owner-only kill switches. Each maps to a setting key
+// the relevant entry point reads via getBoolSetting('feature.<key>', true).
+interface FeatureFlagDef {
+  key: string
+  label: string
+  description: string
+  defaultOn: boolean
+}
+const FEATURE_FLAGS: FeatureFlagDef[] = [
+  { key: 'feature.auto_voice',       label: 'Auto Voice Channels',  description: 'Hub joins create auto-channels. Existing channels keep working when off.', defaultOn: true },
+  { key: 'feature.auto_threads',     label: 'Auto Threads',         description: 'messageCreate creates threads on media in auto-thread channels.',          defaultOn: true },
+  { key: 'feature.social_poller',    label: 'Social Poller',        description: 'RSS poller posts new feed items every 30 min.',                            defaultOn: true },
+  { key: 'feature.presence_renames', label: 'Presence Renames',     description: 'Rich presence drives auto-channel name updates.',                          defaultOn: true },
+  { key: 'feature.birthday_pings',   label: 'Birthday Pings',       description: 'Daily scheduler fires birthday messages.',                                  defaultOn: true },
+  { key: 'feature.color_roles',      label: 'Color Roles (/color)', description: 'User-selectable color role manager. Default OFF (#38).',                    defaultOn: false },
+]
+
+async function renderDebug(client: any, userId: string) {
+  const { isBotOwner } = await import('../services/botOwner')
+  const owner = await isBotOwner(client, userId)
+  const lines: string[] = [
+    '### 🛠️ Debug',
+    '_Bot-owner-only diagnostic surfaces. Sudo can see this page; only bot owners can fire the buttons._\n',
+    owner ? '🟢 You **are** a bot owner.' : '🔒 You are **not** a bot owner — buttons will deny.',
+  ]
+  const container = new ContainerBuilder()
+    .setAccentColor(0xed4245)
+    .addTextDisplayComponents(new TextDisplayBuilder().setContent(lines.join('\n')))
+
+  const components: any[] = [container]
+  components.push(
+    new ActionRowBuilder<MessageActionRowComponentBuilder>().addComponents(
+      new ButtonBuilder().setCustomId('sudo:set:nav:feature_flags').setLabel('Feature flags').setEmoji('🚦').setStyle(ButtonStyle.Primary),
+      new ButtonBuilder().setCustomId('sudo:set:nav:orphan_scan').setLabel('Orphan resource scan').setEmoji('🔎').setStyle(ButtonStyle.Secondary),
+      new ButtonBuilder().setCustomId('sudo:set:debug:clear_caches').setLabel('Force-clear caches').setEmoji('🧹').setStyle(ButtonStyle.Danger),
+    ),
+  )
+  components.push(
+    new ActionRowBuilder<MessageActionRowComponentBuilder>().addComponents(
+      new ButtonBuilder().setCustomId('sudo:set:home').setLabel('Back').setStyle(ButtonStyle.Secondary),
+    ),
+  )
+  return { flags: MessageFlags.IsComponentsV2 as number, components }
+}
+
+async function renderFeatureFlags() {
+  const lines: string[] = [
+    '### 🚦 Feature Flags',
+    '_Bot-owner-only kill switches per feature. Each toggle gates the relevant entry point at runtime._\n',
+  ]
+  for (const f of FEATURE_FLAGS) {
+    const on = getBoolSetting(f.key, f.defaultOn)
+    lines.push(`**${f.label}** · ${on ? '🟢 On' : '⚪ Off'}\n_${f.description}_\n`)
+  }
+
+  const container = new ContainerBuilder()
+    .setAccentColor(0xed4245)
+    .addTextDisplayComponents(new TextDisplayBuilder().setContent(lines.join('\n')))
+
+  const components: any[] = [container]
+  for (const f of FEATURE_FLAGS) {
+    const on = getBoolSetting(f.key, f.defaultOn)
+    components.push(
+      new ActionRowBuilder<MessageActionRowComponentBuilder>().addComponents(
+        new ButtonBuilder()
+          .setCustomId(`sudo:set:feature:${f.key}`)
+          .setLabel(`${on ? 'Disable' : 'Enable'} ${f.label}`)
+          .setEmoji(on ? '🔕' : '🔔')
+          .setStyle(on ? ButtonStyle.Secondary : ButtonStyle.Success),
+      ),
+    )
+  }
+  components.push(
+    new ActionRowBuilder<MessageActionRowComponentBuilder>().addComponents(
+      new ButtonBuilder().setCustomId('sudo:set:nav:debug').setLabel('Back to Debug').setStyle(ButtonStyle.Secondary),
+    ),
+  )
+  return { flags: MessageFlags.IsComponentsV2 as number, components }
+}
+
+async function renderOrphanScan(client: any, guildId: string) {
+  const guild = client.guilds.cache.get(guildId)
+  if (!guild) {
+    return {
+      flags: MessageFlags.IsComponentsV2 as number,
+      components: [new ContainerBuilder().addTextDisplayComponents(new TextDisplayBuilder().setContent('### 🔎 Orphan scan\n_Guild not in cache._'))],
+    }
+  }
+
+  const { db } = await import('../db/client')
+  const { autoChannels, hubChannels, autoThreadChannels, games, archivedChannels } = await import('../db/schema')
+
+  const [autoRows, hubRows, threadRows, gameRows, archivedRows] = await Promise.all([
+    db.select().from(autoChannels),
+    db.select().from(hubChannels),
+    db.select().from(autoThreadChannels),
+    db.select().from(games),
+    db.select().from(archivedChannels),
+  ])
+
+  const orphans: { table: string; rowKey: string; missingId: string; field: string }[] = []
+  const seenInDiscord = (id: string | null | undefined) => !!(id && guild.channels.cache.has(id))
+  const roleSeen = (id: string | null | undefined) => !!(id && guild.roles.cache.has(id))
+
+  for (const r of autoRows) {
+    if (!seenInDiscord(r.voiceChannelId)) orphans.push({ table: 'auto_channels', rowKey: r.id, missingId: r.voiceChannelId, field: 'voice_channel_id' })
+    if (!seenInDiscord(r.textChannelId))  orphans.push({ table: 'auto_channels', rowKey: r.id, missingId: r.textChannelId, field: 'text_channel_id' })
+  }
+  for (const r of hubRows) {
+    if (!seenInDiscord(r.channelId))   orphans.push({ table: 'hub_channels', rowKey: r.id, missingId: r.channelId, field: 'channel_id' })
+    if (!seenInDiscord(r.categoryId))  orphans.push({ table: 'hub_channels', rowKey: r.id, missingId: r.categoryId, field: 'category_id' })
+  }
+  for (const r of threadRows) {
+    if (!seenInDiscord(r.channelId))   orphans.push({ table: 'auto_thread_channels', rowKey: r.channelId, missingId: r.channelId, field: 'channel_id' })
+  }
+  for (const r of gameRows) {
+    if (r.channelId && !seenInDiscord(r.channelId))  orphans.push({ table: 'games', rowKey: r.id, missingId: r.channelId, field: 'channel_id' })
+    if (r.categoryId && !seenInDiscord(r.categoryId)) orphans.push({ table: 'games', rowKey: r.id, missingId: r.categoryId, field: 'category_id' })
+    if (r.roleId && !roleSeen(r.roleId))             orphans.push({ table: 'games', rowKey: r.id, missingId: r.roleId, field: 'role_id' })
+    if (r.pingRoleId && !roleSeen(r.pingRoleId))     orphans.push({ table: 'games', rowKey: r.id, missingId: r.pingRoleId, field: 'ping_role_id' })
+  }
+  for (const r of archivedRows) {
+    if (!seenInDiscord(r.channelId)) orphans.push({ table: 'archived_channels', rowKey: r.channelId, missingId: r.channelId, field: 'channel_id' })
+  }
+
+  const lines: string[] = [
+    '### 🔎 Orphan resource scan',
+    '_Walks bot-managed tables and flags rows referencing Discord channels/roles that no longer exist._\n',
+    orphans.length === 0 ? '🟢 **No orphans found.** Everything tracked is still alive in Discord.' : `🟡 **${orphans.length} orphan reference${orphans.length === 1 ? '' : 's'} found:**`,
+  ]
+  for (const o of orphans.slice(0, 30)) {
+    lines.push(`• \`${o.table}.${o.field}\` → \`${o.missingId}\` (row \`${o.rowKey.slice(0, 12)}\`)`)
+  }
+  if (orphans.length > 30) lines.push(`_…and ${orphans.length - 30} more._`)
+
+  const container = new ContainerBuilder()
+    .setAccentColor(orphans.length === 0 ? 0x57f287 : 0xfee75c)
+    .addTextDisplayComponents(new TextDisplayBuilder().setContent(lines.join('\n')))
+
+  const components: any[] = [container]
+  components.push(
+    new ActionRowBuilder<MessageActionRowComponentBuilder>().addComponents(
+      new ButtonBuilder().setCustomId('sudo:set:debug:cleanup_orphans').setLabel('Clean up orphan rows').setEmoji('🗑️').setStyle(ButtonStyle.Danger).setDisabled(orphans.length === 0),
+      new ButtonBuilder().setCustomId('sudo:set:nav:orphan_scan').setLabel('Re-scan').setEmoji('♻️').setStyle(ButtonStyle.Secondary),
+      new ButtonBuilder().setCustomId('sudo:set:nav:debug').setLabel('Back to Debug').setStyle(ButtonStyle.Secondary),
+    ),
+  )
   return { flags: MessageFlags.IsComponentsV2 as number, components }
 }
 
@@ -1173,6 +1323,12 @@ export async function handleSettingsButton(interaction: ButtonInteraction): Prom
       await interaction.editReply((await renderArchive(interaction.client, interaction.guildId!)) as any)
     } else if (category === 'archive_scan_results') {
       await interaction.editReply((await renderArchiveScanResults(interaction.client, interaction.guildId!)) as any)
+    } else if (category === 'debug') {
+      await interaction.editReply((await renderDebug(interaction.client, interaction.user.id)) as any)
+    } else if (category === 'feature_flags') {
+      await interaction.editReply((await renderFeatureFlags()) as any)
+    } else if (category === 'orphan_scan') {
+      await interaction.editReply((await renderOrphanScan(interaction.client, interaction.guildId!)) as any)
     } else if (category === 'auto_threads') {
       await interaction.editReply(renderAutoThreads() as any)
     } else if (category === 'staff_roles') {
@@ -1275,6 +1431,102 @@ export async function handleSettingsButton(interaction: ButtonInteraction): Prom
     const { updateAutoThreadChannel } = await import('../services/settings')
     await updateAutoThreadChannel(channelId, { archiveDuration })
     await interaction.editReply(renderAutoThreads() as any)
+    return
+  }
+
+  // #34 — sudo:set:debug:clear_caches — bot-owner-only
+  if (id === 'sudo:set:debug:clear_caches') {
+    const { isBotOwner, invalidateBotOwnerCache } = await import('../services/botOwner')
+    if (!await isBotOwner(interaction.client, interaction.user.id)) {
+      await interaction.followUp({ content: '❌ Force-clear caches is bot-owner-only.', flags: MessageFlags.Ephemeral })
+      return
+    }
+    const { loadSettings } = await import('../services/settings')
+    const { loadGames } = await import('../services/games')
+    const { loadSocialFeeds } = await import('../services/socialFeeds')
+    invalidateBotOwnerCache()
+    await Promise.all([
+      loadSettings().catch(err => logger.warn('clear_caches: loadSettings failed', err)),
+      loadGames().catch(err => logger.warn('clear_caches: loadGames failed', err)),
+      loadSocialFeeds().catch(err => logger.warn('clear_caches: loadSocialFeeds failed', err)),
+    ])
+    await interaction.editReply((await renderDebug(interaction.client, interaction.user.id)) as any)
+    await interaction.followUp({ content: '✅ Caches reloaded: settings, games, social feeds, bot-owner.', flags: MessageFlags.Ephemeral })
+    return
+  }
+
+  // #16 — sudo:set:debug:cleanup_orphans — bot-owner-only, delete orphaned DB rows
+  if (id === 'sudo:set:debug:cleanup_orphans') {
+    const { isBotOwner } = await import('../services/botOwner')
+    if (!await isBotOwner(interaction.client, interaction.user.id)) {
+      await interaction.followUp({ content: '❌ Orphan cleanup is bot-owner-only.', flags: MessageFlags.Ephemeral })
+      return
+    }
+    const guild = interaction.client.guilds.cache.get(interaction.guildId!)
+    if (!guild) {
+      await interaction.followUp({ content: '❌ Guild not in cache.', flags: MessageFlags.Ephemeral })
+      return
+    }
+    const { db } = await import('../db/client')
+    const { autoChannels, hubChannels, autoThreadChannels, archivedChannels } = await import('../db/schema')
+
+    // Delete entirely-orphan rows (where every Discord reference is gone). For
+    // partial orphans (e.g. games with only a missing ping_role_id), don't
+    // delete — they still have other valid references and the user can edit
+    // them via the Games panel.
+    const [autoRows, hubRows, threadRows, archivedRows] = await Promise.all([
+      db.select().from(autoChannels),
+      db.select().from(hubChannels),
+      db.select().from(autoThreadChannels),
+      db.select().from(archivedChannels),
+    ])
+    let deleted = 0
+    for (const r of autoRows) {
+      if (!guild.channels.cache.has(r.voiceChannelId) && !guild.channels.cache.has(r.textChannelId)) {
+        await db.delete(autoChannels).where(eq(autoChannels.id, r.id)).catch(() => {}); deleted++
+      }
+    }
+    for (const r of hubRows) {
+      if (!guild.channels.cache.has(r.channelId)) {
+        await db.delete(hubChannels).where(eq(hubChannels.id, r.id)).catch(() => {}); deleted++
+      }
+    }
+    for (const r of threadRows) {
+      if (!guild.channels.cache.has(r.channelId)) {
+        await db.delete(autoThreadChannels).where(eq(autoThreadChannels.channelId, r.channelId)).catch(() => {}); deleted++
+      }
+    }
+    for (const r of archivedRows) {
+      if (!guild.channels.cache.has(r.channelId)) {
+        await db.delete(archivedChannels).where(eq(archivedChannels.channelId, r.channelId)).catch(() => {}); deleted++
+      }
+    }
+
+    // Reload caches so the in-memory state matches the DB.
+    const { loadSettings } = await import('../services/settings')
+    await loadSettings().catch(() => {})
+
+    await interaction.editReply((await renderOrphanScan(interaction.client, interaction.guildId!)) as any)
+    await interaction.followUp({ content: `✅ Removed **${deleted}** orphan row${deleted === 1 ? '' : 's'}. Games with partially-missing references are left intact — edit those via the Games panel.`, flags: MessageFlags.Ephemeral })
+    return
+  }
+
+  // #33 — sudo:set:feature:{key} — bot-owner-only toggle
+  if (id.startsWith('sudo:set:feature:')) {
+    const { isBotOwner } = await import('../services/botOwner')
+    if (!await isBotOwner(interaction.client, interaction.user.id)) {
+      await interaction.followUp({ content: '❌ Feature flags are bot-owner-only.', flags: MessageFlags.Ephemeral })
+      return
+    }
+    const key = id.slice('sudo:set:feature:'.length)
+    const def = FEATURE_FLAGS.find(f => f.key === key)
+    if (!def) {
+      await interaction.followUp({ content: `Unknown feature flag: ${key}`, flags: MessageFlags.Ephemeral })
+      return
+    }
+    const next = !getBoolSetting(def.key, def.defaultOn)
+    await setSetting(def.key, next ? 'true' : 'false', interaction.user.id)
+    await interaction.editReply((await renderFeatureFlags()) as any)
     return
   }
 

@@ -63,6 +63,14 @@ export async function seedHubsFromEnv(guild: Guild): Promise<void> {
 const handlingHubs = new Set<string>()
 
 export async function handleHubJoin(client: Client, guild: Guild, member: GuildMember, hubChannelId: string): Promise<void> {
+  // Feature flag (#33): bot owner can disable auto-voice creation. Existing
+  // channels keep working; new hub joins just no-op.
+  const { getBoolSetting } = await import('../settings')
+  if (!getBoolSetting('feature.auto_voice', true)) {
+    logger.info(`Auto-voice disabled (feature flag) — ignoring hub join from ${member.id} on ${hubChannelId}`)
+    return
+  }
+
   // Idempotency: if the hub has already been promoted to an auto channel
   // (created moments ago by a parallel join), do nothing here. The earlier
   // auto_channels check in voiceStateUpdate is the primary guard; this

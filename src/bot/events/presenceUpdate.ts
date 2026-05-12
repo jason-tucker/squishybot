@@ -20,6 +20,9 @@ export function registerPresenceUpdate(client: Client): void {
   client.on('presenceUpdate', async (_old: Presence | null, newPresence: Presence) => {
     if (newPresence.guild?.id !== env.GUILD_ID) return
     if (!newPresence.userId) return
+    // Feature flag (#33).
+    const { getBoolSetting } = await import('../../services/settings')
+    if (!getBoolSetting('feature.presence_renames', true)) return
 
     // Look up the auto channel the user is currently sitting in (if any).
     // Tracking by voice-channel rather than ownership lets a non-owner's
