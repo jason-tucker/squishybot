@@ -39,6 +39,11 @@ import '../../services/rpc/handlers/voice'
 import '../../services/rpc/handlers/meta'
 // Wave 7d — users.resolve verb (snowflake→@username for panel display).
 import '../../services/rpc/handlers/users'
+// color.assign verb — sudo applies / clears a curated color role for any
+// member from the panel members editor. The public `/color` slash command
+// stays gated on `feature.color_roles`; the verb itself isn't double-gated
+// (panel hides the section when the flag is off, see /squishy/members/[id]).
+import '../../services/rpc/handlers/color'
 
 const SUPPRESS_NOTIFICATIONS = 1 << 12  // MessageFlags.SuppressNotifications
 
