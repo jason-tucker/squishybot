@@ -1,7 +1,7 @@
 # ── Stage 1: Build ────────────────────────────────────────────────────────────
 # TypeScript compilation runs HERE (on the CI runner with 7 GB RAM),
 # never on the production server.
-FROM node:24-alpine AS builder
+FROM node:26-alpine AS builder
 
 RUN corepack enable pnpm
 
@@ -16,7 +16,7 @@ COPY . .
 RUN node --max-old-space-size=4096 node_modules/typescript/bin/tsc
 
 # ── Stage 2: Production ───────────────────────────────────────────────────────
-FROM node:24-alpine AS production
+FROM node:26-alpine AS production
 
 WORKDIR /app
 
