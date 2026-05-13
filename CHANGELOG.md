@@ -7,6 +7,10 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### Ops
+
+- **Schema-change → botpanel dispatch.** New `.github/workflows/notify-panel-schema-change.yml` fires a `repository_dispatch` (`bot-schema-changed`) at `jason-tucker/botpanel` whenever a push to `main` touches `src/db/schema/**`. Botpanel's companion `sync-bot-schema` workflow opens or updates a PR with the re-vendored Drizzle schemas. Closes the race where botpanel's `main` could go red after a schema merge here. Auth: `BOTPANEL_DISPATCH_PAT` repo secret.
+
 ### Fixed
 
 - **Reconciler no longer adopts untracked voice channels.** Previous behavior: any occupied VC inside the auto-voice category that wasn't already in `auto_channels` got auto-adopted with `source_hub_id='recovered'`, after which it inherited the empty-channel-cleanup timer. That over-reached — manually-created channels inside the auto category were getting swept up and deleted on the first empty cycle. Now: untracked channels are logged-only; the bot leaves them alone. The original "bot was offline when someone joined a hub" justification is rare enough that re-joining the hub when the bot's back up produces a correctly-tracked channel instead.
