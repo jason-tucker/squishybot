@@ -8,8 +8,21 @@ import { settingOrNumber } from '../settings'
 
 const pendingTimers = new Map<string, ReturnType<typeof setTimeout>>()
 
-export function scheduleCleanup(client: Client, voiceChannelId: string): void {
+export async function scheduleCleanup(client: Client, voiceChannelId: string): Promise<void> {
   if (pendingTimers.has(voiceChannelId)) return
+
+  // Reconciler-adopted channels are off-limits for auto-cleanup. The
+  // adopt flow stamped `source_hub_id='recovered'` on these rows; that
+  // marker is the only thing distinguishing them from genuine
+  // hub-created auto channels. The new reconciler doesn't adopt
+  // anymore, but legacy 'recovered' rows from before that change must
+  // not be deleted when empty either — a manually-created channel got
+  // swept up once already and the user wants those preserved.
+  const [row] = await db.select().from(autoChannels).where(eq(autoChannels.voiceChannelId, voiceChannelId))
+  if (row && row.sourceHubId === 'recovered') {
+    logger.info(`Cleanup refused for vc=${voiceChannelId} — source_hub_id='recovered' (legacy adopted channel, preserved)`)
+    return
+  }
 
   // Runtime-overridable via /sudo → Settings → Voice; falls back to env.
   const delay = settingOrNumber('voice.cleanup_delay_ms', env.VOICE_CLEANUP_DELAY_MS)

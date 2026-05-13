@@ -9,6 +9,10 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ### Fixed
 
+- **Reconciler no longer adopts untracked voice channels.** Previous behavior: any occupied VC inside the auto-voice category that wasn't already in `auto_channels` got auto-adopted with `source_hub_id='recovered'`, after which it inherited the empty-channel-cleanup timer. That over-reached — manually-created channels inside the auto category were getting swept up and deleted on the first empty cycle. Now: untracked channels are logged-only; the bot leaves them alone. The original "bot was offline when someone joined a hub" justification is rare enough that re-joining the hub when the bot's back up produces a correctly-tracked channel instead.
+
+- **Cleanup scheduler refuses to schedule cleanup for `source_hub_id='recovered'` rows.** Defensive guard for the legacy adopted-channel rows from before the reconciler-adopt change. A user-reported case (channel id `1368013630351740938`) had an `'recovered'` row from a startup adopt; the row was deleted manually but this prevents the same shape causing harm on any future startup that re-adopted before the reconciler change above.
+
 - **Bot now connects to its own postgres via `db-squishy:5432` alias instead of `db:5432`.** Both squishybot-db and otterbot-db attach to the shared `botpanel-net` network with `db` as a default service-name alias, so DNS round-robined between them — the bot was occasionally hitting otter-db with squishy's credentials, throwing `password authentication failed for user "squishybot"` on every voice state update. Symptom: auto voice channels not working at all (every `voiceStateUpdate` handler call swallowed an error). Fix: pin to the unique `db-squishy` alias that the compose already sets up on botpanel-net. Same pattern as the redis-profiles fix on the panel side.
 
 

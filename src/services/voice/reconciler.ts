@@ -11,7 +11,6 @@ import { postOrUpdateControlPanel } from './controlPanel'
 import { postOrUpdateSticky } from './sticky'
 import { syncTextChannelPermissions } from './permissions'
 import { seedHubsFromEnv } from './hubManager'
-import { createAutoChannel } from './autoChannel'
 import { backfillMembers, clearMembers } from './voiceMembers'
 import { logger } from '../logger'
 import { getSetting, unregisterHubChannel, untrackAutoChannelText, untrackAutoChannelVoice, updateHubChannelId } from '../settings'
@@ -72,7 +71,7 @@ export async function runReconciler(client: Client): Promise<ReconcilerResult> {
 
     // Schedule cleanup if empty
     if (vc.isVoiceBased() && vc.members.size === 0) {
-      scheduleCleanup(client, record.voiceChannelId)
+      void scheduleCleanup(client, record.voiceChannelId)
     }
 
     // Backfill member join times for anyone currently in the channel that we
@@ -142,8 +141,22 @@ export async function runReconciler(client: Client): Promise<ReconcilerResult> {
   }
 
   // --- Scan category for occupied channels not in the DB ---
-  // Handles the case where the bot was offline when a user joined a hub.
-  // The hub gets renamed but no DB record was created. On startup we adopt it.
+  // PREVIOUS BEHAVIOR: any occupied voice channel in the auto-category
+  // that wasn't tracked got auto-adopted as an auto channel, which would
+  // later schedule it for cleanup when empty. That over-reached — manually
+  // created VCs in the auto-category got swept up too, and a single
+  // empty-and-leave cycle would delete them.
+  //
+  // NEW BEHAVIOR: never adopt untracked channels. The only legitimate
+  // adoption case (bot offline while a user joined a hub) is rare AND
+  // the user can just re-join the hub when the bot is back up to get a
+  // proper hub-created channel. Logging the orphan still lets an
+  // operator decide manually whether to clean it up.
+  //
+  // Existing `source_hub_id='recovered'` rows are protected separately
+  // by `cleanupScheduler.scheduleCleanup` (it now refuses to schedule
+  // for that marker), so legacy adoptees from before this change won't
+  // get deleted either.
   const hubs = await db.select().from(hubChannels).where(eq(hubChannels.guildId, guild.id))
   const hubIds = new Set(hubs.map(h => h.channelId))
 
@@ -154,14 +167,11 @@ export async function runReconciler(client: Client): Promise<ReconcilerResult> {
       if (channel.type !== ChannelType.GuildVoice) continue
       if (hubIds.has(channel.id)) continue          // skip hubs
       if (trackedVoiceIds.has(channel.id)) continue // already tracked
-      if (channel.members.size === 0) continue      // empty — skip, cleanup will handle
 
-      // Untracked occupied voice channel — adopt it as an auto channel
-      const owner = channel.members.first()!
-      logger.info(`Reconciler: adopting untracked vc=${channel.id} (${channel.name}), owner=${owner.displayName}`)
-
-      const record = await createAutoChannel(client, guild, owner, channel, 'recovered', channel.name)
-      if (record) result.adopted++
+      // Log only — don't touch.
+      if (channel.members.size > 0) {
+        logger.info(`Reconciler: leaving untracked occupied vc=${channel.id} (${channel.name}) alone — not adopting`)
+      }
     }
   }
 
