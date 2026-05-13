@@ -26,7 +26,16 @@ import { logger } from '../../../logger'
 
 type ChannelTypeToken = 'text' | 'voice' | 'announcement' | 'forum'
 
-const TYPE_MAP: Record<ChannelTypeToken, ChannelType> = {
+// `guild.channels.create` accepts a narrow union, not the full ChannelType
+// enum. Pin the map value-type to the literals so TS doesn't widen on
+// dictionary lookup.
+type CreatableChannelType =
+  | ChannelType.GuildText
+  | ChannelType.GuildVoice
+  | ChannelType.GuildAnnouncement
+  | ChannelType.GuildForum
+
+const TYPE_MAP: Record<ChannelTypeToken, CreatableChannelType> = {
   text: ChannelType.GuildText,
   voice: ChannelType.GuildVoice,
   announcement: ChannelType.GuildAnnouncement,
