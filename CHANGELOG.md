@@ -7,6 +7,9 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### Changed
+- **`users.resolve` RPC now fetches missing members from Discord** instead of returning null for users not in the in-process cache. The bot has GUILD_MEMBERS intent but doesn't pre-warm the cache at boot, so static members fell through to the raw-snowflake fallback on the panel (visible on `/squishy/voice`, audit tables, staff approvals). Fetch fallback is concurrency-bounded (5 parallel) so a stale chunk of 100 ids doesn't fan out into 100 parallel REST calls. Each fetch primes the cache for future calls.
+
 ### Added
 
 - **`color.assign` RPC verb** — sudo applies / clears a curated color role for any member from the panel's new `/squishy/members/[id]` editor. Params `{userId, roleKey: string | null}` — `null` clears every curated color role the user holds; otherwise removes the rest and adds the picked one, preserving the one-color-at-a-time invariant the `/color` slash flow already enforces. Validates `userId` resolves in the configured guild and (when non-null) `roleKey` matches a row in `color_roles`. Returns `{userId, roleKey, applied}` where `applied` is true when at least one Discord role mutation happened.
