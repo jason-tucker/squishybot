@@ -13,4 +13,5 @@
  */
 export * from './reloadCaches'
 export * from './orphanScan'
+export * from './orphanCleanup'
 export * from './reconcilerRun'
