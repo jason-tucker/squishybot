@@ -31,7 +31,7 @@ jobs:
 
       # ── 2. Docker Buildx (enables layer caching) ──────────────────────────────
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
+        uses: docker/setup-buildx-action@v4
 
       # ── 3. Log in to GHCR (uses automatic GITHUB_TOKEN — no extra secret) ─────
       - name: Log in to GHCR
