@@ -24,6 +24,12 @@ import '../../services/rpc/handlers/admin'
 import '../../services/rpc/handlers/games/refresh_cache'
 // Wave 7b — games.set_prefs verb (batched per-user view/ping toggles from /me/games).
 import '../../services/rpc/handlers/games/set_prefs'
+// game.provision verb — atomic create-channel+two-roles+games-row for the
+// panel's Add-Game "auto-provision" checkbox.
+import '../../services/rpc/handlers/games/provision'
+// discord.* low-level resource creators — called by the panel's "+ Create"
+// inline buttons when a games-row link points at a deleted entity.
+import '../../services/rpc/handlers/discord'
 // report.submit verb — panel /report page mirrors the slash modal.
 import '../../services/rpc/handlers/report'
 // Wave 7b — reaction-role builder verbs (create/delete/expire).
