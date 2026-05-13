@@ -1,0 +1,32 @@
+name: Notify botpanel of schema change
+
+# Fires a repository_dispatch at jason-tucker/botpanel whenever a push to
+# main touches src/db/schema/**. Botpanel's sync-bot-schema workflow handles
+# the dispatch and opens a PR that re-vendors the schemas. This closes the
+# race where botpanel main goes red after a bot merges a schema change
+# (see jason-tucker/quiet-audience-voting#7's analogous incident).
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'src/db/schema/**'
+  # Manual fire for backfilling after a missed event or testing the wiring.
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  dispatch:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Send repository_dispatch to botpanel
+        env:
+          GH_TOKEN: ${{ secrets.BOTPANEL_DISPATCH_PAT }}
+        run: |
+          gh api -X POST repos/jason-tucker/botpanel/dispatches \
+            -f event_type='bot-schema-changed' \
+            -F 'client_payload[source_repo]=squishybot' \
+            -F 'client_payload[source_ref]=${{ github.sha }}' \
+            -F 'client_payload[schema_dir]=squishy' \
+            -F 'client_payload[head_commit_message]=${{ github.event.head_commit.message }}'
