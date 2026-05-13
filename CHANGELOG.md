@@ -9,6 +9,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ### Added
 
+- **`color.assign` RPC verb** — sudo applies / clears a curated color role for any member from the panel's new `/squishy/members/[id]` editor. Params `{userId, roleKey: string | null}` — `null` clears every curated color role the user holds; otherwise removes the rest and adds the picked one, preserving the one-color-at-a-time invariant the `/color` slash flow already enforces. Validates `userId` resolves in the configured guild and (when non-null) `roleKey` matches a row in `color_roles`. Returns `{userId, roleKey, applied}` where `applied` is true when at least one Discord role mutation happened.
 - **`games.set_prefs` RPC verb** — panel calls this from `/me/games` to apply view/ping role toggles for the requesting user. Delegates to the same `applyUserGamePrefs` helper the `/games` slash flow uses, so behavior is identical.
 - **`report.submit` RPC verb** — panel mirrors the `/report` slash modal: same fields, same DM-owner approval, same GitHub issue creation. Verb delegates to a shared `reportRequestService` helper.
 
