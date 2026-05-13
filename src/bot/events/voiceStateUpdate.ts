@@ -201,7 +201,7 @@ async function handleVoiceStateUpdate(client: Client, oldState: VoiceState, newS
         // Empty room — any pending grace is moot; cleanup will delete both
         // channels. cancelGraceTimer is idempotent.
         cancelGraceTimer(leftChannelId)
-        scheduleCleanup(client, leftChannelId)
+        void scheduleCleanup(client, leftChannelId)
       } else {
         await postOrUpdateControlPanel(client, updatedRecord).catch(() => {})
         // Member who left may have been the one whose game was driving the
