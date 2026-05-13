@@ -7,6 +7,9 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### Added
+- **`voice.toggle_host` RPC verb** — panel can add or remove an auto-channel host via the dashboard. Extracts the `/voice → Hosts` slash-select logic into a shared `hostsService.toggleHost()` helper so slash + RPC are byte-identical (race-safe SQL array mutation, text-channel permission sync, hidden-VC ViewChannel overwrite, control-panel refresh, `voice.hosts_changed` Redis event).
+
 ### Changed
 - **`users.resolve` RPC now fetches missing members from Discord** instead of returning null for users not in the in-process cache. The bot has GUILD_MEMBERS intent but doesn't pre-warm the cache at boot, so static members fell through to the raw-snowflake fallback on the panel (visible on `/squishy/voice`, audit tables, staff approvals). Fetch fallback is concurrency-bounded (5 parallel) so a stale chunk of 100 ids doesn't fan out into 100 parallel REST calls. Each fetch primes the cache for future calls.
 

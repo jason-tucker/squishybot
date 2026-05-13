@@ -2,10 +2,9 @@ import type { StringSelectMenuInteraction } from 'discord.js'
 import { decodeVcId } from '../../utils/customId'
 import { db } from '../../db/client'
 import { autoChannels } from '../../db/schema'
-import { eq, sql } from 'drizzle-orm'
-import { canControlChannel, isOwner, isSudo, syncTextChannelPermissions } from '../../services/voice/permissions'
-import { postOrUpdateControlPanel } from '../../services/voice/controlPanel'
-import { publish, voiceCh, type VoiceHostsChangedEvent } from '../../services/eventBus'
+import { eq } from 'drizzle-orm'
+import { canControlChannel, isOwner, isSudo } from '../../services/voice/permissions'
+import { toggleHost } from '../../services/voice/hostsService'
 
 export async function handleVoiceControlSelect(interaction: StringSelectMenuInteraction): Promise<void> {
   const decoded = decodeVcId(interaction.customId)
@@ -43,47 +42,20 @@ export async function handleVoiceControlSelect(interaction: StringSelectMenuInte
 
     await interaction.deferUpdate()
 
-    // Race-safe array mutation in SQL — concurrent host toggles on the same
-    // record won't lose updates the way a JS read-modify-write would, since
-    // each statement re-evaluates the array. RETURNING gives us the canonical
-    // post-mutation row to render against.
-    const expr = op === 'add'
-      // de-dupe: union the current array with the user, then DISTINCT
-      ? sql`(SELECT array_agg(DISTINCT x) FROM unnest(${autoChannels.hostUserIds} || ARRAY[${userId}]::text[]) AS x)`
-      : sql`array_remove(${autoChannels.hostUserIds}, ${userId})`
-    const [updatedRow] = await db.update(autoChannels)
-      .set({ hostUserIds: expr })
-      .where(eq(autoChannels.voiceChannelId, voiceChannelId))
-      .returning()
-
-    const updated = updatedRow ?? { ...record, hostUserIds: record.hostUserIds }
-
-    // Cache.get over fetch — same pattern as the other handlers.
-    const vc = interaction.guild!.channels.cache.get(record.voiceChannelId)
-      ?? await interaction.guild!.channels.fetch(record.voiceChannelId).catch(() => null)
-    const tc = interaction.guild!.channels.cache.get(record.textChannelId)
-      ?? await interaction.guild!.channels.fetch(record.textChannelId).catch(() => null)
-    if (vc?.isVoiceBased() && tc?.isTextBased()) {
-      await syncTextChannelPermissions(tc as any, vc as any, updated, interaction.client.user!.id)
-      // If the VC is hidden, hosts need an explicit view allow to find it from
-      // the channel list. On removal, drop the overwrite so they go back to
-      // @everyone-deny visibility.
-      if (record.isHidden) {
-        if (op === 'add') {
-          await vc.permissionOverwrites.edit(userId, { ViewChannel: true }).catch(() => {})
-        } else {
-          await vc.permissionOverwrites.edit(userId, { ViewChannel: null }).catch(() => {})
-        }
-      }
-    }
-    await postOrUpdateControlPanel(interaction.client, updated)
-
-    void publish<VoiceHostsChangedEvent>(voiceCh('hosts_changed'), {
+    const result = await toggleHost({
+      client: interaction.client,
       voiceChannelId,
-      op,
       userId,
-      ts: new Date().toISOString(),
+      op,
     })
+
+    if (!result.ok) {
+      await interaction.editReply({
+        content: `❌ ${result.error}${result.details ? `: ${result.details}` : ''}`,
+        components: [],
+      })
+      return
+    }
 
     await interaction.editReply({
       content: op === 'add'
