@@ -6,11 +6,15 @@
  * those snowflakes into `{username, displayName, avatarUrl}` in a single
  * round-trip per render.
  *
- * Pure cache read — never fetches. If the bot doesn't have the user in
- * `client.users.cache` (or the member in `guild.members.cache`), the response
- * returns null fields for that id and the panel falls back to displaying the
- * raw snowflake. This keeps the verb cheap (no Discord API calls) and avoids
- * accidental large-guild pre-warm work.
+ * Cache-first with a fetch fallback. Tries `client.users.cache` and
+ * `guild.members.cache` first; for any id still missing, falls back to
+ * `guild.members.fetch(id)` (Discord API). Squishy is a single-mid-sized
+ * guild and the bot has GUILD_MEMBERS intent, but doesn't pre-warm the
+ * member cache at boot — so members who haven't done anything recently
+ * aren't in the in-process cache yet. Without the fetch fallback, the
+ * panel's voice / audit / staff views render raw snowflakes for those
+ * members. Concurrency-bounded so 100 stale ids don't fan out into 100
+ * parallel REST calls.
  *
  * Params: `{ userIds: string[] }`
  *   - Array of Discord snowflakes. Max 100 per call. Duplicates are allowed
@@ -59,26 +63,25 @@ export const resolveHandler: VerbHandler = async (params, ctx) => {
   // covers folks the bot has seen but who aren't (or are no longer) members.
   const guild = ctx.client.guilds.cache.get(env.GUILD_ID)
 
-  // Dedup while preserving caller-supplied order so the panel can zip the
-  // response back onto its row list without an extra Map lookup.
+  // Dedup; collect ids that need a fetch for the second pass.
   const seen = new Set<string>()
-  const out: ResolvedUser[] = []
+  const order: string[] = []
+  const resolvedById = new Map<string, ResolvedUser>()
+  const missingForFetch: string[] = []
+
   for (const id of params.userIds) {
     if (seen.has(id)) continue
     seen.add(id)
+    order.push(id)
 
     const user = ctx.client.users.cache.get(id)
     const member = guild?.members.cache.get(id)
     if (!user && !member) {
-      out.push({ id, username: null, displayName: null, avatarUrl: null })
+      missingForFetch.push(id)
       continue
     }
-
-    // Prefer the member's per-guild displayName (nickname) when available;
-    // otherwise fall back to the global username so the panel still has a
-    // human-readable label.
     const baseUser = user ?? member!.user
-    out.push({
+    resolvedById.set(id, {
       id,
       username: baseUser.username,
       displayName: member?.displayName ?? baseUser.username,
@@ -86,6 +89,37 @@ export const resolveHandler: VerbHandler = async (params, ctx) => {
     })
   }
 
+  // Fetch fallback for missing ids — concurrency-bounded so a stale chunk
+  // of 100 doesn't fan out into 100 parallel Discord API calls. Each fetch
+  // primes the in-process member cache so subsequent calls hit `seen-with-this-id`.
+  if (guild && missingForFetch.length > 0) {
+    const FETCH_CONCURRENCY = 5
+    for (let i = 0; i < missingForFetch.length; i += FETCH_CONCURRENCY) {
+      const slice = missingForFetch.slice(i, i + FETCH_CONCURRENCY)
+      await Promise.all(
+        slice.map(async (id) => {
+          const member = await guild.members.fetch(id).catch(() => null)
+          if (!member) {
+            resolvedById.set(id, { id, username: null, displayName: null, avatarUrl: null })
+            return
+          }
+          resolvedById.set(id, {
+            id,
+            username: member.user.username,
+            displayName: member.displayName ?? member.user.username,
+            avatarUrl: member.displayAvatarURL({ size: 64 }),
+          })
+        }),
+      )
+    }
+  } else {
+    // No guild — can't fetch. Mark every still-missing id as unresolved.
+    for (const id of missingForFetch) {
+      resolvedById.set(id, { id, username: null, displayName: null, avatarUrl: null })
+    }
+  }
+
+  const out: ResolvedUser[] = order.map((id) => resolvedById.get(id)!)
   return { ok: true, data: { users: out } }
 }
 
