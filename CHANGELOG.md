@@ -9,6 +9,10 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ### Fixed
 
+- **Bot now connects to its own postgres via `db-squishy:5432` alias instead of `db:5432`.** Both squishybot-db and otterbot-db attach to the shared `botpanel-net` network with `db` as a default service-name alias, so DNS round-robined between them — the bot was occasionally hitting otter-db with squishy's credentials, throwing `password authentication failed for user "squishybot"` on every voice state update. Symptom: auto voice channels not working at all (every `voiceStateUpdate` handler call swallowed an error). Fix: pin to the unique `db-squishy` alias that the compose already sets up on botpanel-net. Same pattern as the redis-profiles fix on the panel side.
+
+
+
 - **Staff base-role rename: `it_cri_staff` → `itsri_staff`, "IT CRI Staff" → "ITSRI Staff".** The actual Discord role name is **ITSRI Staff**, not IT CRI Staff. Renamed slug + key + label + name in `STAFF_ROLE_DEFS` and every user-facing string referencing it. Safe rename — no `staff_approvals` rows or `bot_settings` entries with the old slug/key exist yet (original entry shipped a few hours earlier and `/sudo → Provision & link` hadn't been run). Provision & Link will now match the existing "ITSRI Staff" Discord role by name.
 
 ### Changed
