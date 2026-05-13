@@ -9,7 +9,13 @@ services:
     environment:
       # Overrides DATABASE_URL from .env so the bot always connects to the
       # compose-managed postgres service, regardless of what's in .env.
-      DATABASE_URL: "postgresql://squishybot:${POSTGRES_PASSWORD:-squishybot_dev}@db:5432/squishybot"
+      # Uses the `db-squishy` alias (set on the botpanel-net network below)
+      # instead of the default `db` alias. Both squishybot-db-1 and
+      # otterbot-db-1 attach to botpanel-net with `db` as a service-name
+      # alias; DNS round-robins between them and the bot was occasionally
+      # hitting otter-db with squishy's credentials, causing voice handler
+      # crashes ("password authentication failed for user squishybot").
+      DATABASE_URL: "postgresql://squishybot:${POSTGRES_PASSWORD:-squishybot_dev}@db-squishy:5432/squishybot"
       # Redis is the event bus and (V2+) command bus to botpanel.
       # Lives in the botpanel compose stack on the shared network.
       REDIS_URL: "${REDIS_URL:-redis://redis:6379}"
