@@ -8,6 +8,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ## [Unreleased]
 
 ### Added
+- **`discord.create_role`, `discord.create_channel`, `game.provision` RPC verbs** — backing the new "+ Create" inline buttons on the panel's games editor (for filling missing role/channel links one resource at a time) plus the new "Auto-provision channel + view role + ping role" checkbox on the Add Game form. `game.provision` is the high-level atomic verb: it creates the games-category text channel (defaults to position 3, prefix `🎮-`, slugged game name), a view role (named after the game), and a ping role (`{name} LFG`, mentionable), then inserts the `games` row wiring all three IDs. Best-effort rollback on partial failure (deletes whatever's already created). Idempotent on `name` — returns `game-exists` with the existing row id. Parent-category resolution: explicit param → `bot_settings.channel.games_category` → top-level (no parent).
 - **`voice.toggle_host` RPC verb** — panel can add or remove an auto-channel host via the dashboard. Extracts the `/voice → Hosts` slash-select logic into a shared `hostsService.toggleHost()` helper so slash + RPC are byte-identical (race-safe SQL array mutation, text-channel permission sync, hidden-VC ViewChannel overwrite, control-panel refresh, `voice.hosts_changed` Redis event).
 
 ### Changed
