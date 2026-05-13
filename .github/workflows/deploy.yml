@@ -55,7 +55,7 @@ jobs:
       # TypeScript compiles inside Docker (on this runner with 7 GB RAM).
       # The VPS never runs tsc — it just pulls the pre-built image.
       - name: Build and push image
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: .
           push: true
