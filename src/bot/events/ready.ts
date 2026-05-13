@@ -22,6 +22,10 @@ import '../../services/rpc/handlers/staff'
 import '../../services/rpc/handlers/admin'
 // Wave 7b — games.refresh_cache verb (post-write cache reload hook).
 import '../../services/rpc/handlers/games/refresh_cache'
+// Wave 7b — games.set_prefs verb (batched per-user view/ping toggles from /me/games).
+import '../../services/rpc/handlers/games/set_prefs'
+// report.submit verb — panel /report page mirrors the slash modal.
+import '../../services/rpc/handlers/report'
 // Wave 7b — reaction-role builder verbs (create/delete/expire).
 import '../../services/rpc/handlers/rxnroles/create'
 import '../../services/rpc/handlers/rxnroles/delete'

@@ -7,6 +7,11 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### Added
+
+- **`games.set_prefs` RPC verb** — panel calls this from `/me/games` to apply view/ping role toggles for the requesting user. Delegates to the same `applyUserGamePrefs` helper the `/games` slash flow uses, so behavior is identical.
+- **`report.submit` RPC verb** — panel mirrors the `/report` slash modal: same fields, same DM-owner approval, same GitHub issue creation. Verb delegates to a shared `reportRequestService` helper.
+
 ### Ops
 
 - **Schema-change → botpanel dispatch.** New `.github/workflows/notify-panel-schema-change.yml` fires a `repository_dispatch` (`bot-schema-changed`) at `jason-tucker/botpanel` whenever a push to `main` touches `src/db/schema/**`. Botpanel's companion `sync-bot-schema` workflow opens or updates a PR with the re-vendored Drizzle schemas. Closes the race where botpanel's `main` could go red after a schema merge here. Auth: `BOTPANEL_DISPATCH_PAT` repo secret.
