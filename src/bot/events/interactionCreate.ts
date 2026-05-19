@@ -113,6 +113,12 @@ export function registerInteractionCreate(client: Client) {
         } else if (id.startsWith('play:cancel:')) {
           const { handleCancelButton } = await import('../../commands/play')
           await handleCancelButton(interaction as ButtonInteraction)
+        } else if (id.startsWith('play:help:')) {
+          const { handleHelpButton } = await import('../../commands/play')
+          await handleHelpButton(interaction as ButtonInteraction)
+        } else if (id.startsWith('play:notify:')) {
+          const { handleNotifyToggleButton } = await import('../../commands/play')
+          await handleNotifyToggleButton(interaction as ButtonInteraction)
         } else if (id.startsWith('gn:preview:')) {
           const { handlePreviewButton } = await import('../../commands/gamenight')
           await handlePreviewButton(interaction as ButtonInteraction)

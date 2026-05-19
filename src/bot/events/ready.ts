@@ -32,6 +32,8 @@ import '../../services/rpc/handlers/games/provision'
 import '../../services/rpc/handlers/discord'
 // report.submit verb — panel /report page mirrors the slash modal.
 import '../../services/rpc/handlers/report'
+// play.post verb — panel-triggered LFG post mirroring /play [message] [ping].
+import '../../services/rpc/handlers/play'
 // Wave 7b — reaction-role builder verbs (create/delete/expire).
 import '../../services/rpc/handlers/rxnroles/create'
 import '../../services/rpc/handlers/rxnroles/delete'

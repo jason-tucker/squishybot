@@ -17,6 +17,7 @@ import {
   ButtonStyle,
   ChannelType,
   ChatInputCommandInteraction,
+  type Client,
   ContainerBuilder,
   type AutocompleteInteraction,
   type MessageActionRowComponentBuilder,
@@ -26,6 +27,7 @@ import {
   TextDisplayBuilder,
   type TextChannel,
 } from 'discord.js'
+import { env } from '../config/env'
 import { isSudo } from '../services/voice/permissions'
 import {
   checkPlayCooldown,
@@ -48,6 +50,17 @@ export const data = new SlashCommandBuilder()
     .setRequired(true)
     .setAutocomplete(true)
   )
+  .addStringOption(o => o
+    .setName('message')
+    .setDescription('Optional note to add to the post (e.g. "casual 1hr, no mics needed")')
+    .setMaxLength(500)
+    .setRequired(false)
+  )
+  .addBooleanOption(o => o
+    .setName('ping')
+    .setDescription('Ping the game\'s role on the initial post? Default true.')
+    .setRequired(false)
+  )
 
 // ---------------------------------------------------------------------------
 // In-memory session state, keyed by message ID
@@ -60,6 +73,10 @@ interface LfgSession {
   players: string[]
   /** When the session was created — used to expire stale entries. */
   createdAt: number
+  /** Optional host message (rendered as a quoted block above the player
+   *  list). Preserved across re-renders so click handlers can rebuild the
+   *  panel without dropping it. */
+  hostMessage?: string
 }
 
 const sessions = new Map<string, LfgSession>()
@@ -77,7 +94,7 @@ function sweepSessions(): void {
 // Message rendering
 // ---------------------------------------------------------------------------
 
-function buildPanel(game: Game, session: LfgSession, options?: { initialPing?: boolean }): {
+function buildPanel(game: Game, session: LfgSession, options?: { initialPing?: boolean; hostMessage?: string }): {
   flags: number
   components: any[]
   allowedMentions: { roles: string[]; users: string[]; parse: never[] }
@@ -90,15 +107,29 @@ function buildPanel(game: Game, session: LfgSession, options?: { initialPing?: b
   for (const id of session.players) playerLines.push(`• <@${id}>`)
   const total = 1 + session.players.length
 
+  // Optional host message — rendered as a quoted block between the header
+  // and the player list. Persists on the message (so cache misses + later
+  // re-renders keep it). allowedMentions is locked below so any pings in
+  // the message text don't actually fire.
+  const hostMessage = options?.hostMessage?.trim() ?? ''
+  const hostMessageBlock = hostMessage
+    ? '> ' + hostMessage.split('\n').join('\n> ')
+    : ''
+
   const container = new ContainerBuilder()
     .setAccentColor(0x5865f2)
     .addTextDisplayComponents(new TextDisplayBuilder().setContent(headerLine))
+  if (hostMessageBlock) {
+    container.addSeparatorComponents(sep())
+    container.addTextDisplayComponents(new TextDisplayBuilder().setContent(hostMessageBlock))
+  }
+  container
     .addSeparatorComponents(sep())
     .addTextDisplayComponents(new TextDisplayBuilder().setContent(
       `**Players (${total})**\n${playerLines.join('\n')}`
     ))
 
-  const button = new ActionRowBuilder<MessageActionRowComponentBuilder>().addComponents(
+  const primaryRow = new ActionRowBuilder<MessageActionRowComponentBuilder>().addComponents(
     new ButtonBuilder()
       .setCustomId(`play:join:${game.id}`)
       .setLabel('I want to play!')
@@ -111,6 +142,30 @@ function buildPanel(game: Game, session: LfgSession, options?: { initialPing?: b
       .setStyle(ButtonStyle.Danger),
   )
 
+  // Secondary row: Help + Notify toggle. Discord can't render different
+  // labels per viewer on a shared message — the click handler reads the
+  // clicker's current ping-role state and the ephemeral confirmation
+  // calls out the resulting state ("you're now notified" / "muted").
+  // Notify is hidden when the game has no ping role configured (nothing
+  // meaningful to toggle).
+  const secondaryButtons: ButtonBuilder[] = [
+    new ButtonBuilder()
+      .setCustomId(`play:help:${game.id}`)
+      .setLabel('Help')
+      .setEmoji('❔')
+      .setStyle(ButtonStyle.Secondary),
+  ]
+  if (game.pingRoleId) {
+    secondaryButtons.push(
+      new ButtonBuilder()
+        .setCustomId(`play:notify:${game.id}`)
+        .setLabel('Notify Toggle')
+        .setEmoji('🔔')
+        .setStyle(ButtonStyle.Secondary),
+    )
+  }
+  const secondaryRow = new ActionRowBuilder<MessageActionRowComponentBuilder>().addComponents(...secondaryButtons)
+
   // Lock allowed mentions:
   //  - users: just the host (so they don't ping themselves on subsequent edits)
   //  - roles: the ping role IFF this is the initial post
@@ -119,8 +174,97 @@ function buildPanel(game: Game, session: LfgSession, options?: { initialPing?: b
 
   return {
     flags: MessageFlags.IsComponentsV2,
-    components: [container, button],
+    components: [container, primaryRow, secondaryRow],
     allowedMentions: { roles: allowedRoles, users: [session.hostId], parse: [] },
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Shared post helper — runs the resolve-channel / check-perms / send /
+// track-session flow used by both `/play` slash and the `play.post` RPC
+// verb. Returning a machine token on failure lets each caller surface
+// the right localized message (slash: ephemeral; RPC: JSON to panel).
+// ---------------------------------------------------------------------------
+
+export type PostLfgResult =
+  | { ok: true; channelId: string; messageId: string }
+  | {
+      ok: false
+      error:
+        | 'guild-unavailable'
+        | 'game-not-active'
+        | 'game-no-channel'
+        | 'channel-unreachable'
+        | 'channel-not-text'
+        | 'bot-missing-perm'
+        | 'cooldown'
+        | 'discord-error'
+      details?: string
+      /** Remaining seconds when `error === 'cooldown'`. */
+      remainingSec?: number
+    }
+
+export async function postLfg(client: Client, opts: {
+  game: Game
+  hostUserId: string
+  hostMessage?: string
+  /** Default true. */
+  ping?: boolean
+  /** Slash command: !sudo. RPC: caller decides. */
+  enforceCooldown?: boolean
+}): Promise<PostLfgResult> {
+  const { game, hostUserId } = opts
+  const guild = client.guilds.cache.get(env.GUILD_ID) ?? await client.guilds.fetch(env.GUILD_ID).catch(() => null)
+  if (!guild) {
+    return { ok: false, error: 'guild-unavailable', details: env.GUILD_ID }
+  }
+  if (game.isArchived || !game.isVisible) {
+    return { ok: false, error: 'game-not-active', details: game.name }
+  }
+  if (opts.enforceCooldown) {
+    const check = checkPlayCooldown(guild.id, hostUserId, game.id)
+    if (!check.ok) {
+      return { ok: false, error: 'cooldown', remainingSec: check.remainingSec }
+    }
+  }
+  if (!game.channelId) {
+    return { ok: false, error: 'game-no-channel', details: game.name }
+  }
+  const channel = await guild.channels.fetch(game.channelId).catch(() => null)
+  if (!channel) {
+    return { ok: false, error: 'channel-unreachable', details: game.channelId }
+  }
+  if (channel.type !== ChannelType.GuildText) {
+    return { ok: false, error: 'channel-not-text', details: game.channelId }
+  }
+  const me = await guild.members.fetchMe()
+  if (!(channel as TextChannel).permissionsFor(me)?.has(PermissionFlagsBits.SendMessages)) {
+    return { ok: false, error: 'bot-missing-perm', details: 'SendMessages' }
+  }
+
+  const hostMessage = opts.hostMessage?.trim() || undefined
+  const shouldPing = opts.ping !== false
+  const session: LfgSession = {
+    gameId: game.id,
+    hostId: hostUserId,
+    players: [],
+    createdAt: Date.now(),
+    hostMessage,
+  }
+  try {
+    const sent = await (channel as TextChannel).send(buildPanel(game, session, {
+      initialPing: shouldPing,
+      hostMessage,
+    }) as any)
+    if (sessions.size > 200) sweepSessions()
+    sessions.set(sent.id, session)
+    if (opts.enforceCooldown) markPlayUsed(guild.id, hostUserId, game.id)
+    logger.info(`postLfg game=${game.name} host=${hostUserId} message=${sent.id} ping=${shouldPing} hasMessage=${!!hostMessage}`)
+    return { ok: true, channelId: channel.id, messageId: sent.id }
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err)
+    logger.warn(`postLfg send failed game=${game.name} host=${hostUserId}: ${msg}`)
+    return { ok: false, error: 'discord-error', details: msg }
   }
 }
 
@@ -144,46 +288,54 @@ export async function execute(interaction: ChatInputCommandInteraction): Promise
     await interaction.editReply({ content: `❌ No game matches \`${query}\`. Try \`/games\` to see what's available.` })
     return
   }
-  if (game.isArchived || !game.isVisible) {
-    await interaction.editReply({ content: `❌ **${game.name}** is not active for LFG right now.` })
-    return
-  }
 
-  // Sudo bypasses the cooldown entirely — no flag needed.
-  if (!sudo) {
-    const check = checkPlayCooldown(interaction.guild.id, member.id, game.id)
-    if (!check.ok) {
-      const m = Math.floor(check.remainingSec / 60), s = check.remainingSec % 60
-      const wait = m > 0 ? `${m}m ${s}s` : `${s}s`
-      await interaction.editReply({ content: `🕒 Cooldown — try again in **${wait}**.` })
-      return
+  const hostMessage = interaction.options.getString('message', false)?.trim() || undefined
+  const pingOpt = interaction.options.getBoolean('ping', false)
+
+  const result = await postLfg(interaction.client, {
+    game,
+    hostUserId: member.id,
+    hostMessage,
+    ping: pingOpt === null ? true : pingOpt,
+    enforceCooldown: !sudo,
+  })
+
+  if (!result.ok) {
+    let msg: string
+    switch (result.error) {
+      case 'game-not-active':
+        msg = `❌ **${game.name}** is not active for LFG right now.`
+        break
+      case 'cooldown': {
+        const s = result.remainingSec ?? 0
+        const m = Math.floor(s / 60), sec = s % 60
+        const wait = m > 0 ? `${m}m ${sec}s` : `${sec}s`
+        msg = `🕒 Cooldown — try again in **${wait}**.`
+        break
+      }
+      case 'game-no-channel':
+        msg = `❌ **${game.name}** has no channel configured. Sudo: set one at /sudo → Settings → Games.`
+        break
+      case 'channel-unreachable':
+      case 'channel-not-text':
+        msg = `❌ **${game.name}**'s channel is unreachable or not text-type.`
+        break
+      case 'bot-missing-perm':
+        msg = `❌ Bot lacks Send Messages in the game's channel.`
+        break
+      case 'guild-unavailable':
+        msg = `❌ Guild unavailable — bot may be reconnecting.`
+        break
+      case 'discord-error':
+      default:
+        msg = `❌ Discord error: ${result.details ?? 'unknown'}`
     }
-  }
-
-  if (!game.channelId) {
-    await interaction.editReply({ content: `❌ **${game.name}** has no channel configured. Sudo: set one at /sudo → Settings → Games.` })
-    return
-  }
-  const channel = await interaction.guild.channels.fetch(game.channelId).catch(() => null)
-  if (!channel || channel.type !== ChannelType.GuildText) {
-    await interaction.editReply({ content: `❌ **${game.name}**'s channel is unreachable or not text-type.` })
+    await interaction.editReply({ content: msg })
     return
   }
 
-  const me = await interaction.guild.members.fetchMe()
-  if (!(channel as TextChannel).permissionsFor(me)?.has(PermissionFlagsBits.SendMessages)) {
-    await interaction.editReply({ content: `❌ Bot lacks Send Messages in <#${channel.id}>.` })
-    return
-  }
-
-  const session: LfgSession = { gameId: game.id, hostId: member.id, players: [], createdAt: Date.now() }
-  const sent = await (channel as TextChannel).send(buildPanel(game, session, { initialPing: true }) as any)
-  if (sessions.size > 200) sweepSessions()
-  sessions.set(sent.id, session)
-
-  if (!sudo) markPlayUsed(interaction.guild.id, member.id, game.id)
-  logger.info(`/play game=${game.name} host=${member.id} message=${sent.id} sudo=${sudo}`)
-  await interaction.editReply({ content: `✅ Posted in <#${channel.id}>.` })
+  logger.info(`/play game=${game.name} host=${member.id} message=${result.messageId} sudo=${sudo}`)
+  await interaction.editReply({ content: `✅ Posted in <#${result.channelId}>.` })
 }
 
 export async function autocomplete(interaction: AutocompleteInteraction): Promise<void> {
@@ -238,7 +390,7 @@ export async function handleJoinButton(interaction: ButtonInteraction): Promise<
   if (idx === -1) session.players.push(userId)
   else session.players.splice(idx, 1)
 
-  await interaction.update(buildPanel(game, session) as any)
+  await interaction.update(buildPanel(game, session, { hostMessage: session.hostMessage }) as any)
 }
 
 /**
@@ -290,8 +442,106 @@ function recoverSessionFromMessage(interaction: ButtonInteraction): LfgSession |
     seen.add(id)
     dedupedPlayers.push(id)
   }
+  // Recover the optional host message — it's the TextDisplay whose content
+  // starts with `> ` (the quoted-block marker the renderer emits). We
+  // un-quote line-by-line. Best-effort: if the user removed the leading
+  // `> ` from the message in some weird edit, we just lose the message
+  // text on this re-render (cosmetic).
+  let hostMessage: string | undefined
+  for (const comp of interaction.message.components ?? []) {
+    const c = comp as { type?: number; components?: { content?: string }[] }
+    for (const inner of c.components ?? []) {
+      const content = inner.content
+      if (typeof content !== 'string') continue
+      if (content.startsWith('> ') && !content.startsWith('> **Players')) {
+        // Strip the `> ` prefix from every line.
+        hostMessage = content.split('\n').map(line => line.replace(/^> ?/, '')).join('\n').trim()
+        break
+      }
+    }
+    if (hostMessage) break
+  }
   // Recovered sessions get a fresh createdAt — we can't recover the original
   // from message contents, and a freshly-recovered entry shouldn't be
   // immediately swept on the next size-trigger.
-  return { gameId, hostId, players: dedupedPlayers, createdAt: Date.now() }
+  return { gameId, hostId, players: dedupedPlayers, createdAt: Date.now(), hostMessage }
+}
+
+// ---------------------------------------------------------------------------
+// Help button — ephemeral explainer for users wondering "wtf is /play".
+// ---------------------------------------------------------------------------
+
+export async function handleHelpButton(interaction: ButtonInteraction): Promise<void> {
+  const gameId = interaction.customId.split(':')[2]
+  const game = getGame(gameId)
+  const gameName = game?.name ?? 'this game'
+  await interaction.reply({
+    ephemeral: true,
+    content:
+      `**What is /play?**\n` +
+      `It's a quick way to say "I'm playing **${gameName}** right now, who wants to join?" The host posts a CV2 panel with a player list; anyone who wants in clicks **🎮 I want to play!** to be added.\n\n` +
+      `**About the buttons**\n` +
+      `• **🎮 I want to play!** — adds you to the player list (or removes you if you're already on it).\n` +
+      `• **✖️ Cancel** — host-only, ends the session.\n` +
+      `• **❔ Help** — this card.\n` +
+      `• **🔔 Notify Toggle** — adds or removes the game's ping role for you, so future \`/play ${gameName}\` posts ping you (or don't). Each click flips your state and tells you which way it went.\n\n` +
+      `**Cooldown**: 30 min per (you, game) so the channel doesn't get spammed.\n` +
+      `**Don't want to be pinged anymore?** Click 🔔 Notify Toggle on any post for this game, or open \`Manage Games\` on the dashboard.`,
+  })
+}
+
+// ---------------------------------------------------------------------------
+// Notify-toggle button — adds the game's ping role to the clicker if they
+// don't have it; removes it if they do. The PUBLIC button can't show
+// different labels per viewer (Discord limitation), so the ephemeral
+// confirmation owns the "you're now notified / muted" framing.
+// ---------------------------------------------------------------------------
+
+export async function handleNotifyToggleButton(interaction: ButtonInteraction): Promise<void> {
+  if (!interaction.guild) {
+    await interaction.reply({ ephemeral: true, content: '❌ Server-only.' })
+    return
+  }
+  const gameId = interaction.customId.split(':')[2]
+  const game = getGame(gameId)
+  if (!game) {
+    await interaction.reply({ ephemeral: true, content: '❌ Game not found (it may have been removed).' })
+    return
+  }
+  if (!game.pingRoleId) {
+    await interaction.reply({
+      ephemeral: true,
+      content: `❌ **${game.name}** has no ping role configured, so there's nothing to toggle. Sudo: link one at \`/sudo → Settings → Games\`.`,
+    })
+    return
+  }
+  const member = await interaction.guild.members.fetch(interaction.user.id).catch(() => null)
+  if (!member) {
+    await interaction.reply({ ephemeral: true, content: '❌ Couldn\'t resolve your member.' })
+    return
+  }
+  const hasRole = member.roles.cache.has(game.pingRoleId)
+  try {
+    if (hasRole) {
+      await member.roles.remove(game.pingRoleId, `/play notify toggle off`)
+      await interaction.reply({
+        ephemeral: true,
+        content: `🔕 **Muted** — you won't be pinged when someone runs \`/play ${game.name}\`. Click **🔔 Notify Toggle** again to re-enable.`,
+      })
+    } else {
+      await member.roles.add(game.pingRoleId, `/play notify toggle on`)
+      await interaction.reply({
+        ephemeral: true,
+        content: `🔔 **Get Notified** — you'll be pinged when someone runs \`/play ${game.name}\`. Click **🔔 Notify Toggle** again to mute.`,
+      })
+    }
+    logger.info(`play.notify_toggle user=${member.id} game=${game.name} was=${hasRole ? 'on' : 'off'} now=${hasRole ? 'off' : 'on'}`)
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : 'unknown'
+    logger.warn(`play.notify_toggle failed user=${member.id} game=${game.name}: ${msg}`)
+    await interaction.reply({
+      ephemeral: true,
+      content: `❌ Couldn't toggle the role: ${msg}. The bot may be missing **Manage Roles** or the ping role may be above the bot's top role.`,
+    })
+  }
 }
