@@ -13,6 +13,7 @@ import { logResolvedBotOwners } from '../../services/botOwner'
 import { getBoolSetting } from '../../services/settings'
 import { publishHeartbeat, publishReady } from '../../services/eventBus'
 import { startRpcServer } from '../../services/rpcServer'
+import { startCacheInvalidator } from '../../services/cacheInvalidator'
 // Side-effect import: registers the `echo` verb on the RPC registry.
 // Follow-up PRs add more handlers; each one is a side-effect import too.
 import '../../services/rpc/handlers/echo'
@@ -114,6 +115,13 @@ export function registerReadyEvent(client: Client) {
     // bot still boots normally. Runs after the reconciler so handlers
     // see a settled channel state.
     startRpcServer(c)
+
+    // V3-1 cache-invalidate subscriber — listens on
+    // `bot.squishy.settings.invalidate` for HMAC-signed events from
+    // botpanel and reloads in-memory caches (settings, games, hubs, …)
+    // without a bot restart. Non-blocking; logs and skips if
+    // BOTPANEL_RPC_SECRET is unset. Tracks #33 / botpanel V3-1.
+    startCacheInvalidator()
 
     // Build a richer startup DM. Only the BOT_OWNER_ID env target gets this
     // (logger.dmOwner reads env directly — not the dynamic isBotOwner set).
