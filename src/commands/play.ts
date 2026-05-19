@@ -48,6 +48,17 @@ export const data = new SlashCommandBuilder()
     .setRequired(true)
     .setAutocomplete(true)
   )
+  .addStringOption(o => o
+    .setName('message')
+    .setDescription('Optional note to add to the post (e.g. "casual 1hr, no mics needed")')
+    .setMaxLength(500)
+    .setRequired(false)
+  )
+  .addBooleanOption(o => o
+    .setName('ping')
+    .setDescription('Ping the game\'s role on the initial post? Default true.')
+    .setRequired(false)
+  )
 
 // ---------------------------------------------------------------------------
 // In-memory session state, keyed by message ID
@@ -60,6 +71,10 @@ interface LfgSession {
   players: string[]
   /** When the session was created — used to expire stale entries. */
   createdAt: number
+  /** Optional host message (rendered as a quoted block above the player
+   *  list). Preserved across re-renders so click handlers can rebuild the
+   *  panel without dropping it. */
+  hostMessage?: string
 }
 
 const sessions = new Map<string, LfgSession>()
@@ -77,7 +92,7 @@ function sweepSessions(): void {
 // Message rendering
 // ---------------------------------------------------------------------------
 
-function buildPanel(game: Game, session: LfgSession, options?: { initialPing?: boolean }): {
+function buildPanel(game: Game, session: LfgSession, options?: { initialPing?: boolean; hostMessage?: string }): {
   flags: number
   components: any[]
   allowedMentions: { roles: string[]; users: string[]; parse: never[] }
@@ -90,9 +105,23 @@ function buildPanel(game: Game, session: LfgSession, options?: { initialPing?: b
   for (const id of session.players) playerLines.push(`• <@${id}>`)
   const total = 1 + session.players.length
 
+  // Optional host message — rendered as a quoted block between the header
+  // and the player list. Persists on the message (so cache misses + later
+  // re-renders keep it). allowedMentions is locked below so any pings in
+  // the message text don't actually fire.
+  const hostMessage = options?.hostMessage?.trim() ?? ''
+  const hostMessageBlock = hostMessage
+    ? '> ' + hostMessage.split('\n').join('\n> ')
+    : ''
+
   const container = new ContainerBuilder()
     .setAccentColor(0x5865f2)
     .addTextDisplayComponents(new TextDisplayBuilder().setContent(headerLine))
+  if (hostMessageBlock) {
+    container.addSeparatorComponents(sep())
+    container.addTextDisplayComponents(new TextDisplayBuilder().setContent(hostMessageBlock))
+  }
+  container
     .addSeparatorComponents(sep())
     .addTextDisplayComponents(new TextDisplayBuilder().setContent(
       `**Players (${total})**\n${playerLines.join('\n')}`
@@ -200,8 +229,23 @@ export async function execute(interaction: ChatInputCommandInteraction): Promise
     return
   }
 
-  const session: LfgSession = { gameId: game.id, hostId: member.id, players: [], createdAt: Date.now() }
-  const sent = await (channel as TextChannel).send(buildPanel(game, session, { initialPing: true }) as any)
+  // Options: `message` text is rendered as a quoted block on the panel;
+  // `ping` (default true) gates whether the role mention fires on the
+  // initial post (Notify Toggle button still works for subsequent users).
+  const hostMessage = interaction.options.getString('message', false)?.trim() || undefined
+  const pingOpt = interaction.options.getBoolean('ping', false)
+  const shouldPing = pingOpt === null ? true : pingOpt
+  const session: LfgSession = {
+    gameId: game.id,
+    hostId: member.id,
+    players: [],
+    createdAt: Date.now(),
+    hostMessage,
+  }
+  const sent = await (channel as TextChannel).send(buildPanel(game, session, {
+    initialPing: shouldPing,
+    hostMessage,
+  }) as any)
   if (sessions.size > 200) sweepSessions()
   sessions.set(sent.id, session)
 
@@ -262,7 +306,7 @@ export async function handleJoinButton(interaction: ButtonInteraction): Promise<
   if (idx === -1) session.players.push(userId)
   else session.players.splice(idx, 1)
 
-  await interaction.update(buildPanel(game, session) as any)
+  await interaction.update(buildPanel(game, session, { hostMessage: session.hostMessage }) as any)
 }
 
 /**
@@ -314,10 +358,29 @@ function recoverSessionFromMessage(interaction: ButtonInteraction): LfgSession |
     seen.add(id)
     dedupedPlayers.push(id)
   }
+  // Recover the optional host message — it's the TextDisplay whose content
+  // starts with `> ` (the quoted-block marker the renderer emits). We
+  // un-quote line-by-line. Best-effort: if the user removed the leading
+  // `> ` from the message in some weird edit, we just lose the message
+  // text on this re-render (cosmetic).
+  let hostMessage: string | undefined
+  for (const comp of interaction.message.components ?? []) {
+    const c = comp as { type?: number; components?: { content?: string }[] }
+    for (const inner of c.components ?? []) {
+      const content = inner.content
+      if (typeof content !== 'string') continue
+      if (content.startsWith('> ') && !content.startsWith('> **Players')) {
+        // Strip the `> ` prefix from every line.
+        hostMessage = content.split('\n').map(line => line.replace(/^> ?/, '')).join('\n').trim()
+        break
+      }
+    }
+    if (hostMessage) break
+  }
   // Recovered sessions get a fresh createdAt — we can't recover the original
   // from message contents, and a freshly-recovered entry shouldn't be
   // immediately swept on the next size-trigger.
-  return { gameId, hostId, players: dedupedPlayers, createdAt: Date.now() }
+  return { gameId, hostId, players: dedupedPlayers, createdAt: Date.now(), hostMessage }
 }
 
 // ---------------------------------------------------------------------------
