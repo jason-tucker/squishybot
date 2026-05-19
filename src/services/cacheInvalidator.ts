@@ -83,7 +83,7 @@ export function startCacheInvalidator(): void {
     retryStrategy: (times) => Math.min(times * 500, 10_000),
     enableOfflineQueue: true,
   }
-  const r = new Redis(env.REDIS_URL ?? 'redis://redis:6379', opts)
+  const r = new Redis(process.env.REDIS_URL ?? 'redis://redis:6379', opts)
   r.on('error', (err: Error) => {
     logger.warn(`cacheInvalidator: subscriber error: ${err.message}`)
   })
