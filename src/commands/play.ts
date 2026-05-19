@@ -98,7 +98,7 @@ function buildPanel(game: Game, session: LfgSession, options?: { initialPing?: b
       `**Players (${total})**\n${playerLines.join('\n')}`
     ))
 
-  const button = new ActionRowBuilder<MessageActionRowComponentBuilder>().addComponents(
+  const primaryRow = new ActionRowBuilder<MessageActionRowComponentBuilder>().addComponents(
     new ButtonBuilder()
       .setCustomId(`play:join:${game.id}`)
       .setLabel('I want to play!')
@@ -111,6 +111,30 @@ function buildPanel(game: Game, session: LfgSession, options?: { initialPing?: b
       .setStyle(ButtonStyle.Danger),
   )
 
+  // Secondary row: Help + Notify toggle. Discord can't render different
+  // labels per viewer on a shared message — the click handler reads the
+  // clicker's current ping-role state and the ephemeral confirmation
+  // calls out the resulting state ("you're now notified" / "muted").
+  // Notify is hidden when the game has no ping role configured (nothing
+  // meaningful to toggle).
+  const secondaryButtons: ButtonBuilder[] = [
+    new ButtonBuilder()
+      .setCustomId(`play:help:${game.id}`)
+      .setLabel('Help')
+      .setEmoji('❔')
+      .setStyle(ButtonStyle.Secondary),
+  ]
+  if (game.pingRoleId) {
+    secondaryButtons.push(
+      new ButtonBuilder()
+        .setCustomId(`play:notify:${game.id}`)
+        .setLabel('Notify Toggle')
+        .setEmoji('🔔')
+        .setStyle(ButtonStyle.Secondary),
+    )
+  }
+  const secondaryRow = new ActionRowBuilder<MessageActionRowComponentBuilder>().addComponents(...secondaryButtons)
+
   // Lock allowed mentions:
   //  - users: just the host (so they don't ping themselves on subsequent edits)
   //  - roles: the ping role IFF this is the initial post
@@ -119,7 +143,7 @@ function buildPanel(game: Game, session: LfgSession, options?: { initialPing?: b
 
   return {
     flags: MessageFlags.IsComponentsV2,
-    components: [container, button],
+    components: [container, primaryRow, secondaryRow],
     allowedMentions: { roles: allowedRoles, users: [session.hostId], parse: [] },
   }
 }
@@ -294,4 +318,83 @@ function recoverSessionFromMessage(interaction: ButtonInteraction): LfgSession |
   // from message contents, and a freshly-recovered entry shouldn't be
   // immediately swept on the next size-trigger.
   return { gameId, hostId, players: dedupedPlayers, createdAt: Date.now() }
+}
+
+// ---------------------------------------------------------------------------
+// Help button — ephemeral explainer for users wondering "wtf is /play".
+// ---------------------------------------------------------------------------
+
+export async function handleHelpButton(interaction: ButtonInteraction): Promise<void> {
+  const gameId = interaction.customId.split(':')[2]
+  const game = getGame(gameId)
+  const gameName = game?.name ?? 'this game'
+  await interaction.reply({
+    ephemeral: true,
+    content:
+      `**What is /play?**\n` +
+      `It's a quick way to say "I'm playing **${gameName}** right now, who wants to join?" The host posts a CV2 panel with a player list; anyone who wants in clicks **🎮 I want to play!** to be added.\n\n` +
+      `**About the buttons**\n` +
+      `• **🎮 I want to play!** — adds you to the player list (or removes you if you're already on it).\n` +
+      `• **✖️ Cancel** — host-only, ends the session.\n` +
+      `• **❔ Help** — this card.\n` +
+      `• **🔔 Notify Toggle** — adds or removes the game's ping role for you, so future \`/play ${gameName}\` posts ping you (or don't). Each click flips your state and tells you which way it went.\n\n` +
+      `**Cooldown**: 30 min per (you, game) so the channel doesn't get spammed.\n` +
+      `**Don't want to be pinged anymore?** Click 🔔 Notify Toggle on any post for this game, or open \`Manage Games\` on the dashboard.`,
+  })
+}
+
+// ---------------------------------------------------------------------------
+// Notify-toggle button — adds the game's ping role to the clicker if they
+// don't have it; removes it if they do. The PUBLIC button can't show
+// different labels per viewer (Discord limitation), so the ephemeral
+// confirmation owns the "you're now notified / muted" framing.
+// ---------------------------------------------------------------------------
+
+export async function handleNotifyToggleButton(interaction: ButtonInteraction): Promise<void> {
+  if (!interaction.guild) {
+    await interaction.reply({ ephemeral: true, content: '❌ Server-only.' })
+    return
+  }
+  const gameId = interaction.customId.split(':')[2]
+  const game = getGame(gameId)
+  if (!game) {
+    await interaction.reply({ ephemeral: true, content: '❌ Game not found (it may have been removed).' })
+    return
+  }
+  if (!game.pingRoleId) {
+    await interaction.reply({
+      ephemeral: true,
+      content: `❌ **${game.name}** has no ping role configured, so there's nothing to toggle. Sudo: link one at \`/sudo → Settings → Games\`.`,
+    })
+    return
+  }
+  const member = await interaction.guild.members.fetch(interaction.user.id).catch(() => null)
+  if (!member) {
+    await interaction.reply({ ephemeral: true, content: '❌ Couldn\'t resolve your member.' })
+    return
+  }
+  const hasRole = member.roles.cache.has(game.pingRoleId)
+  try {
+    if (hasRole) {
+      await member.roles.remove(game.pingRoleId, `/play notify toggle off`)
+      await interaction.reply({
+        ephemeral: true,
+        content: `🔕 **Muted** — you won't be pinged when someone runs \`/play ${game.name}\`. Click **🔔 Notify Toggle** again to re-enable.`,
+      })
+    } else {
+      await member.roles.add(game.pingRoleId, `/play notify toggle on`)
+      await interaction.reply({
+        ephemeral: true,
+        content: `🔔 **Get Notified** — you'll be pinged when someone runs \`/play ${game.name}\`. Click **🔔 Notify Toggle** again to mute.`,
+      })
+    }
+    logger.info(`play.notify_toggle user=${member.id} game=${game.name} was=${hasRole ? 'on' : 'off'} now=${hasRole ? 'off' : 'on'}`)
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : 'unknown'
+    logger.warn(`play.notify_toggle failed user=${member.id} game=${game.name}: ${msg}`)
+    await interaction.reply({
+      ephemeral: true,
+      content: `❌ Couldn't toggle the role: ${msg}. The bot may be missing **Manage Roles** or the ping role may be above the bot's top role.`,
+    })
+  }
 }
