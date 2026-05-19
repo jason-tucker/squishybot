@@ -17,6 +17,7 @@ import {
   ButtonStyle,
   ChannelType,
   ChatInputCommandInteraction,
+  type Client,
   ContainerBuilder,
   type AutocompleteInteraction,
   type MessageActionRowComponentBuilder,
@@ -26,6 +27,7 @@ import {
   TextDisplayBuilder,
   type TextChannel,
 } from 'discord.js'
+import { env } from '../config/env'
 import { isSudo } from '../services/voice/permissions'
 import {
   checkPlayCooldown,
@@ -178,6 +180,95 @@ function buildPanel(game: Game, session: LfgSession, options?: { initialPing?: b
 }
 
 // ---------------------------------------------------------------------------
+// Shared post helper — runs the resolve-channel / check-perms / send /
+// track-session flow used by both `/play` slash and the `play.post` RPC
+// verb. Returning a machine token on failure lets each caller surface
+// the right localized message (slash: ephemeral; RPC: JSON to panel).
+// ---------------------------------------------------------------------------
+
+export type PostLfgResult =
+  | { ok: true; channelId: string; messageId: string }
+  | {
+      ok: false
+      error:
+        | 'guild-unavailable'
+        | 'game-not-active'
+        | 'game-no-channel'
+        | 'channel-unreachable'
+        | 'channel-not-text'
+        | 'bot-missing-perm'
+        | 'cooldown'
+        | 'discord-error'
+      details?: string
+      /** Remaining seconds when `error === 'cooldown'`. */
+      remainingSec?: number
+    }
+
+export async function postLfg(client: Client, opts: {
+  game: Game
+  hostUserId: string
+  hostMessage?: string
+  /** Default true. */
+  ping?: boolean
+  /** Slash command: !sudo. RPC: caller decides. */
+  enforceCooldown?: boolean
+}): Promise<PostLfgResult> {
+  const { game, hostUserId } = opts
+  const guild = client.guilds.cache.get(env.GUILD_ID) ?? await client.guilds.fetch(env.GUILD_ID).catch(() => null)
+  if (!guild) {
+    return { ok: false, error: 'guild-unavailable', details: env.GUILD_ID }
+  }
+  if (game.isArchived || !game.isVisible) {
+    return { ok: false, error: 'game-not-active', details: game.name }
+  }
+  if (opts.enforceCooldown) {
+    const check = checkPlayCooldown(guild.id, hostUserId, game.id)
+    if (!check.ok) {
+      return { ok: false, error: 'cooldown', remainingSec: check.remainingSec }
+    }
+  }
+  if (!game.channelId) {
+    return { ok: false, error: 'game-no-channel', details: game.name }
+  }
+  const channel = await guild.channels.fetch(game.channelId).catch(() => null)
+  if (!channel) {
+    return { ok: false, error: 'channel-unreachable', details: game.channelId }
+  }
+  if (channel.type !== ChannelType.GuildText) {
+    return { ok: false, error: 'channel-not-text', details: game.channelId }
+  }
+  const me = await guild.members.fetchMe()
+  if (!(channel as TextChannel).permissionsFor(me)?.has(PermissionFlagsBits.SendMessages)) {
+    return { ok: false, error: 'bot-missing-perm', details: 'SendMessages' }
+  }
+
+  const hostMessage = opts.hostMessage?.trim() || undefined
+  const shouldPing = opts.ping !== false
+  const session: LfgSession = {
+    gameId: game.id,
+    hostId: hostUserId,
+    players: [],
+    createdAt: Date.now(),
+    hostMessage,
+  }
+  try {
+    const sent = await (channel as TextChannel).send(buildPanel(game, session, {
+      initialPing: shouldPing,
+      hostMessage,
+    }) as any)
+    if (sessions.size > 200) sweepSessions()
+    sessions.set(sent.id, session)
+    if (opts.enforceCooldown) markPlayUsed(guild.id, hostUserId, game.id)
+    logger.info(`postLfg game=${game.name} host=${hostUserId} message=${sent.id} ping=${shouldPing} hasMessage=${!!hostMessage}`)
+    return { ok: true, channelId: channel.id, messageId: sent.id }
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err)
+    logger.warn(`postLfg send failed game=${game.name} host=${hostUserId}: ${msg}`)
+    return { ok: false, error: 'discord-error', details: msg }
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Command + autocomplete
 // ---------------------------------------------------------------------------
 
@@ -197,61 +288,54 @@ export async function execute(interaction: ChatInputCommandInteraction): Promise
     await interaction.editReply({ content: `❌ No game matches \`${query}\`. Try \`/games\` to see what's available.` })
     return
   }
-  if (game.isArchived || !game.isVisible) {
-    await interaction.editReply({ content: `❌ **${game.name}** is not active for LFG right now.` })
-    return
-  }
 
-  // Sudo bypasses the cooldown entirely — no flag needed.
-  if (!sudo) {
-    const check = checkPlayCooldown(interaction.guild.id, member.id, game.id)
-    if (!check.ok) {
-      const m = Math.floor(check.remainingSec / 60), s = check.remainingSec % 60
-      const wait = m > 0 ? `${m}m ${s}s` : `${s}s`
-      await interaction.editReply({ content: `🕒 Cooldown — try again in **${wait}**.` })
-      return
-    }
-  }
-
-  if (!game.channelId) {
-    await interaction.editReply({ content: `❌ **${game.name}** has no channel configured. Sudo: set one at /sudo → Settings → Games.` })
-    return
-  }
-  const channel = await interaction.guild.channels.fetch(game.channelId).catch(() => null)
-  if (!channel || channel.type !== ChannelType.GuildText) {
-    await interaction.editReply({ content: `❌ **${game.name}**'s channel is unreachable or not text-type.` })
-    return
-  }
-
-  const me = await interaction.guild.members.fetchMe()
-  if (!(channel as TextChannel).permissionsFor(me)?.has(PermissionFlagsBits.SendMessages)) {
-    await interaction.editReply({ content: `❌ Bot lacks Send Messages in <#${channel.id}>.` })
-    return
-  }
-
-  // Options: `message` text is rendered as a quoted block on the panel;
-  // `ping` (default true) gates whether the role mention fires on the
-  // initial post (Notify Toggle button still works for subsequent users).
   const hostMessage = interaction.options.getString('message', false)?.trim() || undefined
   const pingOpt = interaction.options.getBoolean('ping', false)
-  const shouldPing = pingOpt === null ? true : pingOpt
-  const session: LfgSession = {
-    gameId: game.id,
-    hostId: member.id,
-    players: [],
-    createdAt: Date.now(),
-    hostMessage,
-  }
-  const sent = await (channel as TextChannel).send(buildPanel(game, session, {
-    initialPing: shouldPing,
-    hostMessage,
-  }) as any)
-  if (sessions.size > 200) sweepSessions()
-  sessions.set(sent.id, session)
 
-  if (!sudo) markPlayUsed(interaction.guild.id, member.id, game.id)
-  logger.info(`/play game=${game.name} host=${member.id} message=${sent.id} sudo=${sudo}`)
-  await interaction.editReply({ content: `✅ Posted in <#${channel.id}>.` })
+  const result = await postLfg(interaction.client, {
+    game,
+    hostUserId: member.id,
+    hostMessage,
+    ping: pingOpt === null ? true : pingOpt,
+    enforceCooldown: !sudo,
+  })
+
+  if (!result.ok) {
+    let msg: string
+    switch (result.error) {
+      case 'game-not-active':
+        msg = `❌ **${game.name}** is not active for LFG right now.`
+        break
+      case 'cooldown': {
+        const s = result.remainingSec ?? 0
+        const m = Math.floor(s / 60), sec = s % 60
+        const wait = m > 0 ? `${m}m ${sec}s` : `${sec}s`
+        msg = `🕒 Cooldown — try again in **${wait}**.`
+        break
+      }
+      case 'game-no-channel':
+        msg = `❌ **${game.name}** has no channel configured. Sudo: set one at /sudo → Settings → Games.`
+        break
+      case 'channel-unreachable':
+      case 'channel-not-text':
+        msg = `❌ **${game.name}**'s channel is unreachable or not text-type.`
+        break
+      case 'bot-missing-perm':
+        msg = `❌ Bot lacks Send Messages in the game's channel.`
+        break
+      case 'guild-unavailable':
+        msg = `❌ Guild unavailable — bot may be reconnecting.`
+        break
+      case 'discord-error':
+      default:
+        msg = `❌ Discord error: ${result.details ?? 'unknown'}`
+    }
+    await interaction.editReply({ content: msg })
+    return
+  }
+
+  logger.info(`/play game=${game.name} host=${member.id} message=${result.messageId} sudo=${sudo}`)
+  await interaction.editReply({ content: `✅ Posted in <#${result.channelId}>.` })
 }
 
 export async function autocomplete(interaction: AutocompleteInteraction): Promise<void> {
