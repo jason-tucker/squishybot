@@ -383,6 +383,19 @@ export function updateHubChannelId(oldChannelId: string, newChannelId: string): 
   hubsCache.set(newChannelId, { ...hub, channelId: newChannelId })
 }
 
+/**
+ * Persist a hub's current position. Called after a hub is moved (e.g. bumped
+ * to the bottom of its category by `positionHubAtBottom`) so the cached
+ * `position` stays in sync with the live channel.
+ */
+export async function updateHubPosition(channelId: string, position: number): Promise<void> {
+  const cached = hubsCache.get(channelId)
+  if (cached) hubsCache.set(channelId, { ...cached, position })
+  await db.update(hubChannels)
+    .set({ position })
+    .where(eq(hubChannels.channelId, channelId))
+}
+
 // ---------------------------------------------------------------------------
 // Auto-channel text-channel IDs — hot-path lookup for messageCreate
 // ---------------------------------------------------------------------------

@@ -12,6 +12,7 @@ import {
   isHubChannelCached,
   registerHubChannel,
   updateHubChannelId,
+  updateHubPosition,
 } from '../settings'
 
 export function isHubChannel(channelId: string): boolean {
@@ -125,13 +126,35 @@ export async function handleHubJoin(client: Client, guild: Guild, member: GuildM
   }
 }
 
+/**
+ * Count the voice channels currently in `categoryId`. Used as the target
+ * position for a freshly-created hub so it lands at the bottom of the
+ * category's voice list: position N (where N voice channels already exist)
+ * is exactly "after the last one".
+ *
+ * The stored `hub_channels.position` was the original position the hub was
+ * registered at, which goes stale the moment the first auto channel spawns
+ * (the auto channel takes position 0 and pushes the hub down by one).
+ * Trusting that stored value made the hub drift up into the middle of the
+ * category over time — see #124.
+ */
+function bottomVoicePosition(guild: Guild, categoryId: string): number {
+  let count = 0
+  for (const ch of guild.channels.cache.values()) {
+    if (ch.parentId === categoryId && ch.type === ChannelType.GuildVoice) count++
+  }
+  return count
+}
+
 async function createReplacementHub(guild: Guild, originalHub: typeof hubChannels.$inferSelect): Promise<void> {
   try {
+    const bottomPos = bottomVoicePosition(guild, originalHub.categoryId)
+
     const newHub = await guild.channels.create({
       name: originalHub.label,
       type: ChannelType.GuildVoice,
       parent: originalHub.categoryId,
-      position: originalHub.position,
+      position: bottomPos,
     })
 
     // Update the cache *before* the DB write so a voiceStateUpdate for someone
@@ -140,8 +163,11 @@ async function createReplacementHub(guild: Guild, originalHub: typeof hubChannel
     await db.update(hubChannels)
       .set({ channelId: newHub.id })
       .where(eq(hubChannels.id, originalHub.id))
+    // Persist the bottom-of-category position so it doesn't drift on the
+    // next restart's reconcile pass (which trusts the stored value).
+    await updateHubPosition(newHub.id, newHub.position)
 
-    logger.info(`Replacement hub created: ${newHub.name} (${newHub.id})`)
+    logger.info(`Replacement hub created: ${newHub.name} (${newHub.id}) at bottom position ${newHub.position}`)
   } catch (err) {
     logger.error('Failed to create replacement hub:', err)
   }
