@@ -47,6 +47,12 @@ async function handleVoiceStateUpdate(client: Client, oldState: VoiceState, newS
     const joinedChannelId = newState.channelId
 
     // --- JOINED A CHANNEL ---
+    //
+    // No early `return` after either branch: when a user *moves* (oldChannel
+    // set + newChannel set), we still need to process the LEFT side below.
+    // Skipping it was bug #123 — rapid hub-join would leave the source
+    // auto channel empty with no cleanup scheduled (the reconciler reaped it
+    // only on next restart).
     if (joinedChannelId && joinedChannelId !== leftChannelId) {
       // Check auto_channels FIRST. The hub-cache eviction lags the hub→auto
       // rename by a couple of awaits (it lives in createReplacementHub which
@@ -92,13 +98,12 @@ async function handleVoiceStateUpdate(client: Client, oldState: VoiceState, newS
         // New member arrived — they may be playing something that should
         // change the channel name. Re-evaluate (handles throttle internally).
         await maybeRenameChannel(client, updatedRecord).catch(() => {})
-        return
-      }
-
-      // Otherwise — actual hub join.
-      if (isHubChannel(joinedChannelId)) {
+      } else if (isHubChannel(joinedChannelId)) {
+        // Otherwise — actual hub join. Mutually exclusive with the auto-channel
+        // branch above (a channel can't be in both auto_channels and the hub
+        // cache at the same time except during the rename window, which the
+        // db-first ordering handles).
         await handleHubJoin(client, guild, member, joinedChannelId)
-        return
       }
     }
 
