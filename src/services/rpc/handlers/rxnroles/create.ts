@@ -51,13 +51,15 @@ import type { TextChannel } from 'discord.js'
 import { registerVerb, type VerbHandler } from '../../registry'
 import { createReactionRoleMessage } from '../../../reactionRoles'
 import { logger } from '../../../logger'
+import { getIntSetting } from '../../../settings'
 
 const SNOWFLAKE_RE = /^\d{15,25}$/
 const MAX_MAPPINGS = 20
 const MIN_MAPPINGS = 1
-// 30 days — matches the cap on the in-bot Reaction Roles modal so the
-// two creation surfaces stay consistent.
-const MAX_EXPIRES_MIN = 60 * 24 * 30
+// 30 days — hard ceiling. Operators can lower this via the
+// `rxnroles.max_expires_minutes` bot_setting to keep panel users from
+// posting messages that linger for a month by accident.
+const HARD_MAX_EXPIRES_MIN = 60 * 24 * 30
 
 interface CreateParams {
   channelId: string
@@ -100,7 +102,11 @@ function parseParams(raw: unknown): CreateParams | { error: string } {
   let expiresInMinutes: number | undefined
   if (isTemporary) {
     const n = Number(o.expiresInMinutes)
-    if (!Number.isFinite(n) || n < 1 || n > MAX_EXPIRES_MIN) {
+    const cap = getIntSetting('rxnroles.max_expires_minutes', HARD_MAX_EXPIRES_MIN, {
+      min: 1,
+      max: HARD_MAX_EXPIRES_MIN,
+    })
+    if (!Number.isFinite(n) || n < 1 || n > cap) {
       return { error: 'bad-expires' }
     }
     expiresInMinutes = Math.floor(n)

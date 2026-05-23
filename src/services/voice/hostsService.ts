@@ -18,6 +18,7 @@ import { db } from '../../db/client'
 import { autoChannels } from '../../db/schema'
 import { env } from '../../config/env'
 import { logger } from '../logger'
+import { getIntSetting } from '../settings'
 import { syncTextChannelPermissions } from './permissions'
 import { postOrUpdateControlPanel } from './controlPanel'
 import { publish, voiceCh, type VoiceHostsChangedEvent } from '../eventBus'
@@ -38,6 +39,7 @@ export type ToggleHostResult =
         | 'is-owner'
         | 'voice-channel-fetch-failed'
         | 'db-error'
+        | 'host-cap-reached'
       details?: string
     }
 
@@ -53,6 +55,20 @@ export async function toggleHost(input: ToggleHostInput): Promise<ToggleHostResu
 
   // Owner can't be host-toggled — that role is implicit.
   if (record.ownerUserId === userId) return { ok: false, error: 'is-owner' }
+
+  // Enforce the per-channel host cap on add. 0 (the default) means "unlimited";
+  // any positive integer is treated as a hard cap. Removals are always allowed
+  // even when at/over the cap so an operator can lower the setting and prune.
+  if (op === 'add' && !record.hostUserIds.includes(userId)) {
+    const cap = getIntSetting('voice.max_hosts_per_channel', 0, { min: 0, max: 50 })
+    if (cap > 0 && record.hostUserIds.length >= cap) {
+      return {
+        ok: false,
+        error: 'host-cap-reached',
+        details: `cap=${cap} current=${record.hostUserIds.length}`,
+      }
+    }
+  }
 
   const guild = client.guilds.cache.get(env.GUILD_ID)
   if (!guild) return { ok: false, error: 'voice-channel-fetch-failed' }

@@ -13,7 +13,7 @@ import { and, eq, inArray } from 'drizzle-orm'
 import { db } from '../db/client'
 import { games, userGamePrefs } from '../db/schema'
 import { logger } from './logger'
-import { getSetting } from './settings'
+import { getIntSetting, getSetting } from './settings'
 
 export type Game = typeof games.$inferSelect
 export type GamePref = typeof userGamePrefs.$inferSelect
@@ -542,16 +542,25 @@ export async function gameInterestCounts(guild: Guild): Promise<Map<string, Game
 // ---------------------------------------------------------------------------
 
 // Default /play cooldown (1800s = 30 min) per CLAUDE.md spec. Per-game
-// overrides live in games.play_cooldown_seconds (#22) — null falls back here,
+// overrides live in games.play_cooldown_seconds (#22) — null falls back to
+// the `play.default_cooldown_seconds` bot_setting (then to 1800),
 // 0 disables cooldown entirely.
-const DEFAULT_PLAY_COOLDOWN_SEC = 1800
+const HARDCODED_PLAY_COOLDOWN_SEC = 1800
 const lastPlayAt = new Map<string, number>()
+
+function defaultCooldownSeconds(): number {
+  // Negative cooldowns are nonsense; cap at 24h to bound the lazy-sweep window.
+  return getIntSetting('play.default_cooldown_seconds', HARDCODED_PLAY_COOLDOWN_SEC, {
+    min: 0,
+    max: 24 * 60 * 60,
+  })
+}
 
 function cooldownSecondsFor(gameId: string): number {
   const g = getGame(gameId)
-  if (!g) return DEFAULT_PLAY_COOLDOWN_SEC
+  if (!g) return defaultCooldownSeconds()
   return g.playCooldownSeconds === null || g.playCooldownSeconds === undefined
-    ? DEFAULT_PLAY_COOLDOWN_SEC
+    ? defaultCooldownSeconds()
     : g.playCooldownSeconds
 }
 

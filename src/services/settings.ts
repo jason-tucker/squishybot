@@ -431,3 +431,26 @@ export function getBoolSetting(key: string, fallback = false): boolean {
   if (v === 'false') return false
   return fallback
 }
+
+/**
+ * Integer setting helper. Parses the cached string value with `Number()`,
+ * coerces to an integer via `Math.trunc`, and clamps to `[min, max]` when
+ * either bound is provided. Anything non-numeric (or NaN after parse)
+ * falls back to `fallback`. Use this for play cooldowns, max-host caps,
+ * rxnroles cap minutes — anything where an operator typo shouldn't crash
+ * the bot.
+ */
+export function getIntSetting(
+  key: string,
+  fallback: number,
+  bounds?: { min?: number; max?: number },
+): number {
+  const v = settingsCache.get(key)
+  if (v === undefined) return fallback
+  const n = Number(v)
+  if (!Number.isFinite(n)) return fallback
+  let out = Math.trunc(n)
+  if (bounds?.min !== undefined && out < bounds.min) out = bounds.min
+  if (bounds?.max !== undefined && out > bounds.max) out = bounds.max
+  return out
+}
