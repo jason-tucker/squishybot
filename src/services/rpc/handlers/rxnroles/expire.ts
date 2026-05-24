@@ -39,6 +39,19 @@ export const rxnRolesExpireHandler: VerbHandler = async (params, ctx) => {
     return { ok: false, error: 'not-found' }
   }
 
+  // Mirror the panel's audit-integrity guards (#229): expire is only valid
+  // for messages created with a TTL. Even if the panel is bypassed and a
+  // direct RPC arrives for a permanent message, we refuse — otherwise the
+  // bot's log line records `action:'expired'` against a message that was
+  // never temporary, defeating the verb's whole "distinct from delete"
+  // forensics value.
+  if (cfg.expiresAt === null) {
+    return { ok: false, error: 'not-temporary' }
+  }
+  if (cfg.expiresAt.getTime() < Date.now()) {
+    return { ok: false, error: 'already-expired' }
+  }
+
   try {
     await deleteReactionRoleMessage(ctx.client, parsed.messageId)
     logger.info(

@@ -5,6 +5,15 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [0.8.5] — 2026-05-24
+
+### Fixed
+- **Security (botpanel#229): `rxnroles.expire` RPC handler now rejects non-temporary and already-expired messages.** Mirrors the panel-side guard in the matching botpanel PR. Even if the panel is bypassed and a direct RPC arrives for a permanent message, the handler refuses with `error: 'not-temporary'` (no `expiresAt`) or `error: 'already-expired'` (timestamp in the past) — otherwise the bot would log `action:'expired'` against a message that was never temporary, defeating the verb's "distinct from delete" forensics value.
+
+_v0.8.5 · 2a1725e_
+
+---
+
 ## [Unreleased]
 
 ### Added
