@@ -5,6 +5,15 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [0.8.4] — 2026-05-24
+
+### Security
+- **Four new `bot_settings` knobs now have write-time validation in the sudo modal.** `play.default_cooldown_seconds`, `rxnroles.max_expires_minutes`, `rxnroles.default_expires_minutes`, and `voice.max_hosts_per_channel` were absent from `NUMERIC_SETTINGS`, so the sudo modal fell through to the generic string fallback and would persist any string (`"abc"`, `"NaN"`, a 10MB body). Read-time clamping in `getIntSetting` was the only line of defense. Added entries with bounds mirroring the read sites so garbage is rejected up front. Closes #130.
+
+_v0.8.4 · 2a1725e_
+
+---
+
 ## [0.8.3] — 2026-05-24
 
 ### Security

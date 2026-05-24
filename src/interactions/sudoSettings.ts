@@ -103,6 +103,13 @@ interface NumericSettingDef {
 const NUMERIC_SETTINGS: NumericSettingDef[] = [
   { key: 'voice.cleanup_delay_ms', label: 'Cleanup delay (ms)', description: 'Empty auto channels are deleted after this many ms', envFallback: env.VOICE_CLEANUP_DELAY_MS, min: 0, max: 600000 },
   { key: 'voice.owner_grace_ms', label: 'Owner grace (ms)', description: 'When the owner leaves a non-empty channel, an acting owner runs it for this long before promotion. The original owner can reclaim by rejoining. 0 disables grace (instant transfer).', envFallback: 300000, min: 0, max: 3600000 },
+  // Bounds mirror the read sites so the sudo-modal write-path rejects
+  // garbage (non-numeric, out-of-range, oversized) up front instead of
+  // relying on read-time clamping in `getIntSetting` as the only defense.
+  { key: 'play.default_cooldown_seconds', label: '/play default cooldown (s)', description: 'Default /play cooldown when a game has no `play_cooldown_seconds` override. 0 disables.', envFallback: 1800, min: 0, max: 86400 },
+  { key: 'rxnroles.max_expires_minutes', label: 'Rxnroles max expires (min)', description: 'Hard ceiling on the panel\'s "expires in N minutes" input for temporary reaction-role messages. Capped at 30 days (43200 min).', envFallback: 43200, min: 1, max: 43200 },
+  { key: 'rxnroles.default_expires_minutes', label: 'Rxnroles default expires (min)', description: 'Pre-fill for the panel\'s "expires in N minutes" input. Bot does not consume this; bounds mirror the max-expires ceiling.', envFallback: 60, min: 1, max: 43200 },
+  { key: 'voice.max_hosts_per_channel', label: 'Max hosts per channel', description: 'Cap on the host count per auto-channel. 0 = unlimited.', envFallback: 0, min: 0, max: 50 },
 ]
 
 interface BoolSettingDef {
