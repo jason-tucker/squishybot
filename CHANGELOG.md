@@ -5,6 +5,15 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [0.8.6] — 2026-05-24
+
+### Fixed
+- **Security (#134): `cacheInvalidator` now handles `reaction_role_messages` invalidations.** The switch in `handleInvalidate` previously only knew about `bot_settings`; any other table fell through to the unknown-table warn + no-op. Added a `reaction_role_messages` case that calls `loadReactionRoles()`, mirroring the `bot_settings` posture (full reload, key logged for traceability). Preventive — no panel-side publisher exists yet on the rxnroles surface, so this is pure future-proofing with zero behavior change today. Closes the gap that would otherwise cause stale reaction-role caches once a panel publisher lands.
+
+_v0.8.6 · 8092b84_
+
+---
+
 ## [0.8.5] — 2026-05-24
 
 ### Fixed
