@@ -5,6 +5,15 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [0.8.3] — 2026-05-24
+
+### Security
+- **`getIntSetting` now treats empty/whitespace cached values as unset and returns the fallback.** `Number('')` and `Number(' ')` both yield `0`, which silently bypassed the fallback path — an operator who blanked out e.g. `voice.max_hosts_per_channel` in the panel got `0` ("unlimited") instead of the intended default. Not exploitable today but a real foot-gun if any knob's `0` semantics ever shifts. Closes #129.
+
+_v0.8.3 · 6387d41_
+
+---
+
 ## [Unreleased]
 
 ### Added

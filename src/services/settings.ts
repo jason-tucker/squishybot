@@ -447,6 +447,10 @@ export function getIntSetting(
 ): number {
   const v = settingsCache.get(key)
   if (v === undefined) return fallback
+  // `Number('')` and `Number(' ')` both return 0, which would silently
+  // bypass the fallback and stand in for "operator left the field blank
+  // in the panel". Treat empty/whitespace as unset.
+  if (v.trim() === '') return fallback
   const n = Number(v)
   if (!Number.isFinite(n)) return fallback
   let out = Math.trunc(n)
