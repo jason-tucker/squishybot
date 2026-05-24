@@ -27,6 +27,7 @@ import { env } from '../config/env'
 import { logger } from './logger'
 import { hmacSha256, timingSafeCompare } from '../utils/hmac'
 import { loadSettings } from './settings'
+import { loadReactionRoles } from './reactionRoles'
 
 const CHANNEL = 'bot.squishy.settings.invalidate'
 
@@ -55,6 +56,15 @@ async function handleInvalidate(params: { table?: unknown; key?: unknown }): Pro
       // in trying to surgically invalidate. `key` is logged for traceability.
       logger.info(`cacheInvalidator: reload bot_settings (key=${key ?? '*'})`)
       await loadSettings()
+      return
+    case 'reaction_role_messages':
+      // Same posture as bot_settings — reload the whole reaction-role cache
+      // (messages + mappings) in one go. `key` is logged for traceability.
+      // Preventive: no panel publisher exists yet for the rxnroles surface,
+      // but the bot side is wired up so when one lands (or a direct invalidate
+      // arrives from another source) the in-memory cache stays in sync.
+      logger.info(`cacheInvalidator: reload reaction_role_messages (key=${key ?? '*'})`)
+      await loadReactionRoles()
       return
     case '':
       logger.warn('cacheInvalidator: envelope had no table — ignoring')
