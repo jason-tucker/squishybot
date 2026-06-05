@@ -3,6 +3,7 @@ name: Deploy SquishyBot
 on:
   push:
     branches: [main]
+  pull_request:
   workflow_dispatch:
 
 # Never cancel an in-progress deploy — wait for it to finish first
@@ -34,7 +35,9 @@ jobs:
         uses: docker/setup-buildx-action@v4
 
       # ── 3. Log in to GHCR (uses automatic GITHUB_TOKEN — no extra secret) ─────
+      # Only on push to main — PRs validate the build but never push, so no login.
       - name: Log in to GHCR
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         uses: docker/login-action@v3
         with:
           registry: ${{ env.REGISTRY }}
@@ -51,14 +54,16 @@ jobs:
             type=sha,prefix=sha-
             type=raw,value=latest,enable={{is_default_branch}}
 
-      # ── 5. Build Docker image and push to GHCR ────────────────────────────────
+      # ── 5. Build Docker image (push only on main) ─────────────────────────────
       # TypeScript compiles inside Docker (on this runner with 7 GB RAM).
       # The VPS never runs tsc — it just pulls the pre-built image.
+      # On a PR this still builds the image (validating the TS compile) but
+      # `push` is false, so nothing is published to GHCR.
       - name: Build and push image
         uses: docker/build-push-action@v7
         with:
           context: .
-          push: true
+          push: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
@@ -68,7 +73,9 @@ jobs:
       # Non-blocking — slash command schemas rarely change. If Discord secrets
       # aren't set, this step will fail (Zod env validation) but the VPS deploy
       # below still runs because of continue-on-error.
+      # Push-to-main only: relies on the `:latest` image that was just pushed.
       - name: Deploy slash commands
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         continue-on-error: true
         run: |
           docker run --rm --entrypoint="" \
@@ -82,7 +89,9 @@ jobs:
             node dist/bot/registerCommands.js
 
       # ── 7. Deploy to VPS ──────────────────────────────────────────────────────
+      # Push-to-main only — never deploy from a PR.
       - name: Deploy to VPS
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         uses: appleboy/ssh-action@v1.2.0
         with:
           host: ${{ secrets.VPS_HOST }}
@@ -116,8 +125,9 @@ jobs:
 
       # ── 8. Notify Discord — success ───────────────────────────────────────────
       # Skipped silently if the webhook isn't configured.
+      # Push-to-main only — PRs don't deploy, so there's nothing to announce.
       - name: Notify success
-        if: success()
+        if: success() && github.event_name == 'push' && github.ref == 'refs/heads/main'
         env:
           WEBHOOK: ${{ secrets.DISCORD_DEPLOY_WEBHOOK }}
         run: |
@@ -136,8 +146,9 @@ jobs:
             }"
 
       # ── 9. Notify Discord — failure ───────────────────────────────────────────
+      # Push-to-main only — a failed PR build reports via the check itself.
       - name: Notify failure
-        if: failure()
+        if: failure() && github.event_name == 'push' && github.ref == 'refs/heads/main'
         env:
           WEBHOOK: ${{ secrets.DISCORD_DEPLOY_WEBHOOK }}
         run: |

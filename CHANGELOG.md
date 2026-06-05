@@ -5,6 +5,16 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [0.8.8] — 2026-06-05
+
+### Fixed
+- **CI: the `Build, Push & Deploy` check now runs on pull requests, so non-code (docs) PRs can satisfy branch protection without an admin override.** `main` requires the status check named exactly `Build, Push & Deploy`, produced by the `Deploy SquishyBot` workflow — but that workflow only triggered on `push` to `main` and `workflow_dispatch`, never on `pull_request`. PRs therefore never produced the required check and could only be merged by admin override. Added a `pull_request:` trigger so the job runs on every PR; the Docker image still builds (validating the TypeScript compile inside Docker) but with `push: false` on PRs. The GHCR login, slash-command deploy, VPS SSH deploy, and Discord success/failure notifications are all guarded with `github.event_name == 'push' && github.ref == 'refs/heads/main'`, so push + deploy stay main-only and push-to-main behavior is unchanged. The job name (and thus the required-check context) is intentionally left identical so branch protection keeps matching it.
+- No bot code or behavior changes; CI configuration only.
+
+_v0.8.8 · ci-only_
+
+---
+
 ## [0.8.7] — 2026-06-05
 
 ### Docs
