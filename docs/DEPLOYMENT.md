@@ -7,6 +7,7 @@
 | **Local dev** | `pnpm dev` (tsx, hot reload, local Postgres) |
 | **Any server** | `docker compose up -d` (one command, pulls from GHCR) |
 | **CI/CD** | Push to `main` → GitHub Actions builds image → pushes to GHCR → VPS pulls |
+| **Auto-deploy** | [watchtower](https://github.com/nicholas-fedor/watchtower) on the VPS polls the `:latest` tag (~30s) and restarts the container when its digest changes |
 
 > **Why Docker?** The VPS has ~900 MB free RAM and cannot compile TypeScript.
 > The GitHub Actions runner has 7 GB RAM and builds the image there.
@@ -153,6 +154,8 @@ Just push to `main`. The workflow handles everything automatically:
 3. Registers slash commands in Discord
 4. SSHs to VPS: pulls new image, restarts container
 5. Sends Discord notification
+
+> The container carries the `com.centurylinklabs.watchtower.enable="true"` label, so **watchtower** on the VPS also pulls the new `:latest` digest and restarts the bot on its own poll cycle (~30s) — the SSH step in step 4 is a belt-and-suspenders fast path, not the only deploy mechanism.
 
 ---
 

@@ -5,6 +5,17 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [0.8.7] — 2026-06-05
+
+### Docs
+- **README restructured to the shared project layout** (Overview → Architecture → Stack → Quick start → Configuration → Usage → Deployment → Conventions) while keeping the full feature + command content. Staleness fixed along the way: the Production section described a systemd service, but the `squishybot` CLI and deployment are entirely Docker-based (GHCR image + watchtower) — replaced with the real subcommands and CI story; added the `/color` command (feature-flagged) that was missing from the table; corrected the deploy step to `pnpm deploy:commands`; staff requests are reached via `/settings → Staff Role` (not a `/staff request` command); and the env table now lists `BOTPANEL_RPC_SECRET`, `REDIS_URL`, `BOT_IMAGE`, `POSTGRES_PASSWORD`, and `NODE_ENV`, marks `HUB_CHANNEL_IDS` optional, and notes the real `VOICE_CLEANUP_DELAY_MS` code default (`0`).
+- **Wiki overhauled** to match current code — Slash-Commands (`/help` + `/settings`, not the removed `/squishy`; added `/color`; full settings sub-panel + `/play` options), Database-Schema (all 19 tables, refreshed `bot_settings` key list), Architecture (Docker build reality + Redis event/command bus + full service map), Environment-Variables (`BOTPANEL_RPC_SECRET`/`REDIS_URL`, `HUB_CHANNEL_IDS` optional), Staff-Roles (request entry is `/settings → Staff Role`), Bot-Owner, Feature-Roadmap, and Home.
+- No code or behavior changes; documentation only.
+
+_v0.8.7 · docs-only_
+
+---
+
 ## [0.8.6] — 2026-05-24
 
 ### Fixed
