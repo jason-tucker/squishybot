@@ -1,95 +1,58 @@
 # SquishyBot
 
-A multipurpose Discord bot for a single server. Built with discord.js v14, TypeScript, PostgreSQL, and Drizzle ORM.
+A multipurpose Discord bot for a single server, built around **dynamic auto voice channels** with attached text channels and interactive control panels. discord.js v14 · TypeScript · PostgreSQL · Drizzle ORM.
 
-## Quick install (any VPS with Docker)
+## Overview
 
-```bash
-# 1. Install Docker (skip if already installed)
-curl -fsSL https://get.docker.com | sudo sh && sudo usermod -aG docker $USER && newgrp docker
+SquishyBot serves one Discord guild. Its headline feature is auto voice channels: members join a **hub** voice channel and the bot converts it into their own room — renamed in place, with a private text channel and a persistent Components V2 control panel. A replacement hub is spawned immediately, and rooms clean themselves up when empty. A startup **reconciler** repairs orphaned channels, missing hubs, and stale panels after every restart.
 
-# 2. Install SquishyBot (replace YOURUSER with your GitHub username)
-GITHUB_OWNER=YOURUSER bash <(curl -fsSL https://raw.githubusercontent.com/YOURUSER/squishybot/main/scripts/install.sh)
-```
+Around that core, the bot bundles game roles + LFG pings (`/play`), self-service profiles and birthdays, staff-role requests, auto-threads, social-feed reposting, reaction roles, channel archiving, and an owner-reviewed `/report → GitHub issue` flow. Almost everything is configurable at runtime through `/sudo → Settings` — no redeploy needed to onboard a new hub, game, or auto-thread channel.
 
-The installer verifies Docker, clones the repo, generates a strong Postgres password, opens `.env` so you can paste your Discord token + IDs, pulls the GHCR image, and starts the bot.
+A companion web dashboard ([botpanel](https://github.com/jason-tucker/botpanel)) drives the same actions over a Redis command bus, so the bot exposes most flows as both Discord interactions and RPC verbs.
 
-See [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) for the full setup guide and CI/CD configuration.
+Roadmap, completed work, and open action items live on the [Bot Development project board](https://github.com/users/jason-tucker/projects/3). Items use statuses **Todo**, **In Progress**, **Done**, **Tucker Action** (waiting on the owner), and **Blocked** (with a Blocker note).
 
-Roadmap, completed work, and open action items are tracked in the [Bot Development project board](https://github.com/users/jason-tucker/projects/3). Items use these statuses: **Todo**, **In Progress**, **Done**, **Tucker Action** (waiting on me), **Blocked** (with a Blocker note explaining why).
+## Architecture
 
-## Features
+### Auto voice system
 
-### Auto Voice Channels
+When a member joins a hub voice channel, `voiceStateUpdate → handleHubJoin` runs:
 
-- Join a **hub** voice channel → the hub converts into your personal voice channel (you stay in it)
-- A replacement hub is immediately created
-- An attached **text channel** appears, visible only to users in the voice channel + sudo users
-- A persistent **control panel** message lets you rename, lock, add/remove hosts, claim, delete, or apply a template
-- A silent **sticky button** stays at the bottom of the text channel (always `📋 Open Panel`) so the panel is one click away even after lots of chat
-- **Templates** — Auto (follows your rich presence), Counter (live `[x/y]` member count), Comp 5-stack, Tryhard Mode, Chill Session
-- Default channel name uses your active game; if you're not playing anything, you get a random tech-themed name like *Sloppy Ethernet*
-- When the channel becomes empty, both voice + text channels are cleaned up automatically
-- Bot repairs itself on restart (reconciler recovers orphaned channels, missing hubs, and stale panels)
+1. The hub VC is **renamed in place** and moved to the top of the category — the member stays put, no move needed.
+2. A **replacement hub** is created so the entry point is never consumed.
+3. An attached **text channel** is created, denied to `@everyone` and granted to the owner, members currently in the VC, the bot, and sudo roles.
+4. A **control panel** (Components V2) is posted silently in the text channel, plus a sticky **📋 Open Panel** button pinned to the bottom.
+5. An `auto_channels` row records the full state (owner, hosts, lock/hide flags, user limit, name template, panel message ID).
 
-### Staff Requests
+Channel names track Discord **rich presence** for every member in the room (not just the owner); with nobody playing, the name falls back to a manual name or a random tech-themed default (e.g. *Sloppy Ethernet*). When the room empties, a DB-backed **cleanup scheduler** deletes both channels after a configurable delay. Ownership uses a **grace window** (default 5 min) so an owner who briefly leaves can reclaim before an acting owner is promoted.
 
-- Submit a request via `/settings → Staff Role`
-- Bot posts the request in a configured admin thread, pinging the designated reviewer
-- Sudo can Approve or Deny in place; the requester gets a DM with the result
+Key services live under `src/services/voice/`: `hubManager`, `autoChannel`, `autoNaming`, `controlPanel`, `sticky`, `cleanupScheduler`, `ownerGrace`, `hubLockdown`, `hostsService`, `permissions`, `reconciler`.
 
-### Bug & Feature Reports
+### Reconciler
 
-- `/report` opens a modal (Title / Type / Description / Steps to reproduce)
-- The bot DMs the owner with the contents and four buttons: **Approve+Notify**, **Approve Silent**, **Reject+Notify**, **Reject Silent**
-- On approve, the bot files the issue against `GITHUB_REPO` via the GitHub REST API and (optionally) DMs the reporter the issue URL
+`runReconciler()` runs on `clientReady` and is the bot's self-repair pass. It seeds hubs from env, reconciles every `auto_channels` row against live Discord state (cleaning orphaned rows, rebuilding panels and stickies, re-syncing text-channel permissions), backfills the member list, and restores in-flight cleanup timers, owner-grace windows, and hub lockdowns. Untracked channels in the auto-voice category are logged but left alone (never auto-adopted).
 
-### Sudo Panel
+### Data + integration
 
-- `/sudo` opens an admin select menu: **Settings**, active channels, hubs, force cleanup, pending approvals, run reconciler, restart instructions
-- **Settings** is a runtime config editor — overrides the values that would normally come from `.env` for: extra sudo users, channel IDs (log / admin / birthday / staff approval thread), voice cleanup delay, the auto-voice category, the list of registered hubs, and the list of auto-thread channels. Reset on any field falls back to the env value.
-- Settings persist in `bot_settings` (key/value), `sudo_users` (members granted sudo at runtime), `hub_channels` (DB-authoritative hub list), and `auto_thread_channels` (the dynamic auto-thread list).
+- **PostgreSQL + Drizzle ORM**, 19 tables. Schema lives only in `src/db/schema/*.ts` — applied with `drizzle-kit push` (no SQL migration files in git). See the [Database Schema wiki](https://github.com/jason-tucker/squishybot/wiki/Database-Schema).
+- **Runtime config** is stored in `bot_settings` (key/value, with env fallback) and edited live via `/sudo → Settings`. Feature flags, channel IDs, hub list, games, social feeds, and more are all DB-authoritative.
+- **Redis** carries a fan-out **event bus** (`bot.squishy.*` — ready/heartbeat/voice/member events) and a botpanel **command bus** (`cmd.squishy.<verb>`, HMAC-signed). RPC handlers under `src/services/rpc/handlers/` mirror the slash flows. Both are optional: with `BOTPANEL_RPC_SECRET` unset or Redis down, the bot runs normally.
 
-### Auto Threads
+## Stack
 
-- Configure under **/sudo → Settings → Auto Threads** — a `ChannelSelectMenu` to add, a `StringSelectMenu` to remove. No code changes required to onboard a new channel.
-- Every non-bot, non-system message in a configured channel gets a public thread. Default thread name: `{author} — {first line}` (truncated to 100 chars). Per-channel `name_template` and `archive_duration` columns are reserved on the schema for future per-channel tuning.
-- Requires the `MessageContent` privileged intent (Dev Portal → Bot).
+| Layer | Tool |
+|---|---|
+| Language | TypeScript (strict) |
+| Runtime | Node 24, `node dist/index.js` (compiled JS in Docker) |
+| Discord | discord.js v14 (Components V2) |
+| Database | PostgreSQL 16 + Drizzle ORM |
+| Schema | `drizzle-kit push` (no SQL files in git) |
+| Cache/bus | Redis (ioredis) — optional event + command bus |
+| Env | Zod-validated `.env` |
+| Dev runner | `tsx watch` |
+| CI/CD | GitHub Actions → GHCR → watchtower |
 
-### Game Night
-
-- Sudo runs `/sudo → Game Night` from the channel they want the announcement in, then fills a modal: game (must be in the catalog), date/time, optional notes.
-- Bot posts a CV2 announcement **in that channel** (no separate channel setting — wherever you ran `/sudo`, that's where it posts).
-- Members RSVP with one click: ✅ Joining · 🤔 Might join · ❌ Not joining (toggle — clicking your current state clears it).
-- Members also indicate whether they own the game: 👍 I own it · 🛒 I don't own it. The "🛒 Need a copy" list helps the host know who to gift the game to (we buy the game for non-owners on game nights).
-- ✖️ Cancel button visible to host and sudo. State held in-memory + parse-from-message recovery so announcements survive restarts.
-
-### Birthday Pings
-
-- Daily scheduler that fires at a configurable target hour (default 9 AM server time) and posts a celebratory message in the channel set under **/sudo → Settings → Channels → Birthday channel**.
-- Members set their birthday via **/profile** (modal: month + day). They can opt out without deleting the date by toggling **Birthday pings**.
-- Same-day restarts don't double-fire (idempotency via `bot_settings.birthday.last_run_date`).
-- Leap-year birthdays (Feb 29) get celebrated on Feb 28 in non-leap years with a small note.
-
-### User Profile Editor
-
-- **Sudo edits anyone's profile** — `/sudo → Settings → User Profiles` lets a sudo member browse profiles by Discord member picker, or right-click any member → **Manage User → Edit Profile** for a faster path. Sudo can edit: display name, real name, birthday, staff category / department / tier / leadership title, and the birthday opt-out flags.
-- **Self-service** — `/settings → Profile & Birthday` opens the same editor in self mode for the caller. Limited to display name, birthday, and the two birthday flags. All edits are logged.
-
-### Game Roles + LFG Pings
-
-- **Catalog (sudo)** — `/sudo → Settings → Games` lets sudo define games (name, aliases, sort order, visibility, archive flag). **Adding a game auto-provisions the Discord ping role and a hidden text channel** — links to existing role/channel by name match if they already exist, otherwise creates them. New channels deny `@everyone` ViewChannel so the per-member view overwrite path is the gate. The default parent category for auto-created channels is configurable via a category select on the same panel.
-- **Member opt-in** — `/games` lists every visible game with two toggles per game: **View** (assigns the View role) and **Pings** (assigns the LFG Ping role). Toggling immediately syncs the role on Discord.
-- **Sudo-acts-on-behalf** — sudo can right-click any member → **Manage User → Game Prefs** and toggle View / Pings on that member's behalf. Same UI, same flow. Same pattern applies to profile editing — `/settings → Profile & Birthday` for self, **Manage User → Edit Profile** for sudo.
-- **`/play <game>`** — LFG ping. Autocompletes on name + aliases. Posts a Components V2 message in the game's channel pinging the LFG role; anyone can click the **🎮 I want to play!** button to join the session (toggle on/off). The host is locked in — they delete the message to cancel. 30-minute per-(user, game) cooldown; sudo can pass `force:true` to bypass.
-
-### Planned Features
-
-_(Nothing currently on the active planned list — see [project board](https://github.com/users/jason-tucker/projects/3) for the latest backlog.)_
-
----
-
-## Setup
+## Quick start
 
 ### 1. Install dependencies
 
@@ -101,35 +64,12 @@ pnpm install
 
 ```bash
 cp .env.example .env
-# Fill in your values
+# Fill in your values — see Configuration below
 ```
 
-| Variable | Required | Description |
-|---|---|---|
-| `DISCORD_BOT_TOKEN` | Yes | Bot token |
-| `DISCORD_CLIENT_ID` | Yes | Application ID |
-| `DATABASE_URL` | Yes | PostgreSQL connection string |
-| `GUILD_ID` | Yes | Single guild this bot serves |
-| `AUTO_VOICE_CATEGORY_ID` | Yes | Default category for hubs and auto channels (overridable via `/sudo → Settings → Voice → Auto-voice category`) |
-| `HUB_CHANNEL_IDS` | No | Comma-separated voice channel IDs to seed as hubs on first boot. Once registered, the DB is authoritative and this env var can be cleared. Add/remove hubs at runtime via `/sudo → Settings → Hub Channels`. |
-| `SUDO_ROLE_IDS` | No | Comma-separated role IDs with admin powers |
-| `SUDO_USER_IDS` | No | Comma-separated user IDs with admin powers |
-| `LOG_CHANNEL_ID` | No | Channel for bot log messages |
-| `ADMIN_CHANNEL_ID` | No | Sudo-only bot admin channel |
-| `STAFF_APPROVAL_THREAD_ID` | No | Thread where `/staff request` submissions are posted |
-| `STAFF_APPROVAL_PING_USER_ID` | No | User pinged on each staff request |
-| `VOICE_CLEANUP_DELAY_MS` | No | ms before empty channel cleanup (default: 30000) |
-| `BIRTHDAY_CHANNEL_ID` | No | Future: birthday pings (also editable at `/sudo → Settings → Channels`) |
-| `CLIPS_CHANNEL_ID` | — | **Deprecated.** Auto-threading is now configured at `/sudo → Settings → Auto Threads` (DB-backed). Safe to remove from `.env`. |
-| `FOOD_CHANNEL_ID` | — | **Deprecated.** Same as above. |
-| `UPTIME_KUMA_PUSH_URL` | No | Push monitor URL |
-| `BOT_OWNER_ID` | Yes for `/report` | Receives DM on every `/report` for review approval, plus startup pings (silent) |
-| `GITHUB_TOKEN` | Yes for `/report` | Fine-grained PAT with **Issues: Read & Write** on `GITHUB_REPO` |
-| `GITHUB_REPO` | Yes for `/report` | `owner/name`, e.g. `jason-tucker/squishybot` |
+### 3. Apply the database schema
 
-### 3. Apply database schema
-
-SquishyBot uses `drizzle-kit push` — schema lives only in `src/db/schema/*.ts`, no SQL migration files in git. The Docker entrypoint runs the push automatically on every start. For local non-Docker dev:
+Schema lives only in `src/db/schema/*.ts`. The Docker entrypoint runs `drizzle-kit push` automatically on every start. For local non-Docker dev:
 
 ```bash
 pnpm drizzle-kit push
@@ -138,89 +78,116 @@ pnpm drizzle-kit push
 ### 4. Deploy slash commands
 
 ```bash
-pnpm commands:deploy
+pnpm deploy:commands
 ```
 
-### 5. Start (development)
+### 5. Start
 
 ```bash
-pnpm dev
+pnpm dev          # local dev (tsx, hot reload)
+# or, in production, via Docker — see Deployment
 ```
 
----
+## Configuration
 
-## Production — `squishybot` CLI
+All variables are validated by Zod in `src/config/env.ts`; the bot exits on a missing required value. In Docker, `DATABASE_URL` and `REDIS_URL` are set for you by `docker-compose.yml` (you only set `POSTGRES_PASSWORD`).
 
-A management CLI is included at `scripts/squishybot`. Install once:
+| Variable | Required | Description |
+|---|---|---|
+| `DISCORD_BOT_TOKEN` | Yes | Bot token |
+| `DISCORD_CLIENT_ID` | Yes | Application (client) ID |
+| `GUILD_ID` | Yes | The single guild this bot serves |
+| `DATABASE_URL` | Yes | PostgreSQL connection string. Set automatically by Docker Compose from `POSTGRES_PASSWORD`. |
+| `AUTO_VOICE_CATEGORY_ID` | Yes | Default category for hubs and auto channels (overridable via `/sudo → Settings → Voice`) |
+| `NODE_ENV` | No | `development` / `production` / `test` (default: `development`) |
+| `HUB_CHANNEL_IDS` | No | Comma-separated voice channel IDs to seed as hubs on first boot. Once registered the DB is authoritative; manage at runtime via `/sudo → Settings → Hub Channels`. |
+| `SUDO_ROLE_IDS` | No | Comma-separated role IDs with admin powers |
+| `SUDO_USER_IDS` | No | Comma-separated user IDs with admin powers |
+| `BOT_OWNER_ID` | No* | Receives startup + error DMs. *Required for `/report` review and bot-owner kill switches. Bot-owner status can also resolve from the Discord dev-portal Team. |
+| `LOG_CHANNEL_ID` | No | Channel for structured bot log messages |
+| `ADMIN_CHANNEL_ID` | No | Sudo-only bot admin channel |
+| `STAFF_APPROVAL_THREAD_ID` | No | Thread where staff-role requests are posted |
+| `STAFF_APPROVAL_PING_USER_ID` | No | User pinged on each staff request |
+| `VOICE_CLEANUP_DELAY_MS` | No | ms before empty channels are cleaned up (code default `0`; `.env.example` seeds `30000`). Overridable via `/sudo → Settings → Voice`. |
+| `BIRTHDAY_CHANNEL_ID` | No | Birthday-ping channel (also editable at `/sudo → Settings → Channels`) |
+| `GITHUB_TOKEN` | No* | Fine-grained PAT with **Issues: Read & Write** on `GITHUB_REPO`. *Required for `/report`. |
+| `GITHUB_REPO` | No* | `owner/name`, e.g. `jason-tucker/squishybot`. *Required for `/report`. |
+| `BOTPANEL_RPC_SECRET` | No | Shared HMAC secret with botpanel for the Redis command/cache bus. Unset → RPC + cache-invalidate subscribers disabled (bot still runs). |
+| `REDIS_URL` | No | Event/command bus. Set by Docker Compose (`redis://redis:6379`). |
+| `BOT_IMAGE` | No | GHCR image for `docker compose pull` (default `ghcr.io/jason-tucker/squishybot:latest`). Set by CI. |
+| `POSTGRES_PASSWORD` | No | Postgres password for the Compose-managed DB. Use alphanumeric/hex (avoid `#`, `*`, `?`). |
+| `UPTIME_KUMA_PUSH_URL` | No | Push-monitor URL; pinged every 60s |
+| `CLIPS_CHANNEL_ID`, `FOOD_CHANNEL_ID` | — | **Deprecated.** Auto-threading is configured at `/sudo → Settings → Auto Threads` (DB-backed). Safe to remove. |
+
+## Usage
+
+Nine commands are registered: eight slash commands plus one right-click context menu. All responses are ephemeral. Full reference: the [Slash Commands wiki](https://github.com/jason-tucker/squishybot/wiki/Slash-Commands).
+
+| Command | Access | Description |
+|---|---|---|
+| `/help` | Everyone | Bot status + feature explainers (Voice / Panel / Games / Game Night / Staff / Reports). Routes self-service edits to `/settings`. |
+| `/settings` | Everyone | Self-service: **Profile & Birthday**, **Game Prefs**, **Staff Role** (request / remove). |
+| `/voice` | Owner / host / sudo | Open an ephemeral copy of the control panel for the auto channel you're in. |
+| `/games` | Everyone | Pick which games you want View access + LFG pings for. |
+| `/play <game>` | Everyone | LFG ping. Posts a Components V2 message in the game's channel with a **🎮 I want to play!** join button. Optional `message` / `ping` options; 30-min per-(user, game) cooldown (`force:true` for sudo). |
+| `/report` | Everyone | Modal (Title / Type / Description / Steps) → DMs the owner with **Approve+Notify** / **Approve Silent** / **Reject+Notify** / **Reject Silent** → on approve, files a GitHub issue against `GITHUB_REPO`. |
+| `/color` | Everyone | Pick a curated color role. **Feature-flagged off** by default (`feature.color_roles`). |
+| `/sudo` | Sudo | Admin panel: Settings, Manage user, Game Night, active channels, force owner transfer, hubs, force cleanup, pending approvals, run reconciler, restart instructions. |
+| Right-click user → **Manage** | Sudo | Roles, voice status, disconnect, staff history, plus profile + game-prefs editors for the target. |
+
+### Permissions
+
+A self-service vs. sudo-on-behalf pattern runs throughout: members edit their own profile / birthday / game prefs via `/settings` and `/games`; sudo edits the same (plus staff fields) via right-click → **Manage** or `/sudo → Settings`. The `/sudo → Settings` surface is a runtime config editor for sudo users, channels, voice timings, hubs, auto-threads, games, user profiles, social feeds, channel archive, welcome/goodbye messages, auto-join roles, color roles, reaction roles, and feature flags (the **Debug** sub-panel — flag toggles and cache/orphan tools gate on bot-owner, not just sudo).
+
+Required Discord bot permissions: **Manage Channels**, **Move Members**, **Manage Roles**, **View Channels / Send Messages / Read Message History**, **Use External Emojis** (Components V2). Privileged intents in the Developer Portal: **Server Members**, **Presence**, and **Message Content** (the last is required for auto-thread name templating).
+
+### Voice control panel buttons
+
+The control panel in each auto-channel text channel is the primary interaction surface (slash commands are fallbacks). Toggle buttons use the **status-flip convention** — the label shows the *current* state, not the pending action.
+
+| Button | What it does |
+|---|---|
+| ✏️ **Rename** | Modal to set a custom name (also updates `fallback_name`) |
+| 🔒 **Locked** / 🔓 **Unlocked** | Toggle `@everyone` Connect |
+| 🙈 **Hidden** / 👁️ **Visible** | Toggle channel visibility |
+| 👑 **Hosts** | Panel listing each member with their rank (👑 host · 🛡️ sudo · 👤 member); click to toggle host status |
+| 📋 **Templates** | Auto / Counter `[x/y]` / Comp 5-stack / Tryhard / Chill — sets name + user limit in one click |
+| 👤 **Claim** | Take ownership when the original owner has left |
+| 🗑️ **Delete** | Delete both voice + text channels immediately |
+
+## Deployment
+
+Production runs on Docker. The image is built on GitHub Actions (the VPS has ~900 MB free RAM and cannot compile TypeScript) and published to GHCR; **watchtower** on the VPS polls the `:latest` tag and restarts the container when its digest changes. The CI workflow also SSHes in to `git reset --hard origin/main` and `docker compose up -d` as a belt-and-suspenders deploy.
+
+A management CLI ships at `scripts/squishybot`. Install once:
 
 ```bash
 sudo cp scripts/squishybot /usr/local/bin/squishybot
 sudo chmod +x /usr/local/bin/squishybot
 ```
 
-Then from anywhere:
+Then from anywhere (auto-detects the project dir):
 
 ```bash
-squishybot install      # first-time setup: install systemd unit, run migrations, deploy commands, start
-squishybot start        # start the bot
-squishybot stop         # stop the bot
-squishybot restart      # graceful restart (runs migrations first)
-squishybot status       # service status
+squishybot start        # docker compose up -d (bot + db)
+squishybot stop         # stop the stack (preserves volumes)
+squishybot restart      # restart just the bot container
+squishybot status       # docker compose ps
 squishybot logs         # tail live logs (Ctrl+C to exit)
 squishybot tail 50      # last 50 log lines
-squishybot deploy       # redeploy slash commands to the guild
-squishybot migrate      # run database migrations
-squishybot update       # git pull + migrate + redeploy + restart
+squishybot pull         # pull the latest image
+squishybot update       # git pull + image pull + up -d
+squishybot rebuild      # build image locally + restart
+squishybot deploy       # register slash commands (uses .env)
+squishybot db:shell     # psql into the postgres container
+squishybot env          # edit .env and reload containers
 ```
 
-A weekly automatic restart runs every Tuesday at 4 AM via the
-`squishybot-restart.timer` unit (installed by `squishybot install`).
+First-time VPS setup, CI secrets, rollback, and Unraid notes live in **[docs/DEPLOYMENT.md](docs/DEPLOYMENT.md)**.
 
-### Manual restart fallback
+## Conventions
 
-If the CLI isn't available:
-```bash
-kill -TERM $(ps aux | grep "tsx.*src/index.ts" | grep -v grep | awk '{print $2}' | head -1)
-sleep 5 && journalctl -u squishybot -n 10 --no-pager
-```
-
----
-
-## Bot permissions required
-
-- Manage Channels
-- Move Members
-- Manage Roles (for permission overwrites)
-- View Channels / Send Messages / Read Message History
-- Use External Emojis (for Components V2)
-- Privileged intents in Developer Portal: **Server Members**, **Presence Intent**, **Message Content** (the last is required for auto-thread name templating)
-
----
-
-## Slash commands
-
-Four top-level slash commands plus one right-click context menu. All responses are ephemeral.
-
-| Command | Access | Description |
-|---|---|---|
-| `/voice` | Owner / Host / Sudo | Open an ephemeral copy of the control panel for the auto channel you're in |
-| `/help` | Everyone | User-facing menu: bot status + feature explainers (Voice / Panel / Reports / Staff). Routes self-service edits to `/settings`. |
-| `/settings` | Everyone | Self-service: Profile & Birthday, Game Prefs, Staff Role (request / remove). |
-| `/sudo` | Sudo | Admin select-menu panel: Settings (sudo users, channels, voice, hubs, auto threads, games, user profiles), active channels, hubs, force cleanup, pending approvals, run reconciler, restart instructions |
-| `/games` | Everyone | Pick which games you want View access + LFG pings for |
-| `/play` | Everyone | LFG ping. Posts a CV2 message in the game's channel with a "🎮 I want to play!" button others can click to join the session. Rate-limited per-(user, game). |
-| `/report` | Everyone | Modal (Title / Type / Description / Steps) → DMs the owner with **Approve+Notify** / **Approve Silent** / **Reject+Notify** / **Reject Silent** buttons → on approve, files a GitHub issue against `GITHUB_REPO` |
-| Right-click user → **Manage** | Sudo | Roles, voice status, disconnect, staff history, profile + game prefs editors |
-
-### Voice control panel (in each auto-channel text channel)
-
-| Button | What it does |
-|---|---|
-| ✏️ **Rename** | Modal to set a custom name |
-| 🔒 **Lock** / 🔓 **Unlock** | Toggle Connect on `@everyone` |
-| 👑 **Hosts** | One panel listing each member with their current rank emoji: 👑 host · 🛡️ sudo · 👤 member. Click any name to toggle their host status. |
-| 📋 **Templates** | Auto / Counter / Comp 5-stack / Tryhard / Chill — sets name + user limit in one click |
-| 👤 **Claim** | Take ownership when the original owner has left |
-| 🗑️ **Delete** | Delete both voice + text channels right away |
-
-The persistent panel + the silent **📋 Open Panel** sticky at the bottom of the text channel are the primary interaction surfaces. Slash commands are fallback escape hatches.
+- **CHANGELOG** — every PR adds a dated, real-semver section at the top of [CHANGELOG.md](CHANGELOG.md) (Keep a Changelog format) with a `v<x.y.z> · <sha>` footer; `package.json` carries the matching version.
+- **Project board** — every work unit gets an item on the [Bot Development project board](https://github.com/users/jason-tucker/projects/3).
+- **Schema** — change `src/db/schema/*.ts` and let `drizzle-kit push` apply it; never hand-write SQL migrations. A schema push on `main` notifies botpanel to re-vendor the Drizzle schemas.
+- See **[CLAUDE.md](CLAUDE.md)** for the full contributor playbook and the **[project wiki](https://github.com/jason-tucker/squishybot/wiki)** for deep-dive docs (architecture, auto-voice internals, bot-owner permissions, staff roles, database schema, environment variables, feature roadmap).
