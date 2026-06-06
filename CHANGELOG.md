@@ -11,6 +11,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - **Scheduled posts + a renderer for the panel's portable "message spec".** New `scheduled_posts` table (migration `0002`) backs fully-customizable Components-V2 posts authored in the botpanel embed editor. `services/msgspec/` renders the spec JSON (containers / text / sections+accessory / separators / image galleries / link buttons) to discord.js builders with `{{variable}}` substitution and `<t:UNIX:style>` timestamp support.
 - **Game-night scheduling.** `services/scheduledPosts/` adds a 15s tick scheduler that posts rows when their `fire_at` is due (survives restarts via a status-claim + stale-`posting` reset), plus a game-night context builder (host mention, RSVP counts/rosters, the event time as a Discord timestamp). Posted messages carry RSVP / own-a-copy / cancel buttons (`sp:` customIds) whose state is **persisted in Postgres** — unlike the legacy in-memory `/sudo → Game Night` flow which lost RSVPs on restart.
 - **RPC verbs `scheduled_post.send` (post a row immediately) and `scheduled_post.cancel` (retract a live post, deleting the Discord message)** for the panel's Send-now / Delete actions.
+- **Game-night `{{steam}}` variable.** The game-night render context now exposes `variables.steam`, so a `{{steam}}` token (in text or a link-button URL) resolves to the Steam link set in the panel.
 
 ### Notes
 - The existing in-Discord `/sudo → Game Night` flow is unchanged and coexists with the new panel-driven, DB-backed path.

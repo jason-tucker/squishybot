@@ -68,6 +68,7 @@ export function buildGameNightContext(row: ScheduledPostRow): SubstitutionContex
       host: row.createdByDiscordId ? `<@${row.createdByDiscordId}>` : '',
       channel: `<#${row.channelId}>`,
       notes: typeof vars.notes === 'string' ? vars.notes : '',
+      steam: typeof vars.steam === 'string' ? vars.steam : '',
       'count.in': String(joining.length),
       'count.maybe': String(might.length),
       'count.out': String(out.length),
