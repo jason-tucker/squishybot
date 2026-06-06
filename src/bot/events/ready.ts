@@ -53,6 +53,9 @@ import '../../services/rpc/handlers/users'
 // stays gated on `feature.color_roles`; the verb itself isn't double-gated
 // (panel hides the section when the flag is off, see /squishy/members/[id]).
 import '../../services/rpc/handlers/color'
+// scheduled_post.send / .cancel verbs — panel "Send now" + live-post retract.
+import '../../services/rpc/handlers/scheduledPosts/send'
+import '../../services/rpc/handlers/scheduledPosts/cancel'
 
 const SUPPRESS_NOTIFICATIONS = 1 << 12  // MessageFlags.SuppressNotifications
 
@@ -84,6 +87,8 @@ export function registerReadyEvent(client: Client) {
     ])
     startBirthdayScheduler(c)
     startSocialPoller(c)
+    const { startScheduledPostScheduler } = await import('../../services/scheduledPosts/scheduler')
+    startScheduledPostScheduler(c)
     const { startGameAutoArchiver } = await import('../../services/gameAutoArchive')
     startGameAutoArchiver(c, env.GUILD_ID)
     const { loadReactionRoles, startReactionRoleCleanup } = await import('../../services/reactionRoles')

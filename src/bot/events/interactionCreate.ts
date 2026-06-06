@@ -131,6 +131,9 @@ export function registerInteractionCreate(client: Client) {
         } else if (id.startsWith('gn:cancel:')) {
           const { handleCancelButton: handleGnCancel } = await import('../../commands/gamenight')
           await handleGnCancel(interaction as ButtonInteraction)
+        } else if (id.startsWith('sp:rsvp:') || id.startsWith('sp:own:') || id.startsWith('sp:cancel:')) {
+          const { handleScheduledPostButton } = await import('../../interactions/buttons/scheduledPost')
+          await handleScheduledPostButton(interaction as ButtonInteraction)
         } else if (id.startsWith('games:cat:')) {
           const { handleCatalogButton } = await import('../../interactions/gamesEditor')
           await handleCatalogButton(interaction as ButtonInteraction)
