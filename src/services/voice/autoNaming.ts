@@ -1,4 +1,4 @@
-import { ActivityType, type Presence, type VoiceBasedChannel, type GuildMember } from 'discord.js'
+import { ActivityType, type Presence, type VoiceBasedChannel, type GuildMember, type Guild } from 'discord.js'
 
 /**
  * Auto-name templates. Templates are NAMING ONLY — they never touch user
@@ -132,4 +132,58 @@ function takeFirstNonEmpty(v: string | null | undefined): string | null {
   if (!v) return null
   const trimmed = v.trim()
   return trimmed.length > 0 ? trimmed : null
+}
+
+/**
+ * Trailing emojis appended after every auto-channel name. The first is the
+ * default; the rest are collision-dodging fallbacks (see decorateChannelName).
+ */
+export const NAME_EMOJIS = ['🎮', '🕹️', '🎯', '🔥', '⭐', '🚀', '🌟', '⚡', '🎲', '💫'] as const
+
+/** Strip a trailing NAME_EMOJIS decoration (incl. any " N" dedupe suffix) so a
+ *  name can be re-decorated without the emoji accreting on every rename. */
+function stripDecoration(name: string): string {
+  const s = name.trim()
+  for (const emoji of NAME_EMOJIS) {
+    // "Base 🎮" or "Base 🎮 2" (counter fallback from a fully-exhausted pool)
+    const re = new RegExp(`\\s*${escapeRegExp(emoji)}(?:\\s+\\d+)?\\s*$`, 'u')
+    if (re.test(s)) return s.replace(re, '').trim()
+  }
+  return s
+}
+
+function escapeRegExp(s: string): string {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+}
+
+/**
+ * Append a trailing emoji to an auto-channel name, choosing one that keeps the
+ * full name distinct from every other channel in the guild. Discord permits
+ * duplicate channel names, but an auto channel whose name exactly matches an
+ * existing channel — a static "overwatch" channel, or another VC already
+ * playing the same game — is confusing. We dodge by trying the next trailing
+ * emoji until the resulting name is unique.
+ *
+ * `selfChannelId` is excluded from the collision set so re-decorating a channel
+ * with an unchanged base name is stable (same emoji back → the caller's
+ * `vc.name === desired` check short-circuits → no rename churn).
+ */
+export function decorateChannelName(guild: Guild, baseName: string, selfChannelId: string): string {
+  const taken = new Set<string>()
+  for (const ch of guild.channels.cache.values()) {
+    if (ch.id === selfChannelId) continue
+    taken.add(ch.name.toLowerCase())
+  }
+  // Strip any existing decoration first so emojis don't pile up across renames,
+  // then leave headroom under Discord's 100-char channel-name limit.
+  const base = stripDecoration(baseName).slice(0, 90).trim()
+  for (const emoji of NAME_EMOJIS) {
+    const candidate = `${base} ${emoji}`
+    if (!taken.has(candidate.toLowerCase())) return candidate
+  }
+  // Pool exhausted (10+ identically-named channels) — default emoji + counter.
+  for (let n = 2; ; n++) {
+    const candidate = `${base} ${NAME_EMOJIS[0]} ${n}`
+    if (!taken.has(candidate.toLowerCase())) return candidate
+  }
 }

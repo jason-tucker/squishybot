@@ -13,6 +13,9 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - **RPC verbs `scheduled_post.send` (post a row immediately) and `scheduled_post.cancel` (retract a live post, deleting the Discord message)** for the panel's Send-now / Delete actions.
 - **Game-night `{{steam}}` variable.** The game-night render context now exposes `variables.steam`, so a `{{steam}}` token (in text or a link-button URL) resolves to the Steam link set in the panel.
 
+### Changed
+- **Auto voice channel names now carry a trailing emoji and never exactly match another channel.** New `decorateChannelName(guild, base, selfChannelId)` in `services/voice/autoNaming.ts` appends a trailing emoji (`🎮` by default) and, if that full name already matches any other channel in the guild — e.g. a static `overwatch` channel or a second VC already playing the same game — it dodges to the next emoji in the pool (`🕹️ 🎯 🔥 ⭐ …`) so two channels never end up with an identical name. Applied at every rename site: presence-driven auto-rename (`autoRename.ts`), the initial hub→auto rename (`autoChannel.ts`), the Templates picker (`selects/voiceTemplate.ts`), the manual Rename modal (`modals/voiceRename.ts`), and the panel-driven `voice.rename` RPC. The DB keeps the undecorated base name in `manual_name` / `fallback_name`, and the decoration is re-derived (stripped + re-applied) on each rename so the emoji never accretes and the `vc.name === desired` short-circuit stays stable.
+
 ### Notes
 - The existing in-Discord `/sudo → Game Night` flow is unchanged and coexists with the new panel-driven, DB-backed path.
 

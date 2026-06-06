@@ -15,6 +15,7 @@ import { registerVerb, type VerbHandler } from '../../registry'
 import { db } from '../../../../db/client'
 import { autoChannels } from '../../../../db/schema'
 import { sanitizeChannelName } from '../../../../utils/channelName'
+import { decorateChannelName } from '../../../voice/autoNaming'
 import { postOrUpdateControlPanel } from '../../../voice/controlPanel'
 import { logger } from '../../../logger'
 
@@ -50,10 +51,13 @@ export const renameHandler: VerbHandler = async (params, ctx) => {
       guild.channels.fetch(record.voiceChannelId).catch(() => null),
       guild.channels.fetch(record.textChannelId).catch(() => null),
     ])
-    const textName = sanitized.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'voice-chat'
+    // DB keeps the typed name undecorated; the visible name gets a trailing
+    // emoji + collision dodge — same rule as the in-bot rename flow.
+    const finalName = vc?.isVoiceBased() ? decorateChannelName(guild, sanitized, vc.id) : sanitized
+    const textName = finalName.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'voice-chat'
 
     await Promise.all([
-      vc?.isVoiceBased() ? vc.setName(sanitized) : Promise.resolve(),
+      vc?.isVoiceBased() ? vc.setName(finalName) : Promise.resolve(),
       tc?.isTextBased() ? (tc as { setName: (n: string) => Promise<unknown> }).setName(textName) : Promise.resolve(),
     ])
 
@@ -64,7 +68,7 @@ export const renameHandler: VerbHandler = async (params, ctx) => {
     const updated = { ...record, manualName: sanitized, autoNameEnabled: false, fallbackName: sanitized }
     await postOrUpdateControlPanel(ctx.client, updated).catch(() => {})
 
-    return { ok: true, data: { newName: sanitized } }
+    return { ok: true, data: { newName: finalName } }
   } catch (err) {
     const msg = (err as Error)?.message ?? String(err)
     logger.warn(`voice.rename: discord error for vc=${voiceChannelId}: ${msg}`)
