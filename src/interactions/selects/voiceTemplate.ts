@@ -4,7 +4,7 @@ import { autoChannels } from '../../db/schema'
 import { eq } from 'drizzle-orm'
 import { canControlChannel, isSudo } from '../../services/voice/permissions'
 import { postOrUpdateControlPanel } from '../../services/voice/controlPanel'
-import { computeAutoName, ALL_TEMPLATES, TEMPLATE_LABELS, type NameTemplate } from '../../services/voice/autoNaming'
+import { computeAutoName, decorateChannelName, ALL_TEMPLATES, TEMPLATE_LABELS, type NameTemplate } from '../../services/voice/autoNaming'
 import { decodeVcId } from '../../utils/customId'
 import { randomTechName } from '../../utils/randomName'
 
@@ -62,12 +62,14 @@ export async function handleVoiceTemplateSelect(interaction: StringSelectMenuInt
 
   // Apply name only — never touch userLimit. The user is the only authority on
   // the per-channel user limit; if they want one, they set it via Discord's
-  // channel settings UI.
+  // channel settings UI. `newName` stays undecorated in the DB (manual/fallback);
+  // the visible name gets a trailing emoji + collision dodge.
+  const finalName = vc ? decorateChannelName(vc.guild, newName, vc.id) : newName
   if (vc) {
-    await vc.edit({ name: newName }).catch(() => {})
+    await vc.edit({ name: finalName }).catch(() => {})
   }
   const tc = await interaction.guild!.channels.fetch(record.textChannelId).catch(() => null)
-  const textName = newName.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'voice-chat'
+  const textName = finalName.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'voice-chat'
   if (tc?.isTextBased()) {
     await (tc as any).setName(textName).catch(() => {})
   }
@@ -88,7 +90,7 @@ export async function handleVoiceTemplateSelect(interaction: StringSelectMenuInt
 
   const label = nameTemplate ? `${TEMPLATE_LABELS[nameTemplate].emoji} ${TEMPLATE_LABELS[nameTemplate].label}` : '💬 Chill'
   await interaction.editReply({
-    content: `✅ Naming template: **${label}**\nChannel name: **${newName}**\n_(User limit unchanged — set it yourself in Discord channel settings if you want one.)_`,
+    content: `✅ Naming template: **${label}**\nChannel name: **${finalName}**\n_(User limit unchanged — set it yourself in Discord channel settings if you want one.)_`,
     components: [],
   })
 }

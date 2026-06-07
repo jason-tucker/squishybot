@@ -6,6 +6,7 @@ import { eq } from 'drizzle-orm'
 import { canControlChannel, isSudo } from '../../services/voice/permissions'
 import { postOrUpdateControlPanel } from '../../services/voice/controlPanel'
 import { sanitizeChannelName } from '../../utils/channelName'
+import { decorateChannelName } from '../../services/voice/autoNaming'
 
 export async function handleVoiceRenameModal(interaction: ModalSubmitInteraction): Promise<void> {
   const decoded = decodeVcId(interaction.customId)
@@ -45,10 +46,14 @@ export async function handleVoiceRenameModal(interaction: ModalSubmitInteraction
     interaction.guild!.channels.fetch(record.textChannelId).catch(() => null),
   ])
 
-  const textName = newName.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'voice-chat'
+  // The DB keeps the user's typed name undecorated (manual/fallback); the
+  // visible name gets a trailing emoji and dodges any collision with another
+  // channel — same rule as the auto-named channels.
+  const finalName = vc?.isVoiceBased() ? decorateChannelName(vc.guild, newName, vc.id) : newName
+  const textName = finalName.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'voice-chat'
 
   await Promise.all([
-    vc?.isVoiceBased() ? vc.setName(newName).catch(() => {}) : Promise.resolve(),
+    vc?.isVoiceBased() ? vc.setName(finalName).catch(() => {}) : Promise.resolve(),
     tc?.isTextBased() ? (tc as any).setName(textName).catch(() => {}) : Promise.resolve(),
   ])
 
@@ -60,8 +65,8 @@ export async function handleVoiceRenameModal(interaction: ModalSubmitInteraction
   await postOrUpdateControlPanel(interaction.client, updated)
 
   if (interaction.isFromMessage()) {
-    await interaction.editReply({ content: `✅ Channel renamed to **${newName}**.`, components: [] })
+    await interaction.editReply({ content: `✅ Channel renamed to **${finalName}**.`, components: [] })
   } else {
-    await interaction.editReply({ content: `✅ Channel renamed to **${newName}**.` })
+    await interaction.editReply({ content: `✅ Channel renamed to **${finalName}**.` })
   }
 }

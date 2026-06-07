@@ -11,6 +11,7 @@ import { postOrUpdateSticky } from './sticky'
 import { scheduleCleanup, cancelCleanup } from './cleanupScheduler'
 import { cancelAllHideGracesFor } from './hideGrace'
 import { clearMembers, recordMemberJoin } from './voiceMembers'
+import { decorateChannelName } from './autoNaming'
 import { clearRenameThrottle } from '../../bot/events/presenceUpdate'
 import { clearStickyDebounce } from '../../bot/events/messageCreate'
 import { logger } from '../logger'
@@ -36,14 +37,19 @@ export async function createAutoChannel(
   const effectiveName = overrideManualName ?? channelName
   const effectiveUserLimit = hubDefaults?.defaultUserLimit ?? 0
 
+  // The visible channel name carries a trailing emoji and dodges any collision
+  // with an existing channel. `effectiveName` (undecorated) is what we persist
+  // as `fallback_name` so later auto-renames re-decorate from a clean base.
+  const displayName = decorateChannelName(guild, effectiveName, existingVoiceChannel.id)
+
   // 1. Rename the existing hub voice channel and move it to position 0 (top of category).
   // userLimit is bundled into this edit so it takes effect immediately if a hub default applies.
-  await existingVoiceChannel.edit({ name: effectiveName, position: 0, userLimit: effectiveUserLimit }).catch(err =>
+  await existingVoiceChannel.edit({ name: displayName, position: 0, userLimit: effectiveUserLimit }).catch(err =>
     logger.warn('Failed to rename/reposition hub channel in place:', err)
   )
 
   // 2. Create the attached text channel at position 0 (top of category, same name as voice)
-  const textChannelName = effectiveName.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'voice-chat'
+  const textChannelName = displayName.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'voice-chat'
   let textChannel
   try {
     textChannel = await guild.channels.create({
@@ -117,7 +123,7 @@ export async function createAutoChannel(
     voiceChannelId: record.voiceChannelId,
     textChannelId: record.textChannelId,
     ownerUserId: record.ownerUserId,
-    name: effectiveName,
+    name: displayName,
     ts: new Date().toISOString(),
   })
 
