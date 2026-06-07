@@ -105,12 +105,32 @@ jobs:
             git fetch --all
             git reset --hard origin/main
 
-            # Pull the new image and restart
-            BOT_IMAGE="${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest" \
-              docker compose pull squishybot
+            export BOT_IMAGE="${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest"
 
-            BOT_IMAGE="${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest" \
-              docker compose up -d --remove-orphans
+            # Pull the new image.
+            docker compose pull squishybot
+
+            # Bring the container up on the new image. The squishybot service is
+            # also labelled for watchtower (com.centurylinklabs.watchtower.enable),
+            # so watchtower independently watches :latest and may already be
+            # recreating the container when this step runs. A single `compose up`
+            # then races it and dies with "removal of container ... is already in
+            # progress". Retry a few times: once watchtower's recreate settles,
+            # `up -d` converges to a no-op (container already on the new :latest)
+            # and succeeds. Both deployers stay enabled; they just stop fighting.
+            for attempt in 1 2 3 4 5; do
+              if docker compose up -d --remove-orphans; then
+                echo "✓ compose up succeeded (attempt $attempt)"
+                break
+              fi
+              if [ "$attempt" -eq 5 ]; then
+                echo "ERROR: compose up failed after $attempt attempts"
+                docker compose logs squishybot --tail=30 || true
+                exit 1
+              fi
+              echo "compose up attempt $attempt failed (likely a watchtower recreate race) — retrying in 8s…"
+              sleep 8
+            done
 
             # Wait for container to be healthy
             sleep 10
