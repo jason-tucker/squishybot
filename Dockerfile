@@ -34,4 +34,11 @@ RUN chmod +x docker-entrypoint.sh
 
 ENV NODE_ENV=production
 
+# Drop root: the node:*-alpine image ships an unprivileged `node` user (uid
+# 1000). Running the bot as root means any RCE / malicious-dependency code
+# executes as root inside the container — larger blast radius on the shared
+# docker network. All copied files are world-readable and the bot writes only
+# to stdout + the DB, so the unprivileged user is sufficient.
+USER node
+
 ENTRYPOINT ["./docker-entrypoint.sh"]

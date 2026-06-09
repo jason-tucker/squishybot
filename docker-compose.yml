@@ -15,7 +15,7 @@ services:
       # alias; DNS round-robins between them and the bot was occasionally
       # hitting otter-db with squishy's credentials, causing voice handler
       # crashes ("password authentication failed for user squishybot").
-      DATABASE_URL: "postgresql://squishybot:${POSTGRES_PASSWORD:-squishybot_dev}@db-squishy:5432/squishybot"
+      DATABASE_URL: "postgresql://squishybot:${POSTGRES_PASSWORD:?set a strong POSTGRES_PASSWORD in .env}@db-squishy:5432/squishybot"
       # Redis is the event bus and (V2+) command bus to botpanel.
       # Lives in the botpanel compose stack on the shared network.
       REDIS_URL: "${REDIS_URL:-redis://redis:6379}"
@@ -39,7 +39,10 @@ services:
     restart: unless-stopped
     environment:
       POSTGRES_USER: squishybot
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-squishybot_dev}
+      # Fail loudly (`:?`) if unset/empty rather than silently falling back to a
+      # weak, guessable literal — the DB is reachable by every container on the
+      # shared botpanel-net.
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set a strong POSTGRES_PASSWORD in .env}
       POSTGRES_DB: squishybot
     # No host port mapping (security). The bot reaches the DB at "db:5432"
     # over the default compose network; botpanel reaches it at "db-squishy:5432"
