@@ -212,6 +212,14 @@ export function startRpcServer(client: Client): void {
     return
   }
 
+  // H6: the command bus carries privileged verbs (grant roles, manage channels).
+  // HMAC protects against forgery, but an unauthenticated Redis on the shared
+  // botpanel-net lets a co-tenant eavesdrop/DoS the bus. Nudge operators to use
+  // an authenticated URL (redis://:password@host + `requirepass`).
+  if (!/^rediss?:\/\/[^@/]*:[^@/]+@/.test(REDIS_URL)) {
+    logger.warn('rpcServer: REDIS_URL has no password — the command bus relies on BOTPANEL_RPC_SECRET alone. Enable Redis AUTH (requirepass) and use redis://:<password>@host so a co-tenant on the shared network cannot read/inject bus traffic.')
+  }
+
   const r = getSubscriber()
 
   // ioredis fires 'pmessage' for psubscribe matches. Body wrapped in a

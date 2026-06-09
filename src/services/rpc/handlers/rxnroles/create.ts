@@ -36,8 +36,9 @@
  *
  *   `{ ok: false, error: '<code>' }` on validation or runtime failure.
  *   Error codes: `bad-params`, `bad-channel`, `bad-channel-type`,
- *   `bad-mappings`, `bad-expires`, `guild-mismatch`, `send-failed`,
- *   `db-write-failed`. The panel renders these as a friendly banner.
+ *   `bad-mappings`, `bad-role`, `bad-expires`, `guild-mismatch`,
+ *   `send-failed`, `db-write-failed`. The panel renders these as a friendly
+ *   banner.
  *
  * Custom emoji: callers may pass either the raw unicode char ("🟢") or
  * the full `<:name:id>` / `<a:name:id>` Discord syntax. The latter is
@@ -50,6 +51,7 @@
 import type { TextChannel } from 'discord.js'
 import { registerVerb, type VerbHandler } from '../../registry'
 import { createReactionRoleMessage } from '../../../reactionRoles'
+import { checkAssignableRole } from '../../../../utils/roleGuard'
 import { logger } from '../../../logger'
 
 const SNOWFLAKE_RE = /^\d{15,25}$/
@@ -129,6 +131,22 @@ export const rxnRolesCreateHandler: VerbHandler = async (params, ctx) => {
   // text-based but we never want a reaction-role message in a DM.
   if (!('guildId' in channel) || !channel.guildId) {
     return { ok: false, error: 'bad-channel-type' }
+  }
+
+  // SECURITY (H2): params validation only checked that each roleId is a
+  // well-formed snowflake — not that it's *safe to grant*. A Redis-capable
+  // caller could otherwise wire a reaction to a privileged/managed role and
+  // self-assign it. Refuse to create the message unless every mapped role
+  // passes the shared assignability guard. (The reaction grant sink in
+  // `messageReaction.ts` re-checks too, but failing here gives the panel a
+  // clean error instead of silently seeding a dead reaction.)
+  const guild = (channel as TextChannel).guild
+  for (const m of parsed.mappings) {
+    const verdict = checkAssignableRole(guild, m.roleId)
+    if (!verdict.ok) {
+      logger.warn(`rxnroles.create: refusing non-assignable role ${m.roleId} (${verdict.reason})`)
+      return { ok: false, error: 'bad-role', details: verdict.reason }
+    }
   }
 
   const expiresAt = parsed.expiresInMinutes

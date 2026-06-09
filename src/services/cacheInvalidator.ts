@@ -13,8 +13,10 @@
  *
  * Note: this envelope is *not* the same shape as the rpcServer envelope
  * (which carries `requestId` for request/reply). Invalidate is one-way,
- * idempotent, fire-and-forget — no requestId, no replay window check
- * (calling `loadSettings()` twice is harmless).
+ * idempotent, fire-and-forget — no requestId nonce cache (calling
+ * `loadSettings()` twice is harmless), but we DO apply the same ±30s
+ * timestamp window as rpcServer so a captured message can't be replayed
+ * indefinitely to force endless cache reloads (DB query amplification).
  *
  * Posture:
  *  - Bad HMAC → drop silently + warn. Same as rpcServer.
@@ -30,6 +32,7 @@ import { loadSettings } from './settings'
 import { loadReactionRoles } from './reactionRoles'
 
 const CHANNEL = 'bot.squishy.settings.invalidate'
+const REPLAY_WINDOW_MS = 30_000
 
 type InvalidateEnvelope = {
   ts: number
@@ -115,6 +118,12 @@ export function startCacheInvalidator(): void {
     const expected = hmacSha256(env.BOTPANEL_RPC_SECRET!, wire)
     if (!timingSafeCompare(expected, envelope.hmac)) {
       logger.warn(`cacheInvalidator: HMAC mismatch on ${channel} — dropping`)
+      return
+    }
+    // Replay window (L4): drop envelopes outside ±30s so a captured message
+    // can't be replayed indefinitely to force repeated cache reloads.
+    if (Math.abs(Date.now() - envelope.ts) > REPLAY_WINDOW_MS) {
+      logger.warn(`cacheInvalidator: stale envelope on ${channel} (skew=${Date.now() - envelope.ts}ms) — dropping`)
       return
     }
     try {

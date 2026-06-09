@@ -19,11 +19,54 @@ export interface RssItem {
   imageUrl: string | null
 }
 
+/**
+ * Hard cap on how many item/entry blocks we extract. Real feeds carry a few
+ * dozen; this bounds total parsing work regardless of input.
+ */
+const MAX_ITEMS = 500
+
 export function parseFeed(xml: string): RssItem[] {
-  // Match either RSS <item>...</item> or Atom <entry>...</entry> blocks.
-  const blocks = [...xml.matchAll(/<item\b[^>]*>([\s\S]*?)<\/item>/gi)]
-    .concat([...xml.matchAll(/<entry\b[^>]*>([\s\S]*?)<\/entry>/gi)])
-  return blocks.map(b => parseBlock(b[1])).filter((it): it is RssItem => it !== null)
+  // Extract RSS <item>...</item> and Atom <entry>...</entry> blocks.
+  //
+  // SECURITY (H3): the previous matcher used a lazy regex
+  // (`/<item\b[^>]*>([\s\S]*?)<\/item>/gi`) which backtracks *quadratically*
+  // on input containing many unclosed `<item>` opens. A hostile/compromised
+  // feed serving `"<item>".repeat(N)` within the 5 MB body cap could pin the
+  // single-threaded event loop for minutes, freezing the whole bot. The
+  // indexOf-based scan below is O(n) and the item cap bounds total work.
+  const inners: string[] = []
+  extractBlocks(xml, 'item', inners)
+  extractBlocks(xml, 'entry', inners)
+  return inners.map(parseBlock).filter((it): it is RssItem => it !== null)
+}
+
+/**
+ * Append the inner text of up to MAX_ITEMS `<tag>…</tag>` blocks found in `xml`
+ * to `out`, using a linear indexOf scan (no regex backtracking). Matches the
+ * old regex's word-boundary behaviour: `<item>` and `<item attr="…">` match,
+ * `<items>` does not.
+ */
+function extractBlocks(xml: string, tag: string, out: string[]): void {
+  const open = `<${tag}`
+  const close = `</${tag}>`
+  let pos = 0
+  while (out.length < MAX_ITEMS) {
+    const start = xml.indexOf(open, pos)
+    if (start === -1) break
+    // Char right after the tag name must end the name (`>`, whitespace, or
+    // self-close) — otherwise it's a different tag like `<items>`.
+    const after = xml[start + open.length]
+    if (after !== '>' && after !== ' ' && after !== '\t' && after !== '\n' && after !== '\r' && after !== '/') {
+      pos = start + open.length
+      continue
+    }
+    const openEnd = xml.indexOf('>', start + open.length)
+    if (openEnd === -1) break
+    const end = xml.indexOf(close, openEnd + 1)
+    if (end === -1) break
+    out.push(xml.slice(openEnd + 1, end))
+    pos = end + close.length
+  }
 }
 
 function parseBlock(inner: string): RssItem | null {

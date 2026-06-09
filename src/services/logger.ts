@@ -25,6 +25,9 @@ const SECRET_PATTERNS: Array<{ value: string | undefined; label: string }> = [
   { value: env.GITHUB_TOKEN,      label: '[REDACTED:GITHUB_TOKEN]' },
   { value: env.DATABASE_URL,      label: '[REDACTED:DATABASE_URL]' },
   { value: env.UPTIME_KUMA_PUSH_URL, label: '[REDACTED:UPTIME_KUMA_PUSH_URL]' },
+  // HMAC shared secret for the botpanel command bus — an error wrapping it
+  // (e.g. from the RPC/HMAC code) must not reach the LOG_CHANNEL or owner DM.
+  { value: env.BOTPANEL_RPC_SECRET, label: '[REDACTED:BOTPANEL_RPC_SECRET]' },
 ]
 
 function redact(s: string): string {

@@ -39,6 +39,11 @@ services:
     restart: unless-stopped
     environment:
       POSTGRES_USER: squishybot
+      # Keep a default so an existing deploy (whose DB volume was initialized
+      # with this value) isn't broken on upgrade — but SET a strong
+      # POSTGRES_PASSWORD in .env. The bot logs a startup warning if it detects
+      # this weak default, and the DB is reachable by every container on the
+      # shared botpanel-net.
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-squishybot_dev}
       POSTGRES_DB: squishybot
     # No host port mapping (security). The bot reaches the DB at "db:5432"

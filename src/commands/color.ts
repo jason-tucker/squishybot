@@ -17,6 +17,7 @@ import { db } from '../db/client'
 import { colorRoles } from '../db/schema'
 import { eq } from 'drizzle-orm'
 import { getBoolSetting } from '../services/settings'
+import { isAssignableRole } from '../utils/roleGuard'
 import { logger } from '../services/logger'
 
 export const data = new SlashCommandBuilder()
@@ -45,12 +46,30 @@ export async function execute(interaction: ChatInputCommandInteraction): Promise
 }
 
 export async function handleColorPick(interaction: StringSelectMenuInteraction): Promise<void> {
+  // Re-check the feature flag on the handler, not just on `execute`: a stale
+  // ephemeral picker left open after the feature is toggled off must not still
+  // drive role grants.
+  if (!getBoolSetting('feature.color_roles', false)) {
+    await interaction.reply({ content: 'ℹ️ Color roles are currently disabled.', ephemeral: true })
+    return
+  }
   const picked = interaction.values[0]
   if (!picked) return
   await interaction.deferUpdate()
   const member = await interaction.guild!.members.fetch(interaction.user.id)
   const rows = await db.select().from(colorRoles).where(eq(colorRoles.guildId, interaction.guildId!))
   const colorRoleIds = new Set(rows.map(r => r.roleId))
+
+  // SECURITY (H1): a select interaction's `values` array is client-supplied and
+  // is NOT constrained to the options we rendered. Without this check a member
+  // could submit `color:pick` with ANY role id and have the bot add it —
+  // self-granting staff / mod / any bot-manageable role. Only ever grant a role
+  // that is (a) a configured color role for this guild and (b) passes the shared
+  // assignability guard (never privileged / managed / @everyone).
+  if (!colorRoleIds.has(picked) || !isAssignableRole(interaction.guild!, picked)) {
+    await interaction.editReply({ content: '❌ That isn’t a valid color role.', components: [] })
+    return
+  }
 
   // Remove any other curated color roles the member currently has.
   for (const id of member.roles.cache.keys()) {

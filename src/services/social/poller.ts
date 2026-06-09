@@ -35,6 +35,8 @@ import { isIP } from 'node:net'
 
 const DEFAULT_INTERVAL_MS = 30 * 60 * 1000  // 30 minutes
 const FETCH_TIMEOUT_MS = 15_000
+/** Max redirect hops to follow manually (each re-validated against the SSRF allowlist). */
+const MAX_REDIRECTS = 5
 /**
  * Hard cap on RSS body size — typical feeds are <100 KB. 5 MB protects the
  * bot from a hostile/misconfigured feed serving multi-GB responses (memory
@@ -119,16 +121,31 @@ async function pollFeed(client: Client, feed: SocialFeed): Promise<void> {
 }
 
 export async function fetchAndParse(url: string): Promise<RssItem[]> {
-  await assertSafeOutboundUrl(url)
-  const res = await fetch(url, {
-    headers: { 'User-Agent': 'squishybot social poller (+https://github.com/jason-tucker/squishybot)' },
-    signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
-    // We bound the body manually below; redirects still chase, so an attacker
-    // can't feed a redirect to a private IP because each hop's DNS is
-    // re-resolved against this same allowlist via the upstream resolver.
-    redirect: 'follow',
-  })
-  if (!res.ok) throw new Error(`HTTP ${res.status} from ${url}`)
+  // SECURITY (M1): follow redirects MANUALLY and re-run the SSRF allowlist on
+  // every hop. With `redirect: 'follow'`, fetch/undici chases 3xx internally
+  // without re-invoking our guard, so a public URL could 302 → http://localhost
+  // / 169.254.169.254 / the docker db|redis host and bypass the check entirely.
+  let current = url
+  let res: Response | null = null
+  for (let hop = 0; hop <= MAX_REDIRECTS; hop++) {
+    await assertSafeOutboundUrl(current)
+    res = await fetch(current, {
+      headers: { 'User-Agent': 'squishybot social poller (+https://github.com/jason-tucker/squishybot)' },
+      signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
+      redirect: 'manual',
+    })
+    if (res.status >= 300 && res.status < 400) {
+      const loc = res.headers.get('location')
+      if (!loc) break  // malformed redirect — treat the 3xx as terminal (errors below)
+      // Resolve relative Location against the current URL, then re-validate at
+      // the top of the next iteration before connecting.
+      current = new URL(loc, current).toString()
+      continue
+    }
+    break
+  }
+  if (!res) throw new Error(`no response from ${url}`)
+  if (!res.ok) throw new Error(`HTTP ${res.status} from ${current}`)
   const xml = await readBoundedText(res, MAX_FEED_BYTES)
   return parseFeed(xml)
 }

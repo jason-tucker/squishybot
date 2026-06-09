@@ -66,3 +66,15 @@ if (!parsed.success) {
 }
 
 export const env = parsed.data
+
+// Non-fatal hardening nudge (M2): warn when the DB is using the weak compose
+// default password. We deliberately do NOT hard-fail — that would break an
+// existing deploy whose Postgres volume was initialized with this default — but
+// the operator should rotate to a strong POSTGRES_PASSWORD in .env. Using
+// console.warn (not the logger) to avoid an import cycle at startup; the literal
+// password is intentionally not printed.
+if (/:squishybot_dev@/.test(env.DATABASE_URL)) {
+  console.warn(
+    '⚠️  DATABASE_URL is using the weak default DB password. Set a strong POSTGRES_PASSWORD in .env and rotate the database password — the DB is reachable by every container on the shared docker network.',
+  )
+}
