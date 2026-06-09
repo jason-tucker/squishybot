@@ -11,6 +11,13 @@ concurrency:
   group: deploy-squishybot
   cancel-in-progress: false
 
+# Least-privilege default for the whole workflow (including PR-triggered runs).
+# Jobs opt into more as needed — the deploy job adds `packages: write` for GHCR.
+# Anything not granted here is unavailable to GITHUB_TOKEN regardless of the
+# repository's default-token-permissions setting.
+permissions:
+  contents: read
+
 env:
   REGISTRY: ghcr.io
   IMAGE_NAME: ${{ github.repository }}
