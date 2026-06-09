@@ -7,6 +7,7 @@
  */
 import type { Client, MessageReaction, PartialMessageReaction, User, PartialUser } from 'discord.js'
 import { getReactionRoleConfig } from '../../services/reactionRoles'
+import { checkAssignableRole } from '../../utils/roleGuard'
 import { logger } from '../../services/logger'
 
 function emojiKey(r: MessageReaction | PartialMessageReaction): string {
@@ -39,8 +40,21 @@ async function apply(client: Client, reaction: MessageReaction | PartialMessageR
   if (!member) return
 
   try {
-    if (add) await member.roles.add(mapping.roleId, 'reaction-role')
-    else     await member.roles.remove(mapping.roleId, 'reaction-role')
+    if (add) {
+      // SECURITY (H2): the mapping's roleId can originate from the RPC bus
+      // (`rxnroles.create`) where only its snowflake *shape* was validated. This
+      // is the actual grant sink, so re-check assignability here — never hand a
+      // member a privileged / managed / @everyone role via a reaction. (Removal
+      // is always allowed: stripping a role is never an escalation.)
+      const verdict = checkAssignableRole(guild, mapping.roleId)
+      if (!verdict.ok) {
+        logger.warn(`reaction-role: refusing to grant non-assignable role ${mapping.roleId} (${verdict.reason}) to ${user.id}`)
+        return
+      }
+      await member.roles.add(mapping.roleId, 'reaction-role')
+    } else {
+      await member.roles.remove(mapping.roleId, 'reaction-role')
+    }
   } catch (err) {
     logger.warn(`reaction-role ${add ? 'add' : 'remove'} failed for ${user.id} → ${mapping.roleId}: ${(err as Error).message}`)
   }
