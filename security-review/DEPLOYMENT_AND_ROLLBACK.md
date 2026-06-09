@@ -13,11 +13,11 @@ nothing ships until this branch is merged.
 - [x] ReDoS fix benchmarked (900k unclosed `<item>` → ~14ms; 700k items → capped at 500, ~20ms)
 - [x] SSRF redirect behaviour verified against a local 302 server
 - [x] `docker compose config` interpolation validated (`POSTGRES_PASSWORD` now required)
-- [ ] **Operator:** confirm `.env` on the VPS sets a strong `POSTGRES_PASSWORD` *before deploying* — compose now **fails to start** if it is unset/empty (intended; see Behaviour changes).
+- [ ] **Operator (recommended, not required):** set a strong `POSTGRES_PASSWORD` in the VPS `.env`. This is no longer deploy-blocking — compose keeps the `squishybot_dev` fallback so the upgrade can't break an existing DB — but the bot now logs a startup warning while the weak default is in use.
 - [ ] **Operator:** confirm the bot can run as non-root (it writes only to stdout + DB; no host bind-mount needs root)
 
-## Behaviour changes to be aware of (two intentional fail-closed hardenings)
-1. **`docker compose up` now errors if `POSTGRES_PASSWORD` is unset/empty** (was: silent fallback to `squishybot_dev`). Set it in `.env` first. This is the fix for M2.
+## Behaviour changes to be aware of
+1. **DB password (M2) — non-breaking.** The compose `${POSTGRES_PASSWORD:-squishybot_dev}` fallback is **retained**, so `docker compose up` still starts even if `POSTGRES_PASSWORD` is unset (no outage on upgrade). The hardening is a **non-fatal startup warning** logged by the bot when it detects the weak default in `DATABASE_URL`. Action is recommended (set a strong value + rotate), not required for the deploy to succeed.
 2. **The container now runs as the unprivileged `node` user** (was: root). If any future change needs to write inside the image filesystem, it must target a world-writable path (e.g. `/tmp`) or a mounted volume with appropriate ownership.
 
 No database migration is introduced by this branch. (The pre-existing `drizzle-kit push --force`

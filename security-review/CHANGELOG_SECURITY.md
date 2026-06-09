@@ -17,8 +17,10 @@ Branch base: `1fbb135` (main). 7 commits, +270/−26 across 15 files. No DB migr
 - **[M1] SSRF via redirect** in the RSS poller — `redirect:'follow'` bypassed the private-IP
   allowlist. Now follows ≤5 redirects manually, re-validating every hop. (`c44c627`)
 - **[H4] Container ran as root** — added `USER node` to the production image stage. (`a185988`)
-- **[M2] Weak default DB password** — compose fell back to `squishybot_dev`; now
-  `${POSTGRES_PASSWORD:?…}` fails loudly when unset. (`a185988`)
+- **[M2] Weak default DB password** — the bot now logs a non-fatal startup
+  warning when it detects the weak `squishybot_dev` default in `DATABASE_URL`.
+  (`a185988`; intentionally **non-breaking** — the compose fallback is retained
+  so an existing deploy isn't broken on upgrade.)
 - **[L1] HMAC secret not redacted** — `BOTPANEL_RPC_SECRET` added to the logger's redaction list.
   (`240a1e0`)
 - **[L3] `ws` CVE-2026-45736** — pnpm override `ws@^8.20.1` (resolves 8.21.0). (`d8aed0e`)
@@ -33,8 +35,9 @@ Branch base: `1fbb135` (main). 7 commits, +270/−26 across 15 files. No DB migr
   (`1dba7fb`)
 - New shared `src/utils/roleGuard.ts` — single chokepoint for "is this role safe to grant?".
 
-## Behaviour changes (intentional, fail-closed)
-- `docker compose up` now **fails** if `POSTGRES_PASSWORD` is unset/empty.
+## Behaviour changes
+- DB password (M2): **non-breaking** — compose keeps the `squishybot_dev`
+  fallback; the bot only logs a startup warning when the weak default is in use.
 - The production container now runs as the unprivileged `node` user.
 
 ## Not changed (documented for follow-up — see REMEDIATION_PLAN.md)

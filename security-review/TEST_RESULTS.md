@@ -16,7 +16,7 @@
 | ReDoS benchmark (throwaway `tsx` script) | ✅ pass | see below |
 | SSRF redirect behaviour (throwaway `node` script, local 302 server) | ✅ pass | see below |
 | Redis-auth regex classification (`node -e`) | ✅ pass | 5/5 URL cases correct |
-| `docker compose config` (interpolation) | ✅ pass | unset `POSTGRES_PASSWORD` fails loudly as intended |
+| `docker compose config` (interpolation) | ✅ pass | M2 later softened to non-breaking — compose retains the `squishybot_dev` fallback; the weak-default check is now a non-fatal startup warning in `config/env.ts` |
 
 ## H3 — RSS ReDoS fix (benchmark)
 Throwaway `tsx` script against `parseFeed` (then deleted):
@@ -46,7 +46,7 @@ re-validation logic and the undici primitive were both verified.)
 | H3 ReDoS | **benchmark** (above) |
 | M1 SSRF redirect | **undici primitive + loop behaviour test** (above) |
 | H4 non-root | Dockerfile inspection (`USER node`) |
-| M2 DB password | `docker compose config` (fail-loud confirmed) |
+| M2 DB password | typecheck + weak-default regex check (non-fatal startup warning) |
 | L1 redaction | typecheck (`env.BOTPANEL_RPC_SECRET` resolves) |
 | L3 `ws` | `pnpm audit` 2→1, resolved version `ws@8.21.0` |
 | L4 replay window | typecheck + manual trace |
