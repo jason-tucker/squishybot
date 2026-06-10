@@ -114,6 +114,28 @@ jobs:
 
             export BOT_IMAGE="${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest"
 
+            # ── Pre-deploy DB backup gate ────────────────────────────────────
+            # The new image runs schema migrations on startup. Dump the DB FIRST
+            # so a bad migration is always recoverable. Abort the deploy if the
+            # backup can't be taken — better to skip a deploy than to migrate
+            # with no rollback. The `db` service stays up across this deploy.
+            BACKUP_DIR="./backups"
+            mkdir -p "$BACKUP_DIR"
+            TS=$(date -u +%Y%m%dT%H%M%SZ)
+            BACKUP_FILE="$BACKUP_DIR/squishybot-$TS.sql.gz"
+            echo "▶ Backing up database to $BACKUP_FILE …"
+            if docker compose exec -T db sh -c \
+                 'PGPASSWORD="$POSTGRES_PASSWORD" pg_dump -U "$POSTGRES_USER" -d "$POSTGRES_DB"' \
+                 | gzip > "$BACKUP_FILE"; then
+              echo "✓ DB backup written ($(du -h "$BACKUP_FILE" | cut -f1))"
+            else
+              echo "ERROR: DB backup failed — aborting deploy (no unrecoverable migration)"
+              rm -f "$BACKUP_FILE"
+              exit 1
+            fi
+            # Retain only the 14 most recent backups
+            ls -1t "$BACKUP_DIR"/squishybot-*.sql.gz 2>/dev/null | tail -n +15 | xargs -r rm -f
+
             # Pull the new image.
             docker compose pull squishybot
 

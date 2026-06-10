@@ -210,6 +210,22 @@ pnpm commands:deploy
 
 ## Run database migrations
 
+The container applies **committed SQL migrations on startup** (drizzle-orm migrate
+runner: `scripts/docker-entrypoint.sh` → `node dist/db/migrate.js`). It is
+forward-only and fails closed — a bad migration aborts startup instead of
+silently mutating data. To run migrations manually against a DB:
+
 ```bash
 pnpm db:migrate
 ```
+
+### Changing the schema
+
+`src/db/schema/*.ts` is the source of truth. To change it:
+
+1. Edit the schema module(s).
+2. `pnpm db:generate` — emits a reviewed SQL file under `src/db/migrations/` (+ snapshot/journal).
+3. **Inspect the generated `.sql`** (especially any `DROP`), then commit it *with* the schema change. Migrations are committed — they are not gitignored.
+4. On deploy, the startup runner applies it. The deploy workflow takes a `pg_dump` backup first, so every migration is recoverable.
+
+`drizzle-kit push` is for throwaway local DBs only — **never in production**; the container migrates, it no longer pushes. The first migrate run against the pre-existing (push-built) production DB self-baselines automatically — see `security-review/H5_MIGRATION_CUTOVER.md`.

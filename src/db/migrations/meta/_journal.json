@@ -3,17 +3,10 @@
   "dialect": "postgresql",
   "entries": [
     {
-      "idx": 1,
+      "idx": 0,
       "version": "7",
-      "when": 1746403200000,
-      "tag": "0001_initial_schema",
-      "breakpoints": true
-    },
-    {
-      "idx": 2,
-      "version": "7",
-      "when": 1749168000000,
-      "tag": "0002_scheduled_posts",
+      "when": 1781050773826,
+      "tag": "0000_init",
       "breakpoints": true
     }
   ]

@@ -32,7 +32,7 @@
 | Co-tenant connects to DB with weak/guessable password | 2 | **Hardened** (M2 fail-loud) + **residual** (strong password is operator's job) |
 | Replay captured invalidate message → DB reload amplification | 2 | **Fixed** (L4) |
 | RCE in bot → root in container → pivot on shared net | 1/2/3 | **Reduced** (H4 non-root) |
-| Schema diff at boot drops production columns/data | ops | **Residual** (H5 — needs migration strategy) |
+| Schema diff at boot drops production columns/data | ops | **Fixed** (H5 — committed migrations + backup gate, replaced `push --force`) |
 | Compromised floating-tag action runs in SSH-key deploy job | 4 | **Residual** (L2 — pin to SHA) |
 | Fork PR exfiltrates secrets | 4 | **Not exploitable** — secrets/SSH/push steps gated on `push` to `main`; fork `GITHUB_TOKEN` is read-only by policy; top-level perms now `contents: read` |
 

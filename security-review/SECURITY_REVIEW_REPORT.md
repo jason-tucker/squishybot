@@ -23,8 +23,8 @@
 | **Overall pre-review risk** | **Medium-High** — two High-severity in-guild privilege-escalation paths reachable by any member / any Redis-network peer, plus a High-severity event-loop DoS via a hostile RSS feed. |
 | **Overall post-review risk** | **Low-Medium** — all member-reachable escalation and DoS paths fixed; residual items are infra/ops hardening (Redis auth on the shared bus, schema-push strategy) that need operator action, not code. |
 | **Confirmed findings** | 15 (0 Critical, **6 High**, 2 Medium, 5 Low, 2 Info) |
-| **Fixed in this branch** | 11 findings across 7 atomic commits |
-| **Documented for manual action** | 4 (H5 schema-push, server-side half of H6, L2 SHA-pinning, I1 job-split) |
+| **Fixed in this branch** | 12 findings (11 in the original PR + **H5** migration cutover) |
+| **Documented for manual action** | 3 (server-side half of H6, L2 SHA-pinning, I1 job-split) |
 | **Verification** | `pnpm typecheck` green after every commit; ReDoS fix proven by benchmark; SSRF redirect behaviour proven against a local server. No runtime e2e possible (a Discord bot needs a live token + guild; repo has no test framework). |
 | **Safe to deploy?** | **Yes** to staging/prod from this branch *after* a normal review — all changes are behaviour-preserving. The DB-password hardening (M2) is a **non-breaking app-layer startup warning** (the weak `squishybot_dev` compose fallback is retained so existing deploys aren't broken); the container now runs as non-root (writes only stdout + DB). No DB migration. See `DEPLOYMENT_AND_ROLLBACK.md`. |
 
@@ -37,7 +37,9 @@
 
 ### Biggest residual risks (need operator action)
 - **H6 (server side)** — Redis on the shared `botpanel-net` has no password; the HMAC secret is the *only* barrier to the privileged RPC bus. Enable `requirepass` + an authenticated `REDIS_URL`.
-- **H5** — `drizzle-kit push --force` runs at every container boot and can silently drop columns/data. Move to reviewed, versioned migrations with a backup gate.
+
+### Also fixed (follow-up)
+6. **H5 — `drizzle-kit push --force` at every boot** (could silently drop columns/data). Replaced with a committed-migration runner: a generated baseline, a forward-only fail-closed startup migrate, a `pg_dump` pre-deploy backup gate, and a self-baseline guard for the legacy push-built DB. See `H5_MIGRATION_CUTOVER.md`.
 
 ---
 
@@ -49,7 +51,7 @@
 | **H2** | High | High | Privesc (CWE-269) | `src/services/rpc/handlers/rxnroles/create.ts:90`; sink `src/bot/events/messageReaction.ts:42` | mapping `roleId` validated for snowflake *shape* only; reaction grant sink added it unconditionally | Redis-network peer wires a reaction to a privileged role → self-assign by reacting | `checkAssignableRole` at create (`bad-role`) **and** at the grant sink | ✅ Fixed (`de7fe55`) |
 | **H3** | High | High | ReDoS / DoS (CWE-1333/400) | `src/services/social/rssParser.ts:24` (pre-fix) | lazy regex `/<item\b[^>]*>([\s\S]*?)<\/item>/gi` backtracks O(n²) on unclosed `<item>` opens | Hostile feed `"<item>".repeat(N)` within 5 MB cap pins the event loop for minutes → whole bot frozen | Linear `indexOf` block scan, capped at 500 items | ✅ Fixed (`c44c627`) |
 | **H4** | High | High | Insecure default (CWE-250) | `Dockerfile` (no `USER`) | `node:24-alpine` defaults to uid 0; entrypoint + bot ran as root | RCE / malicious dependency executes as root on the shared docker network | `USER node` before `ENTRYPOINT` | ✅ Fixed (`a185988`) |
-| **H5** | High | High | Data-loss (CWE-665) | `scripts/docker-entrypoint.sh:4-9` | `drizzle-kit push --force` at every boot; `--force` auto-approves column drops | A schema diff (refactor / watchtower auto-deploy) silently drops columns + data, unattended, no backup | **Documented** — move to versioned migrations + backup gate | 🔶 Manual (see `REMEDIATION_PLAN.md`) |
+| **H5** | High | High | Data-loss (CWE-665) | `scripts/docker-entrypoint.sh:4-9` (pre-fix) | `drizzle-kit push --force` at every boot; `--force` auto-approves column drops | A schema diff (refactor / watchtower auto-deploy) silently drops columns + data, unattended, no backup | Committed-migration runner (generated baseline + forward-only fail-closed `migrate()`), `pg_dump` pre-deploy backup gate, self-baseline guard for the legacy DB | ✅ Fixed (see `H5_MIGRATION_CUTOVER.md`) |
 | **H6** | High | Med | Missing auth (CWE-306) | `docker-compose.yml` (`REDIS_URL` no password, external `botpanel-net`) | password-less Redis is the sole gate for all privileged RPC verbs | Any container on the shared network that learns the HMAC secret (or replays/eavesdrops) drives privileged verbs | Code: startup warning + docs. **Server side: enable `requirepass` (manual)** | 🟡 Partially fixed (`3acb434`, `240a1e0`) + manual |
 | **M1** | Med | High | SSRF (CWE-918) | `src/services/social/poller.ts:129` (pre-fix) | `redirect:'follow'` — undici chases 3xx without re-running `assertSafeOutboundUrl` | Public feed 302→`169.254.169.254`/`localhost`/docker `db`/`redis` bypasses the allowlist | Manual redirect (≤5 hops), re-validate every hop, `redirect:'manual'` | ✅ Fixed (`c44c627`) |
 | **M2** | Med | High | Weak credential (CWE-1392/258) | `docker-compose.yml:18,42` | `${POSTGRES_PASSWORD:-squishybot_dev}` weak fallback | DB on shared net comes up with a guessable password if the var is unset | Non-breaking startup warning in `config/env.ts` when the weak default is detected (fallback retained so existing deploys don't break); operator sets a strong value | ✅ Fixed (`a185988`, softened to non-breaking) |
