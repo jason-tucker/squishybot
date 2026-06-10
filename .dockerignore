@@ -9,8 +9,9 @@ dist
 # Dev dependencies not needed in image context
 node_modules
 
-# Migration SQL files — schema is applied via drizzle-kit push at startup
-src/db/migrations
+# NOTE: src/db/migrations is intentionally NOT ignored — the committed .sql
+# migrations must be in the build context so they can be copied into the image
+# for the startup migrate runner.
 
 # Runtime and local tooling
 logs
@@ -29,5 +30,6 @@ CLAUDE.md
 scripts/squishybot
 scripts/clearCommands.ts
 
-# drizzle local-dev config (Docker uses drizzle.docker.config.cjs)
+# drizzle-kit config is only used for local dev (generate/check/studio); the
+# image's migrate runner reads the migrations folder directly.
 drizzle.config.ts

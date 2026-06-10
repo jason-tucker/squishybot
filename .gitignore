@@ -8,6 +8,8 @@ logs
 .DS_Store
 *.tsbuildinfo
 
-# Migration SQL files are never committed — schema is managed via drizzle-kit push
-src/db/migrations/*.sql
-src/db/migrations/meta
+# Committed SQL migrations are the source of truth (drizzle-orm migrate runner).
+# They are intentionally tracked — do NOT ignore them.
+
+# Pre-deploy DB backups written on the VPS by the deploy workflow
+backups/

@@ -17,14 +17,28 @@ commits, in auto-fix priority order (escalation → DoS/SSRF → infra → suppl
 
 ## Requires human / operator action (documented, not auto-applied)
 
-### H5 — Replace `drizzle-kit push --force` at boot with reviewed migrations  *(High)*
-`scripts/docker-entrypoint.sh` runs `drizzle-kit push --config=… --force` on **every** container
-start; `--force` auto-approves destructive DDL (column/table drops). With watchtower auto-deploying
-`:latest`, an unintended schema diff can drop production data unattended with no backup.
-**Recommended:** generate versioned migrations (`drizzle-kit generate`) reviewed in PRs; apply them
-as an explicit, gated deploy step (after a DB backup), not unattended at boot. As an interim guard,
-take a `pg_dump` before each deploy and drop `--force` so non-additive diffs require explicit review.
-*Risk of auto-applying:* high (could break the deploy or change schema behaviour) — left for the maintainer.
+### H5 — Replace `drizzle-kit push --force` at boot with reviewed migrations  *(High)*  ✅ Implemented
+**Was:** `scripts/docker-entrypoint.sh` ran `drizzle-kit push --config=… --force` on **every**
+container start; `--force` auto-approved destructive DDL (column/table drops). With watchtower
+auto-deploying `:latest`, an unintended schema diff could drop production data unattended, no backup.
+
+**Now:** the container runs the committed-migration runner (`node dist/db/migrate.js`) instead of
+push. Specifically:
+- A single complete baseline migration was generated from the current 20-table schema
+  (`src/db/migrations/0000_init.sql` + snapshot/journal), and migrations are now **committed**
+  (removed from `.gitignore`/`.dockerignore`) and copied into the image.
+- The startup runner is forward-only and **fails closed** — a bad migration aborts startup rather
+  than mutating data. The dev flow is `pnpm db:generate` → review the `.sql` → commit.
+- The deploy workflow takes a **`pg_dump` backup gate** before bringing up the new image (aborts the
+  deploy if the backup fails; retains the last 14).
+- `src/db/migrate.ts` **self-baselines** a legacy push-built DB on first run: if app tables exist but
+  the drizzle ledger is empty, it records the baseline as already-applied so the cutover is safe in
+  any order (no manual SQL, no crash-loop). Fresh DBs are created from the baseline; already-migrated
+  DBs are untouched.
+
+**Operator cutover/verification (optional, recommended):** see `H5_MIGRATION_CUTOVER.md` — backup,
+verify the baseline reproduces the live schema, then merge/deploy. The self-baseline makes the manual
+step unnecessary in the happy path; the runbook is the verification + disaster-recovery reference.
 
 ### H6 (server side) — Authenticate Redis on the shared bus  *(High)*
 The command bus reduces to "who can reach Redis + knows the HMAC secret." Redis has no password and

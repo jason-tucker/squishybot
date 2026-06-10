@@ -40,8 +40,14 @@ Branch base: `1fbb135` (main). 7 commits, +270/−26 across 15 files. No DB migr
   fallback; the bot only logs a startup warning when the weak default is in use.
 - The production container now runs as the unprivileged `node` user.
 
+## Also fixed (follow-up)
+- **[H5]** Replaced `drizzle-kit push --force` at boot with a committed-migration runner:
+  generated baseline (`src/db/migrations/0000_init.sql`), forward-only fail-closed startup
+  `migrate()`, a `pg_dump` pre-deploy backup gate, and a self-baseline guard for the legacy
+  push-built DB. Migrations are now committed (out of `.gitignore`/`.dockerignore`). See
+  `H5_MIGRATION_CUTOVER.md`.
+
 ## Not changed (documented for follow-up — see REMEDIATION_PLAN.md)
-- **[H5]** `drizzle-kit push --force` at boot (data-loss risk) — needs a migration strategy.
 - **[H6 server side]** Redis `requirepass` on the shared bus — operator/infra action.
 - **[L2]** Pin GitHub Actions to commit SHAs — needs GitHub API access to resolve SHAs safely.
 - **[I1 full]** Split PR-validate from main-deploy jobs.
