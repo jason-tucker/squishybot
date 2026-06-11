@@ -32,11 +32,16 @@ export interface ReactionRoleConfig {
 const cache = new Map<string, ReactionRoleConfig>()  // keyed by messageId
 
 export async function loadReactionRoles(): Promise<void> {
-  cache.clear()
+  // Query first, swap synchronously after — reloads triggered by the cache
+  // invalidator must not blank the cache mid-query (reactions arriving in
+  // that window would be silently ignored) or wipe it on a transient DB
+  // error. On failure the previous cache stays live and the rejection
+  // propagates to the caller's catch/log.
   const [msgs, maps] = await Promise.all([
-    db.select().from(reactionRoleMessages).catch(() => []),
-    db.select().from(reactionRoleMappings).catch(() => []),
+    db.select().from(reactionRoleMessages),
+    db.select().from(reactionRoleMappings),
   ])
+  cache.clear()
   for (const m of msgs) {
     cache.set(m.messageId, {
       pk: m.id,

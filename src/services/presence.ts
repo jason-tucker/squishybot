@@ -189,9 +189,12 @@ function readPersistedLastUsedAt(): Date | null {
 function persistLastUsedAt(): void {
   if (!_lastUsedAt) return
   // Fire-and-forget — presence still works in-memory if the write fails;
-  // we just won't survive a restart cleanly.
+  // we just won't survive a restart cleanly. `audit: false`: this key is
+  // internal bookkeeping rewritten every few minutes while the bot is in
+  // use — auditing it would grow `setting_changes` and spam the
+  // `setting_changed` event channel forever with zero operator value.
   const value = _lastUsedAt.toISOString()
-  setSetting(LAST_USED_SETTING_KEY, value).catch(err => {
+  setSetting(LAST_USED_SETTING_KEY, value, undefined, { audit: false }).catch(err => {
     logger.warn('Failed to persist presence.last_used_at', err)
   })
 }

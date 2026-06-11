@@ -56,19 +56,28 @@ const autoChannelTextIdsCache = new Set<string>()
 const autoChannelVoiceMapCache = new Map<string, string>()
 
 export async function loadSettings(): Promise<void> {
+  // Read everything BEFORE touching the live caches. The swap below is fully
+  // synchronous, so concurrent event handlers (voiceStateUpdate, messageCreate,
+  // sudo checks, …) never observe a half-cleared cache while the queries are
+  // in flight — this matters because the cache invalidator re-runs this on
+  // every panel-side settings edit, not just at boot. It also means a failed
+  // query aborts the reload with the previous state intact instead of wiping
+  // in-memory config until the next successful reload (the old per-query
+  // `.catch(() => [])` silently blanked whichever cache had failed). Callers
+  // are expected to catch and log the rejection.
+  const [rows, sudo, threads, hubs, autos] = await Promise.all([
+    db.select().from(botSettings),
+    db.select().from(sudoUsers),
+    db.select().from(autoThreadChannels),
+    db.select().from(hubChannels),
+    db.select({ voiceChannelId: autoChannels.voiceChannelId, textChannelId: autoChannels.textChannelId }).from(autoChannels),
+  ])
   settingsCache.clear()
   sudoUsersCache.clear()
   autoThreadCache.clear()
   hubsCache.clear()
   autoChannelTextIdsCache.clear()
   autoChannelVoiceMapCache.clear()
-  const [rows, sudo, threads, hubs, autos] = await Promise.all([
-    db.select().from(botSettings).catch(() => []),
-    db.select().from(sudoUsers).catch(() => []),
-    db.select().from(autoThreadChannels).catch(() => []),
-    db.select().from(hubChannels).catch(() => []),
-    db.select({ voiceChannelId: autoChannels.voiceChannelId, textChannelId: autoChannels.textChannelId }).from(autoChannels).catch(() => []),
-  ])
   for (const r of rows) settingsCache.set(r.key, r.value)
   for (const s of sudo) sudoUsersCache.add(s.userId)
   for (const t of threads) {
@@ -106,7 +115,20 @@ export function getSetting(key: string): string | null {
   return settingsCache.get(key) ?? null
 }
 
-export async function setSetting(key: string, value: string, byDiscordId?: string): Promise<void> {
+/**
+ * Persist a setting. `opts.audit` (default true) controls whether a changed
+ * value also lands in `setting_changes` and fans out a `setting_changed`
+ * event. Internal bookkeeping keys that churn on a timer (e.g.
+ * `presence.last_used_at`, rewritten every few minutes for as long as the
+ * bot is in use) pass `audit: false` so they don't grow the audit table and
+ * spam the event bus forever; operator-facing settings should never disable it.
+ */
+export async function setSetting(
+  key: string,
+  value: string,
+  byDiscordId?: string,
+  opts?: { audit?: boolean },
+): Promise<void> {
   const oldValue = settingsCache.get(key) ?? null
   await db.insert(botSettings)
     .values({ key, value, updatedByDiscordId: byDiscordId ?? null, updatedAt: new Date() })
@@ -116,7 +138,7 @@ export async function setSetting(key: string, value: string, byDiscordId?: strin
     })
   settingsCache.set(key, value)
   // Audit log (#31) — only when the value actually changed, to avoid noise.
-  if (oldValue !== value) {
+  if (oldValue !== value && opts?.audit !== false) {
     const { settingChanges } = await import('../db/schema')
     await db.insert(settingChanges).values({ key, oldValue, newValue: value, changedByUserId: byDiscordId ?? null }).catch(() => {})
     void publish<SettingChangedEvent>(settingsCh('setting_changed'), {

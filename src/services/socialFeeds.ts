@@ -27,8 +27,11 @@ export interface SocialFeed {
 const cache = new Map<string, SocialFeed>()
 
 export async function loadSocialFeeds(): Promise<void> {
+  // Query first, swap synchronously after — a failed reload keeps the
+  // previous cache live instead of leaving it empty until the next reload.
+  // The rejection propagates to the caller's catch/log.
+  const rows = await db.select().from(socialFeeds)
   cache.clear()
-  const rows = await db.select().from(socialFeeds).catch(() => [])
   for (const r of rows) cache.set(r.id, toSocialFeed(r))
 }
 
