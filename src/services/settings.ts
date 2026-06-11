@@ -434,6 +434,16 @@ export function getAutoChannelTextFor(voiceChannelId: string): string | null {
   return autoChannelVoiceMapCache.get(voiceChannelId) ?? null
 }
 
+/**
+ * All tracked auto-channel voice IDs. Kept in lockstep with `auto_channels`
+ * by the create/delete lifecycle hooks + `loadSettings()`, so callers that
+ * only need the ID set (e.g. hub-join name-collision checks) can skip a
+ * full-table query.
+ */
+export function listAutoChannelVoiceIds(): string[] {
+  return Array.from(autoChannelVoiceMapCache.keys())
+}
+
 export function trackAutoChannelVoice(voiceChannelId: string, textChannelId: string): void {
   autoChannelVoiceMapCache.set(voiceChannelId, textChannelId)
 }

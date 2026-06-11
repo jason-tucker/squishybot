@@ -87,9 +87,10 @@ export async function runReconciler(client: Client): Promise<ReconcilerResult> {
 
     // Retroactively auto-rename — handles presence updates that fired while
     // the bot was down. Centralized logic in autoRename.ts handles template
-    // filtering + throttle + deferred retry on its own.
+    // filtering + throttle + deferred retry on its own. Pass the record we
+    // already selected so it doesn't re-query auto_channels per room.
     const { maybeRenameChannel } = await import('./autoRename')
-    await maybeRenameChannel(client, record.voiceChannelId).catch(() => {})
+    await maybeRenameChannel(client, record).catch(() => {})
 
     // Sync text channel permissions for current members
     if (tc?.isTextBased() && vc.isVoiceBased()) {

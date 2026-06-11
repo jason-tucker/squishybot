@@ -10,6 +10,7 @@ import { logger } from '../logger'
 import {
   getSetting,
   isHubChannelCached,
+  listAutoChannelVoiceIds,
   registerHubChannel,
   updateHubChannelId,
 } from '../settings'
@@ -100,10 +101,11 @@ export async function handleHubJoin(client: Client, guild: Guild, member: GuildM
     // straight from guild.channels.cache (always populated when the bot has
     // the Guilds intent, which it does) instead of awaiting one fetch per
     // record — we'd otherwise serialize N microtask hops on every hub join.
-    const existingIds = new Set(
-      (await db.select({ voiceChannelId: autoChannels.voiceChannelId }).from(autoChannels))
-        .map(r => r.voiceChannelId)
-    )
+    // The ID set comes from the in-memory auto-channel cache (kept in
+    // lockstep with auto_channels by the lifecycle hooks), skipping what was
+    // a full-table query per hub join; it only feeds name de-duplication, so
+    // even a momentarily stale entry is cosmetic.
+    const existingIds = new Set(listAutoChannelVoiceIds())
     const existingNames: string[] = []
     for (const ch of guild.channels.cache.values()) {
       if (existingIds.has(ch.id) && 'name' in ch) existingNames.push(ch.name)
