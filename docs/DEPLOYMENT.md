@@ -26,7 +26,7 @@ cd squishybot
 cp .env.example .env
 nano .env    # fill in all required values (see .env.example for guidance)
 
-# 3. Start everything (pulls image from GHCR, starts Postgres, runs schema push, starts bot)
+# 3. Start everything (pulls image from GHCR, starts Postgres, runs committed migrations, starts bot)
 BOT_IMAGE=ghcr.io/YOUR_GITHUB_USERNAME/squishybot:latest docker compose up -d
 ```
 
@@ -124,7 +124,7 @@ cd /home/botuser/projects/squishybot
 docker compose up -d
 ```
 
-Postgres starts first (health-checked), then squishybot starts and applies the schema automatically via `drizzle-kit push`.
+Postgres starts first (health-checked), then squishybot starts and applies committed SQL migrations automatically via `node dist/db/migrate.js`.
 
 ### 5. Verify
 
@@ -135,14 +135,15 @@ docker compose logs squishybot --tail=20
 
 ---
 
-## Schema Management (no migration files)
+## Schema Management (committed forward-only migrations)
 
-SquishyBot uses `drizzle-kit push` instead of SQL migration files. This means:
+SquishyBot uses committed SQL migration files, applied by `drizzle-orm`'s migrate runner at container start. This means:
 
-- **No SQL files are committed to git** — the schema lives only in `src/db/schema/*.ts`
-- On every container start, `drizzle-kit push` compares the TypeScript schema to the live database and applies any differences
-- Adding a new column: add it to the schema → push to main → redeploy → done
-- Dropping a column: use `--force` (already in entrypoint) — be careful, data is lost
+- **SQL migration files are committed to git** under `src/db/migrations/`
+- On every container start, `node dist/db/migrate.js` applies any unapplied migrations forward-only and fails closed (a bad migration aborts startup rather than silently corrupting data)
+- Adding a new column: edit `src/db/schema/*.ts` → run `pnpm db:generate` → inspect the generated `.sql` → commit both with the schema change → push to main → redeploy → done
+- Dropping a column: generate and inspect the migration carefully; data is lost on apply
+- `drizzle-kit push` is **for throwaway local DBs only** — never run it against the shared production database
 
 ---
 
