@@ -34,7 +34,7 @@ Key services live under `src/services/voice/`: `hubManager`, `autoChannel`, `aut
 
 ### Data + integration
 
-- **PostgreSQL + Drizzle ORM**, 19 tables. Schema lives only in `src/db/schema/*.ts` — applied with `drizzle-kit push` (no SQL migration files in git). See the [Database Schema wiki](https://github.com/jason-tucker/squishybot/wiki/Database-Schema).
+- **PostgreSQL + Drizzle ORM**, 19 tables. Schema lives in `src/db/schema/*.ts`; forward-only SQL migrations are committed to `src/db/migrations/` and applied by `node dist/db/migrate.js` at container start (`drizzle-kit push` is throwaway-local only). See the [Database Schema wiki](https://github.com/jason-tucker/squishybot/wiki/Database-Schema).
 - **Runtime config** is stored in `bot_settings` (key/value, with env fallback) and edited live via `/sudo → Settings`. Feature flags, channel IDs, hub list, games, social feeds, and more are all DB-authoritative.
 - **Redis** carries a fan-out **event bus** (`bot.squishy.*` — ready/heartbeat/voice/member events) and a botpanel **command bus** (`cmd.squishy.<verb>`, HMAC-signed). RPC handlers under `src/services/rpc/handlers/` mirror the slash flows. Both are optional: with `BOTPANEL_RPC_SECRET` unset or Redis down, the bot runs normally.
 
@@ -46,7 +46,7 @@ Key services live under `src/services/voice/`: `hubManager`, `autoChannel`, `aut
 | Runtime | Node 24, `node dist/index.js` (compiled JS in Docker) |
 | Discord | discord.js v14 (Components V2) |
 | Database | PostgreSQL 16 + Drizzle ORM |
-| Schema | `drizzle-kit push` (no SQL files in git) |
+| Schema | Committed SQL migrations (`src/db/migrations/`), applied by `drizzle-orm` migrate runner at container start |
 | Cache/bus | Redis (ioredis) — optional event + command bus |
 | Env | Zod-validated `.env` |
 | Dev runner | `tsx watch` |
@@ -69,10 +69,10 @@ cp .env.example .env
 
 ### 3. Apply the database schema
 
-Schema lives only in `src/db/schema/*.ts`. The Docker entrypoint runs `drizzle-kit push` automatically on every start. For local non-Docker dev:
+Schema lives in `src/db/schema/*.ts`; committed SQL migrations in `src/db/migrations/` are applied automatically by the Docker entrypoint (`node dist/db/migrate.js`). For local non-Docker dev:
 
 ```bash
-pnpm drizzle-kit push
+pnpm db:migrate
 ```
 
 ### 4. Deploy slash commands
@@ -189,5 +189,5 @@ First-time VPS setup, CI secrets, rollback, and Unraid notes live in **[docs/DEP
 
 - **CHANGELOG** — every PR adds a dated, real-semver section at the top of [CHANGELOG.md](CHANGELOG.md) (Keep a Changelog format) with a `v<x.y.z> · <sha>` footer; `package.json` carries the matching version.
 - **Project board** — every work unit gets an item on the [Bot Development project board](https://github.com/users/jason-tucker/projects/3).
-- **Schema** — change `src/db/schema/*.ts` and let `drizzle-kit push` apply it; never hand-write SQL migrations. A schema push on `main` notifies botpanel to re-vendor the Drizzle schemas.
+- **Schema** — change `src/db/schema/*.ts`, run `pnpm db:generate` to emit a reviewed SQL file, inspect it, then commit the `.sql` file with the schema change. The container applies committed migrations at startup. `drizzle-kit push` is throwaway-local only. A schema change merged to `main` triggers a `repository_dispatch` that automatically re-vendors the Drizzle schemas in botpanel.
 - See **[CLAUDE.md](CLAUDE.md)** for the full contributor playbook and the **[project wiki](https://github.com/jason-tucker/squishybot/wiki)** for deep-dive docs (architecture, auto-voice internals, bot-owner permissions, staff roles, database schema, environment variables, feature roadmap).

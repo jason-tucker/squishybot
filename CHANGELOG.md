@@ -5,6 +5,30 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [0.8.9] — 2026-06-13
+
+### Docs
+- **CLAUDE.md: added `## Agent usage` policy section** (Haiku/Sonnet/Opus delegation guidelines, parallelism rules, VPS constraints inlined).
+- **CLAUDE.md: fixed deploy command** — `pnpm commands:deploy` → `pnpm deploy:commands` everywhere (matches `package.json` `scripts.deploy:commands`).
+- **CLAUDE.md: staff roles 7 → 9** — updated the Staff role mapping section to reflect the real registry in `src/services/staffRoles.ts`: 3 Tiers + 5 Departments (Help Desk / Onsites / Security / Sales / Leadership) + 1 Base (ITSRI Staff, auto-granted on every approval).
+- **CLAUDE.md: squishybot CLI table corrected** — removed the non-existent `install` and `migrate` subcommands and the false "restart runs migrations first" claim; replaced with the accurate full command set (`down`, `pull`, `build`, `rebuild`, `shell`/`exec`, `db:shell`/`psql`, `env`, `where`) verified against `scripts/squishybot`.
+- **CLAUDE.md: staff customId flow updated** — documented the current two-step picker flow (`staff:dept_pick:*`, `staff:tier_pick:*`, `staff:request_open:*`, `staff:request:*`); marked `staff:role_pick` as legacy (older in-flight messages only).
+- **CLAUDE.md: bot restart corrected** — replaced stale `kill -TERM ... tsx ... src/index.ts ... journalctl` snippet with the Docker reality: `docker compose restart squishybot` / `squishybot restart`.
+- **CLAUDE.md: Hide/Show voice button added** — `🙈 Hidden / 👁️ Visible` toggle added to the voice control panel buttons table; `hide` and `show` added to the `vc:{voiceChannelId}:{action}` actions list.
+- **CLAUDE.md: commands table updated** — count corrected (8 slash + 1 context menu); added `/color` (feature-flagged, `feature.color_roles`); clarified `/gamenight` is not a registered slash command (accessed via `/sudo → Game Night`).
+- **CLAUDE.md: DB schema table expanded** — added `setting_changes`, `report_log`, `reaction_role_messages`, `reaction_role_mappings`, `scheduled_posts`, `auto_join_roles`, `color_roles`, `archive_eligible_categories`, `archived_channels`; corrected `games` and `user_game_prefs` from "future" to active.
+- **CLAUDE.md: env vars expanded** — added `REDIS_URL`, `BOTPANEL_RPC_SECRET`, `BOT_IMAGE`, `POSTGRES_PASSWORD`.
+- **CLAUDE.md: key services expanded** — added `src/services/rpc/registry.ts`, `src/services/eventBus.ts`, `src/services/cacheInvalidator.ts`, `src/services/scheduledPosts/`, `src/services/msgspec/`, `src/services/voice/autoNaming.ts`.
+- **CLAUDE.md: customId families added** — `gn:*`, `sp:*`, `games:prefs:*`, `games:cat:*`, `profile:*`, `settings:staff_role:*`, `color:pick`, `play:*`.
+- **CLAUDE.md: added Bot ↔ Botpanel section** — Redis command bus (`cmd.squishy.*`, HMAC), event bus (`bot.squishy.*`), cache invalidation, and schema-change dispatch workflow (`.github/workflows/notify-panel-schema-change.yml`).
+- **CLAUDE.md: added Local dev section** — `pnpm dev`, `pnpm typecheck` (local only), no test framework.
+- **README.md: schema section corrected** — removed `drizzle-kit push` claim; updated to committed forward-only migrations applied by `node dist/db/migrate.js`. Stack table and Conventions bullet updated to match.
+- **docs/DEPLOYMENT.md: schema section corrected** — replaced "no migration files / drizzle-kit push" section with committed-migrations flow.
+
+_v0.8.9 · docs-overhaul_
+
+---
+
 ## [Unreleased]
 
 ### Added
