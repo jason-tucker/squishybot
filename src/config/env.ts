@@ -53,6 +53,10 @@ const envSchema = z.object({
   // `startRpcServer` logs a warning and does not subscribe, so the bot
   // still runs in environments without the panel wired up.
   BOTPANEL_RPC_SECRET: z.string().min(1).optional().or(z.literal('').transform(() => undefined)),
+
+  // Website (botpanel) base URL for the "do this on the website" links appended
+  // to slash command replies. Optional — panelLink.ts falls back to the prod domain.
+  PANEL_BASE_URL: z.string().url().optional().or(z.literal('').transform(() => undefined)),
 })
 
 const parsed = envSchema.safeParse(process.env)

@@ -161,6 +161,7 @@ then use (run `squishybot` with no args for the full list):
 | `GITHUB_REPO` | No | `owner/name` of the repo issues land in (e.g. `jason-tucker/squishybot`); required for `/report` |
 | `REDIS_URL` | No | Redis connection URL for the event + command bus. Set automatically by Docker Compose (`redis://redis:6379`). Unset → event bus and RPC disabled, bot still runs. |
 | `BOTPANEL_RPC_SECRET` | No | Shared HMAC secret with botpanel for the Redis command/cache bus. Unset → RPC + cache-invalidate subscribers disabled. |
+| `PANEL_BASE_URL` | No | Base URL of the botpanel website for the "do this on the website" links appended to slash command replies. Defaults to `https://bots.tucker.host`. |
 | `BOT_IMAGE` | No | GHCR image for `docker compose pull` (default `ghcr.io/jason-tucker/squishybot:latest`). Set by CI. |
 | `POSTGRES_PASSWORD` | No | Postgres password for the Compose-managed DB. Use alphanumeric/hex (avoid `#`, `*`, `?`). |
 

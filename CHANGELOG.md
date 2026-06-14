@@ -8,6 +8,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ## [0.9.0] — 2026-06-14
 
 ### Added
+- **Panel deep-links on slash command replies** — `/voice`, `/settings`, `/sudo`, and `/games` (self mode only) now append a subtext `-# 🌐 [label](url)` line pointing users at the matching botpanel page. New helper module `src/utils/panelLink.ts` (`panelBaseUrl`, `panelUrl`, `panelLinkLine`, `panelLinkDisplay`, `appendPanelLink`). Base URL is env-configurable via `PANEL_BASE_URL` (defaults to `https://bots.tucker.host`).
 - **Game prefs: "View defaults ON" (opt-out) model** — new sudo setting `games.default_view_on` (default OFF). When enabled, game channels are visible to `@everyone` by default and members opt **out** via `/games`; new members see them automatically. Pings stay opt-in either way. Managed at **`/sudo → Settings → Game Defaults`**; toggling runs a backfill that flips every game channel's `@everyone` visibility (current + future members at once) while preserving per-member opt-outs (`applyDefaultViewBackfill` in `src/services/games.ts`).
 - **Game prefs: bulk edit tool (two surfaces)** —
   - **All-games single-user editor** (`games:mass:*`): a one-screen View/Pings multi-select prefilled with the target's current state, reachable via the **⚡ Bulk edit all** button on the per-game prefs list (so it's available from `/games`, `/settings → Game Prefs`, and right-click → Manage → Game Prefs, self and sudo).

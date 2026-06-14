@@ -44,6 +44,7 @@ import {
   type RoleSelectMenuInteraction, type StringSelectMenuInteraction,
 } from 'discord.js'
 import { sep } from '../utils/cv2'
+import { appendPanelLink } from '../utils/panelLink'
 import { requireSudo } from '../services/voice/permissions'
 import { clearSetting, getSetting, setSetting } from '../services/settings'
 import {
@@ -327,6 +328,10 @@ export async function renderPrefsList(guild: Guild, targetUserId: string, mode: 
     new ButtonBuilder().setCustomId(`games:prefs:back:${mode}:${targetUserId}`).setLabel('Done').setStyle(ButtonStyle.Secondary)
   )
   components.push(footer)
+
+  if (mode === 'self') {
+    appendPanelLink(container, '/me/games', 'Manage your game prefs on the website')
+  }
 
   return { flags: MessageFlags.IsComponentsV2 as number, components }
 }

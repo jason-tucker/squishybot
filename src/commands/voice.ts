@@ -9,6 +9,7 @@ import { eq } from 'drizzle-orm'
 import { canControlChannel, isSudo } from '../services/voice/permissions'
 import { buildPanelPayloadForRecord } from '../services/voice/controlPanel'
 import { client } from '../bot/client'
+import { panelLinkDisplay } from '../utils/panelLink'
 
 export const data = new SlashCommandBuilder()
   .setName('voice')
@@ -44,5 +45,10 @@ export async function execute(interaction: ChatInputCommandInteraction): Promise
 
   // Also send an ephemeral panel so they can use controls from anywhere
   const payload = await buildPanelPayloadForRecord(client, record)
-  await interaction.editReply({ ...payload, flags: (payload.flags | MessageFlags.Ephemeral) } as any)
+  const linkLine = panelLinkDisplay('/squishy/voice', 'Manage voice channels on the website')
+  await interaction.editReply({
+    ...payload,
+    components: [...(payload.components as any[]), linkLine],
+    flags: (payload.flags | MessageFlags.Ephemeral),
+  } as any)
 }
