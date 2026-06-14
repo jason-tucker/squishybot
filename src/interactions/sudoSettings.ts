@@ -190,11 +190,14 @@ function renderHome() {
     new ButtonBuilder().setCustomId('sudo:set:nav:welcome').setLabel('Welcome/Goodbye').setEmoji('👋').setStyle(ButtonStyle.Secondary),
     new ButtonBuilder().setCustomId('sudo:set:nav:reaction_roles').setLabel('Reaction Roles').setEmoji('🎭').setStyle(ButtonStyle.Secondary),
   )
+  const row5 = new ActionRowBuilder<MessageActionRowComponentBuilder>().addComponents(
+    new ButtonBuilder().setCustomId('sudo:set:nav:game_defaults').setLabel('Game Defaults').setEmoji('🎮').setStyle(ButtonStyle.Secondary),
+  )
   const navRow = new ActionRowBuilder<MessageActionRowComponentBuilder>().addComponents(
     new ButtonBuilder().setCustomId('sudo:home').setLabel('Back to /sudo').setEmoji('🏠').setStyle(ButtonStyle.Secondary),
   )
 
-  return { flags: MessageFlags.IsComponentsV2 as number, components: [container, row1, row2, row3, row4, navRow] }
+  return { flags: MessageFlags.IsComponentsV2 as number, components: [container, row1, row2, row3, row4, row5, navRow] }
 }
 
 async function renderSudoUsers() {
@@ -1842,6 +1845,9 @@ export async function handleSettingsButton(interaction: ButtonInteraction): Prom
       await interaction.editReply((await renderGames(interaction.guildId!)) as any)
     } else if (category === 'profiles') {
       await interaction.editReply((await renderProfiles(interaction.guildId!)) as any)
+    } else if (category === 'game_defaults') {
+      const { renderGameDefaultsPanel } = await import('./gamesEditor')
+      await interaction.editReply((await renderGameDefaultsPanel(interaction.guild!)) as any)
     } else {
       await interaction.followUp({ content: `Unknown category: ${category}`, flags: MessageFlags.Ephemeral })
     }

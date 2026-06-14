@@ -13,7 +13,24 @@ import { and, eq, inArray } from 'drizzle-orm'
 import { db } from '../db/client'
 import { games, userGamePrefs } from '../db/schema'
 import { logger } from './logger'
-import { getSetting } from './settings'
+import { getBoolSetting, getSetting } from './settings'
+
+/**
+ * Master switch for the "View defaults ON" model (opt-out instead of opt-in).
+ *
+ * OFF (default): game channels are hidden from @everyone; a member gets View by
+ *   receiving a per-member ViewChannel *allow* overwrite. No pref row = no view.
+ * ON: game channels are visible to @everyone; a member opts OUT by receiving a
+ *   per-member ViewChannel *deny* overwrite. No pref row = view ON (for games
+ *   that have a channel). Pings are unaffected by this flag — they stay opt-in.
+ *
+ * Stored in bot_settings as `games.default_view_on`. Toggling it runs a backfill
+ * (see applyDefaultViewBackfill) that flips every game channel's @everyone view.
+ */
+export const GAMES_DEFAULT_VIEW_ON_KEY = 'games.default_view_on'
+export function gameDefaultViewOn(): boolean {
+  return getBoolSetting(GAMES_DEFAULT_VIEW_ON_KEY, false)
+}
 
 export type Game = typeof games.$inferSelect
 export type GamePref = typeof userGamePrefs.$inferSelect
@@ -206,10 +223,12 @@ export async function provisionGameDiscord(
           name: slug,
           type: ChannelType.GuildText,
           parent: parent ?? undefined,
+          // Default-on: visible to @everyone (opt-out model). Default-off:
+          // hidden, gated by per-member view overwrites (opt-in model).
           permissionOverwrites: [
             {
               id: guild.roles.everyone.id,
-              deny: [PermissionFlagsBits.ViewChannel],
+              [gameDefaultViewOn() ? 'allow' : 'deny']: [PermissionFlagsBits.ViewChannel],
             },
           ],
           reason: `auto-create game channel for "${game.name}" by ${byUserId}`,
@@ -305,13 +324,27 @@ export async function resolvePrefs(guildOrId: Guild | string, userOrMember: stri
     const p = byGame.get(g.id)
     const hasRow = !!p
 
-    // View — explicit member-level VIEW_CHANNEL allow on game.channelId.
+    // View — member-level overwrite on game.channelId. We read both the allow
+    // (default-off model: explicit opt-in) and the deny (default-on model:
+    // explicit opt-out) bits.
+    const defOn = gameDefaultViewOn()
     let channelView = false
+    let channelDeny = false
+    let hasChannel = false
     if (member && guild) {
       const ch = matchedViewChannel(guild, g)
+      hasChannel = !!ch
       const ow = ch && 'permissionOverwrites' in ch ? (ch as any).permissionOverwrites.cache.get(member.id) : null
       if (ow?.allow?.has(PermissionFlagsBits.ViewChannel)) channelView = true
+      if (ow?.deny?.has(PermissionFlagsBits.ViewChannel)) channelDeny = true
+    } else {
+      hasChannel = !!g.channelId
     }
+    // Effective "view" with no DB row:
+    //   default-on : visible to all → ON when the game has a channel and the
+    //                member carries no personal deny overwrite.
+    //   default-off: only when the member already has an explicit allow.
+    const inferredView = defOn ? (hasChannel && !channelDeny) : channelView
 
     // Ping — name-fallback resolves the role.
     const pingRoleId = guild ? matchedPingRoleId(guild, g) : g.pingRoleId
@@ -323,13 +356,16 @@ export async function resolvePrefs(guildOrId: Guild | string, userOrMember: stri
     // CHANNEL_UPDATE event arrives — which is exactly the "click Leave
     // Channel and nothing happens" bug. Only fall back to inferring from
     // current Discord state when there's no DB row at all.
-    const wantsView = hasRow ? p!.wantsView : channelView
+    const wantsView = hasRow ? p!.wantsView : inferredView
     const wantsPing = hasRow ? p!.wantsPing : rolePing
     return {
       game: g,
       wantsView,
       wantsPing,
-      fromRole: { view: !hasRow && channelView, ping: !hasRow && rolePing },
+      // `fromRole.view` marks "inferred from an existing allow you already have,
+      // toggle to persist" — only meaningful in the default-off opt-in model.
+      // Under default-on a no-row view is just the default, not an inferred grant.
+      fromRole: { view: !hasRow && !defOn && channelView, ping: !hasRow && rolePing },
     }
   })
 }
@@ -359,11 +395,12 @@ export async function setPref(
   const game = getGame(gameId)
   if (!game) return { ok: false, reason: 'game-not-found' }
 
-  // #23 — Ping role requires the View role. A user can't opt into pings
-  // for a game they haven't opted into viewing. Sudo can still set on
-  // behalf via the View toggle first; we don't bypass this for sudo because
-  // the rule is about the target member's preferences, not the editor's.
-  if (which === 'ping' && value === true) {
+  // #23 — Ping role requires View. A user can't opt into pings for a game
+  // they can't see. In the default-off (opt-in) model "can see" means an
+  // explicit wantsView=true row. Under default-on everyone can see every game
+  // channel by default, so the precondition is always satisfied and we skip
+  // the gate. Sudo doesn't bypass this — the rule is about the target's prefs.
+  if (which === 'ping' && value === true && !gameDefaultViewOn()) {
     const [existing] = await db.select().from(userGamePrefs).where(
       and(
         eq(userGamePrefs.guildId, member.guild.id),
@@ -414,14 +451,25 @@ export async function setPref(
 async function applyViewAccess(member: GuildMember, game: Game, value: boolean, reason: string): Promise<void> {
   const ch = matchedViewChannel(member.guild, game)
   if (!ch || !('permissionOverwrites' in ch)) return
+  const overwrites = (ch as any).permissionOverwrites
   try {
-    if (value) {
-      await (ch as any).permissionOverwrites.edit(member.id, {
-        ViewChannel: true,
-        ReadMessageHistory: true,
-      }, { reason })
+    if (gameDefaultViewOn()) {
+      // Default-on: the channel is visible to @everyone. "View on" means no
+      // personal overwrite; "View off" (opt-out) means a personal ViewChannel
+      // deny that overrides the @everyone allow.
+      if (value) {
+        if (overwrites.cache.has(member.id)) await overwrites.delete(member.id, reason)
+      } else {
+        await overwrites.edit(member.id, { ViewChannel: false }, { reason })
+      }
     } else {
-      await (ch as any).permissionOverwrites.delete(member.id, reason)
+      // Default-off: the channel is hidden from @everyone; access is a personal
+      // ViewChannel allow.
+      if (value) {
+        await overwrites.edit(member.id, { ViewChannel: true, ReadMessageHistory: true }, { reason })
+      } else if (overwrites.cache.has(member.id)) {
+        await overwrites.delete(member.id, reason)
+      }
     }
   } catch (err) {
     logger.warn(`Failed to sync view channel ${ch.id} for ${member.id} on game ${game.name}:`, err)
@@ -449,20 +497,159 @@ async function applyPingRole(member: GuildMember, game: Game, value: boolean, re
  */
 export async function restoreMemberPrefs(member: GuildMember): Promise<{ restored: number; skipped: number }> {
   const prefs = await listPrefs(member.guild.id, member.id)
+  const defOn = gameDefaultViewOn()
   let restored = 0
   let skipped = 0
   for (const p of prefs) {
     const game = getGame(p.gameId)
     if (!game) { skipped++; continue }
     const reason = `game-pref restore on rejoin (member ${member.id})`
-    if (p.wantsView) await applyViewAccess(member, game, true, reason)
-    if (p.wantsPing) await applyPingRole(member, game, true, reason)
-    if (p.wantsView || p.wantsPing) restored++
+    let touched = false
+    // View: under default-on, channels are visible by default, so the only
+    // thing to re-apply is an opt-OUT (deny). Under default-off, re-apply the
+    // opt-IN allow. applyViewAccess reads the same flag and does the right op.
+    if (defOn) {
+      if (!p.wantsView) { await applyViewAccess(member, game, false, reason); touched = true }
+    } else if (p.wantsView) {
+      await applyViewAccess(member, game, true, reason); touched = true
+    }
+    if (p.wantsPing) { await applyPingRole(member, game, true, reason); touched = true }
+    if (touched) restored++
   }
   if (restored > 0) {
     logger.info(`Restored game prefs for ${member.user.tag} (${member.id}): ${restored} game(s)`)
   }
   return { restored, skipped }
+}
+
+// ---------------------------------------------------------------------------
+// Bulk / backfill operations (sudo) — server-wide view & ping management.
+// These touch many members/channels, so callers should defer the interaction
+// and surface the returned counts.
+// ---------------------------------------------------------------------------
+
+/**
+ * Flip one game channel's @everyone ViewChannel bit.
+ *   visible=true  → allow  (visible to everyone — the default-on baseline)
+ *   visible=false → deny   (hidden from everyone — the default-off baseline)
+ * Per-member deny overwrites (opt-outs) still win over an @everyone allow, so
+ * making a channel visible does NOT un-hide it for members who opted out.
+ */
+export async function setGameChannelEveryoneVisible(
+  guild: Guild,
+  game: Game,
+  visible: boolean,
+  reason: string,
+): Promise<boolean> {
+  const ch = matchedViewChannel(guild, game)
+  if (!ch || !('permissionOverwrites' in ch)) return false
+  try {
+    await (ch as any).permissionOverwrites.edit(guild.roles.everyone.id, { ViewChannel: visible }, { reason })
+    return true
+  } catch (err) {
+    logger.warn(`Failed to set @everyone view=${visible} on channel ${ch.id} for game ${game.name}:`, err)
+    return false
+  }
+}
+
+export interface BackfillResult { total: number; changed: number; noChannel: number; failed: number }
+
+/**
+ * Apply the default-on/off baseline to every catalog game channel — the
+ * "backfill + new joins" mechanism for View. One @everyone flip per channel
+ * reaches all current AND future members at once. Existing per-member opt-out
+ * denies are preserved (they out-rank the @everyone allow).
+ */
+export async function applyDefaultViewBackfill(
+  guild: Guild,
+  visible: boolean,
+  byUserId: string,
+): Promise<BackfillResult> {
+  const all = listGames({ includeArchived: true, includeHidden: true })
+  const res: BackfillResult = { total: all.length, changed: 0, noChannel: 0, failed: 0 }
+  for (const g of all) {
+    if (!g.channelId || !matchedViewChannel(guild, g)) { res.noChannel++; continue }
+    const ok = await setGameChannelEveryoneVisible(guild, g, visible, `games default-view backfill visible=${visible} by ${byUserId}`)
+    if (ok) res.changed++; else res.failed++
+  }
+  logger.info(`games default-view backfill visible=${visible} by=${byUserId} changed=${res.changed} noChannel=${res.noChannel} failed=${res.failed}`)
+  return res
+}
+
+export interface BulkViewResult { ok: boolean; clearedDenies: number; updatedRows: number }
+
+/**
+ * Server-wide "everyone can see this game": make the channel visible to
+ * @everyone, remove every per-member opt-out deny, and flip stored wantsView
+ * rows to true so opt-outs don't reapply on rejoin (ping prefs preserved).
+ */
+export async function bulkGrantViewEveryone(guild: Guild, gameId: string, byUserId: string): Promise<BulkViewResult> {
+  const game = getGame(gameId)
+  if (!game) return { ok: false, clearedDenies: 0, updatedRows: 0 }
+  const reason = `games bulk grant-view-everyone by ${byUserId}`
+  await setGameChannelEveryoneVisible(guild, game, true, reason)
+  let clearedDenies = 0
+  const ch = matchedViewChannel(guild, game)
+  if (ch && 'permissionOverwrites' in ch) {
+    for (const ow of [...(ch as any).permissionOverwrites.cache.values()]) {
+      if (ow.type === 1 && ow.deny?.has(PermissionFlagsBits.ViewChannel)) {
+        await (ch as any).permissionOverwrites.delete(ow.id, reason).then(() => { clearedDenies++ }).catch(() => {})
+      }
+    }
+  }
+  const updated = await db.update(userGamePrefs).set({ wantsView: true })
+    .where(and(eq(userGamePrefs.guildId, guild.id), eq(userGamePrefs.gameId, gameId), eq(userGamePrefs.wantsView, false)))
+    .returning()
+  return { ok: true, clearedDenies, updatedRows: updated.length }
+}
+
+/**
+ * Server-wide "hide this game from everyone": deny @everyone, strip per-member
+ * view allows so opted-in members lose access too, and flip stored wantsView
+ * rows to false.
+ */
+export async function bulkRevokeViewEveryone(guild: Guild, gameId: string, byUserId: string): Promise<BulkViewResult> {
+  const game = getGame(gameId)
+  if (!game) return { ok: false, clearedDenies: 0, updatedRows: 0 }
+  const reason = `games bulk hide-from-everyone by ${byUserId}`
+  await setGameChannelEveryoneVisible(guild, game, false, reason)
+  let clearedAllows = 0
+  const ch = matchedViewChannel(guild, game)
+  if (ch && 'permissionOverwrites' in ch) {
+    for (const ow of [...(ch as any).permissionOverwrites.cache.values()]) {
+      if (ow.type === 1 && ow.allow?.has(PermissionFlagsBits.ViewChannel)) {
+        await (ch as any).permissionOverwrites.delete(ow.id, reason).then(() => { clearedAllows++ }).catch(() => {})
+      }
+    }
+  }
+  const updated = await db.update(userGamePrefs).set({ wantsView: false })
+    .where(and(eq(userGamePrefs.guildId, guild.id), eq(userGamePrefs.gameId, gameId), eq(userGamePrefs.wantsView, true)))
+    .returning()
+  return { ok: true, clearedDenies: clearedAllows, updatedRows: updated.length }
+}
+
+/**
+ * Server-wide "stop pinging everyone for this game": remove the ping role from
+ * every current holder and flip stored wantsPing rows to false.
+ */
+export async function bulkClearPingsEveryone(guild: Guild, gameId: string, byUserId: string): Promise<{ ok: boolean; removed: number; updatedRows: number }> {
+  const game = getGame(gameId)
+  if (!game) return { ok: false, removed: 0, updatedRows: 0 }
+  const reason = `games bulk clear-pings-everyone by ${byUserId}`
+  let removed = 0
+  const roleId = matchedPingRoleId(guild, game)
+  if (roleId) {
+    const role = guild.roles.cache.get(roleId)
+    if (role) {
+      for (const m of [...role.members.values()]) {
+        await m.roles.remove(roleId, reason).then(() => { removed++ }).catch(() => {})
+      }
+    }
+  }
+  const updated = await db.update(userGamePrefs).set({ wantsPing: false })
+    .where(and(eq(userGamePrefs.guildId, guild.id), eq(userGamePrefs.gameId, gameId), eq(userGamePrefs.wantsPing, true)))
+    .returning()
+  return { ok: true, removed, updatedRows: updated.length }
 }
 
 // ---------------------------------------------------------------------------
@@ -499,12 +686,18 @@ export async function gameInterestCounts(guild: Guild): Promise<Map<string, Game
       inArray(userGamePrefs.gameId, all.map(g => g.id)),
     ))
 
+  const defOn = gameDefaultViewOn()
   const dbViewByGame = new Map<string, Set<string>>()
+  const dbViewOffByGame = new Map<string, Set<string>>()
   const dbPingByGame = new Map<string, Set<string>>()
   for (const r of rows) {
     if (r.wantsView) {
       const set = dbViewByGame.get(r.gameId) ?? new Set()
       set.add(r.userId); dbViewByGame.set(r.gameId, set)
+    } else {
+      // Explicit opt-out — only meaningful under default-on.
+      const set = dbViewOffByGame.get(r.gameId) ?? new Set()
+      set.add(r.userId); dbViewOffByGame.set(r.gameId, set)
     }
     if (r.wantsPing) {
       const set = dbPingByGame.get(r.gameId) ?? new Set()
@@ -535,8 +728,15 @@ export async function gameInterestCounts(guild: Guild): Promise<Map<string, Game
       if (role) for (const id of role.members.keys()) pingIds.add(id)
     }
 
-    const any = new Set<string>([...viewIds, ...pingIds])
-    out.set(g.id, { view: viewIds.size, ping: pingIds.size, any: any.size })
+    const unionSize = new Set<string>([...viewIds, ...pingIds]).size
+    // Under default-on every member with the game's channel sees it unless they
+    // opted out, so "view interest" is ~(members − opt-outs). memberCount counts
+    // bots too; this is a UI hint, not an exact tally.
+    const viewCount = defOn && g.channelId
+      ? Math.max(0, guild.memberCount - (dbViewOffByGame.get(g.id)?.size ?? 0))
+      : viewIds.size
+    const any = defOn && g.channelId ? Math.max(viewCount, unionSize) : unionSize
+    out.set(g.id, { view: viewCount, ping: pingIds.size, any })
   }
   return out
 }

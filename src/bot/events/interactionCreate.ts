@@ -146,6 +146,12 @@ export function registerInteractionCreate(client: Client) {
         } else if (id.startsWith('games:prefs:back:')) {
           const { handlePrefsBack } = await import('../../interactions/gamesEditor')
           await handlePrefsBack(interaction as ButtonInteraction)
+        } else if (id.startsWith('games:mass:open:')) {
+          const { handleMassOpen } = await import('../../interactions/gamesEditor')
+          await handleMassOpen(interaction as ButtonInteraction)
+        } else if (id.startsWith('games:defaults:') || id.startsWith('games:bulk:')) {
+          const { handleGameDefaultsButton } = await import('../../interactions/gamesEditor')
+          await handleGameDefaultsButton(interaction as ButtonInteraction)
         }
 
       } else if (interaction.isChannelSelectMenu()) {
@@ -226,6 +232,12 @@ export function registerInteractionCreate(client: Client) {
         } else if (id.startsWith('games:prefs:pick:')) {
           const { handlePrefsPick } = await import('../../interactions/gamesEditor')
           await handlePrefsPick(interaction as StringSelectMenuInteraction)
+        } else if (id === 'games:bulk:select') {
+          const { handleGameDefaultsSelect } = await import('../../interactions/gamesEditor')
+          await handleGameDefaultsSelect(interaction as StringSelectMenuInteraction)
+        } else if (id.startsWith('games:mass:view:') || id.startsWith('games:mass:ping:')) {
+          const { handleMassSelect } = await import('../../interactions/gamesEditor')
+          await handleMassSelect(interaction as StringSelectMenuInteraction)
         } else if (id === 'color:pick') {
           const { handleColorPick } = await import('../../commands/color')
           await handleColorPick(interaction as StringSelectMenuInteraction)

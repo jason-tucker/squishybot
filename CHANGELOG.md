@@ -5,6 +5,22 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [0.9.0] — 2026-06-14
+
+### Added
+- **Game prefs: "View defaults ON" (opt-out) model** — new sudo setting `games.default_view_on` (default OFF). When enabled, game channels are visible to `@everyone` by default and members opt **out** via `/games`; new members see them automatically. Pings stay opt-in either way. Managed at **`/sudo → Settings → Game Defaults`**; toggling runs a backfill that flips every game channel's `@everyone` visibility (current + future members at once) while preserving per-member opt-outs (`applyDefaultViewBackfill` in `src/services/games.ts`).
+- **Game prefs: bulk edit tool (two surfaces)** —
+  - **All-games single-user editor** (`games:mass:*`): a one-screen View/Pings multi-select prefilled with the target's current state, reachable via the **⚡ Bulk edit all** button on the per-game prefs list (so it's available from `/games`, `/settings → Game Prefs`, and right-click → Manage → Game Prefs, self and sudo).
+  - **Server-wide per-game applier** (`games:bulk:*`, sudo) on the Game Defaults panel: **Show to everyone** / **Hide from everyone** / **Clear pings for everyone** for a chosen game (`bulkGrantViewEveryone` / `bulkRevokeViewEveryone` / `bulkClearPingsEveryone`).
+
+### Changed
+- **`resolvePrefs`** now treats an absent prefs row as View-ON under `games.default_view_on` (when the game has a channel and the member carries no personal deny), and reads member ViewChannel **deny** overwrites as opt-outs.
+- **`applyViewAccess`** is default-on aware: opt-out writes a per-member ViewChannel **deny**; opt-in clears it. Default-off behavior (per-member allow) unchanged.
+- **`restoreMemberPrefs`** re-applies opt-out denies on rejoin under default-on.
+- **Ping opt-in** no longer requires an explicit View row under default-on (everyone has effective view).
+- **New game channels** are created visible to `@everyone` when default-on is active (hidden otherwise).
+- **`gameInterestCounts`** reports View interest as ≈(members − opt-outs) under default-on.
+
 ## [0.8.9] — 2026-06-13
 
 ### Docs
