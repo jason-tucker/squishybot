@@ -10,6 +10,7 @@ import { cancelHideGrace, grantHideGrace } from '../../services/voice/hideGrace'
 import { cancelGraceTimer, getOwnerGraceMs, pickActingOwner, scheduleGracePromotion } from '../../services/voice/ownerGrace'
 import { maybeRenameChannel } from '../../services/voice/autoRename'
 import { recordMemberJoin, recordMemberLeave } from '../../services/voice/voiceMembers'
+import { isAutoChannelVoice } from '../../services/settings'
 import { logger } from '../../services/logger'
 import { recordActivity } from '../../services/presence'
 import { env } from '../../config/env'
@@ -48,15 +49,24 @@ async function handleVoiceStateUpdate(client: Client, oldState: VoiceState, newS
 
     // --- JOINED A CHANNEL ---
     if (joinedChannelId && joinedChannelId !== leftChannelId) {
-      // Check auto_channels FIRST. The hub-cache eviction lags the hub→auto
-      // rename by a couple of awaits (it lives in createReplacementHub which
-      // runs after createAutoChannel returns). Anyone joining the same channel
-      // ID during that window — typically the second of two near-simultaneous
-      // joiners — would otherwise be misclassified as a hub join, hit the
-      // unique constraint on auto_channels.voice_channel_id, and crash. By
-      // checking auto_channels first we route them straight into the joined
-      // user's room as a normal join.
-      const [record] = await db.select().from(autoChannels).where(eq(autoChannels.voiceChannelId, joinedChannelId))
+      // Check the auto-channel cache FIRST (before the hub check). The
+      // hub-cache eviction lags the hub→auto rename by a couple of awaits
+      // (it lives in createReplacementHub which runs after createAutoChannel
+      // returns), so during that window a channel can be both "still a hub"
+      // and "already an auto channel" — the second of two near-simultaneous
+      // joiners must be routed into the joined user's room as a normal join,
+      // not re-processed as a hub join. (handleHubJoin also re-checks
+      // auto_channels itself, so the residual sub-await window where the DB
+      // row exists but the cache isn't tracked yet is covered too.)
+      //
+      // Gating the DB read on the in-memory cache means joins to unmanaged
+      // voice channels — the common case guild-wide — skip Postgres entirely,
+      // mirroring the presenceUpdate hot-path short-circuit. The cache is
+      // populated by loadSettings() at boot and kept in lockstep by the
+      // create/delete lifecycle hooks in autoChannel.ts.
+      const [record] = isAutoChannelVoice(joinedChannelId)
+        ? await db.select().from(autoChannels).where(eq(autoChannels.voiceChannelId, joinedChannelId))
+        : []
       if (record) {
         cancelCleanup(joinedChannelId)
         // They're back inside the VC — they have inherent view, no need to keep
@@ -104,6 +114,9 @@ async function handleVoiceStateUpdate(client: Client, oldState: VoiceState, newS
 
     // --- LEFT A CHANNEL ---
     if (leftChannelId && leftChannelId !== joinedChannelId) {
+      // Same hot-path gate as the join branch: leaves from unmanaged voice
+      // channels skip the DB read entirely.
+      if (!isAutoChannelVoice(leftChannelId)) return
       const [record] = await db.select().from(autoChannels).where(eq(autoChannels.voiceChannelId, leftChannelId))
       if (!record) return
 

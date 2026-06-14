@@ -25,8 +25,12 @@ export type GamePref = typeof userGamePrefs.$inferSelect
 const catalog = new Map<string, Game>()
 
 export async function loadGames(): Promise<void> {
+  // Query first, swap synchronously after — a reload (boot, RPC refresh,
+  // panel invalidate) must never leave the catalog empty mid-query or wipe
+  // it when the DB hiccups. On failure the previous catalog stays live and
+  // the rejection propagates to the caller's catch/log.
+  const rows = await db.select().from(games)
   catalog.clear()
-  const rows = await db.select().from(games).catch(() => [])
   for (const r of rows) catalog.set(r.id, r)
 }
 
