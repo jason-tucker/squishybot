@@ -19,20 +19,25 @@ async function apply(client: Client, reaction: MessageReaction | PartialMessageR
   if (user.bot) return
   if (!reaction.message.guildId) return
 
-  // Fetch any partials so .guildId / .emoji / .members work reliably.
-  if (reaction.partial) {
-    try { await reaction.fetch() } catch { return }
-  }
-  if (user.partial) {
-    try { await user.fetch() } catch { return }
-  }
-
+  // Cheap in-memory checks FIRST. The message id and emoji are always present
+  // on the raw gateway packet (even for partials), so we can rule out
+  // non-reaction-role messages without any API call. Previously every
+  // reaction on any uncached (i.e. pre-restart) message in the guild paid a
+  // REST message-fetch just to discover we didn't care about it.
   const cfg = getReactionRoleConfig(reaction.message.id)
   if (!cfg) return
 
   const key = emojiKey(reaction)
   const mapping = cfg.mappings.find(m => m.emoji === key)
   if (!mapping) return
+
+  // This IS one of ours — now resolve any partials so downstream reads work.
+  if (reaction.partial) {
+    try { await reaction.fetch() } catch { return }
+  }
+  if (user.partial) {
+    try { await user.fetch() } catch { return }
+  }
 
   const guild = client.guilds.cache.get(reaction.message.guildId)
   if (!guild) return

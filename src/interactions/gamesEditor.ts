@@ -48,7 +48,9 @@ import { appendPanelLink } from '../utils/panelLink'
 import { requireSudo } from '../services/voice/permissions'
 import { clearSetting, getSetting, setSetting } from '../services/settings'
 import {
-  createGame, deleteGame, gameCount, gameInterestCounts, getGame, listGames,
+  applyDefaultViewBackfill, bulkClearPingsEveryone, bulkGrantViewEveryone, bulkRevokeViewEveryone,
+  createGame, deleteGame, gameCount, gameDefaultViewOn, GAMES_DEFAULT_VIEW_ON_KEY,
+  gameInterestCounts, getGame, listGames,
   matchedPingRoleId, matchedViewChannel, provisionGameDiscord, resolvePrefs, setPref, updateGame,
   type Game, type GameProvisionResult, type ResolvedPref,
 } from '../services/games'
@@ -316,11 +318,16 @@ export async function renderPrefsList(guild: Guild, targetUserId: string, mode: 
     }
   }
 
-  components.push(
-    new ActionRowBuilder<MessageActionRowComponentBuilder>().addComponents(
-      new ButtonBuilder().setCustomId(`games:prefs:back:${mode}:${targetUserId}`).setLabel('Done').setStyle(ButtonStyle.Secondary)
+  const footer = new ActionRowBuilder<MessageActionRowComponentBuilder>()
+  if (prefs.length > 0) {
+    footer.addComponents(
+      new ButtonBuilder().setCustomId(`games:mass:open:${mode}:${targetUserId}`).setLabel('Bulk edit all').setEmoji('⚡').setStyle(ButtonStyle.Primary)
     )
+  }
+  footer.addComponents(
+    new ButtonBuilder().setCustomId(`games:prefs:back:${mode}:${targetUserId}`).setLabel('Done').setStyle(ButtonStyle.Secondary)
   )
+  components.push(footer)
 
   if (mode === 'self') {
     appendPanelLink(container, '/me/games', 'Manage your game prefs on the website')
@@ -765,4 +772,230 @@ export async function openPrefsEditor(
 ): Promise<void> {
   const payload = await renderPrefsEditor(guild, targetUserId, mode)
   await reply(payload)
+}
+
+// ===========================================================================
+// MASS PREFS — all-games-at-once single-user editor (self + sudo)
+//
+// Two multi-selects (View / Pings) prefilled with the target's current state,
+// so a whole profile can be set in one screen instead of drilling per-game.
+// customId family: games:mass:*
+// ===========================================================================
+
+/** games:mass:open:{mode}:{uid} — switch from the per-game list to the bulk editor. */
+export async function handleMassOpen(interaction: ButtonInteraction): Promise<void> {
+  const [, , , mode, uid] = interaction.customId.split(':')
+  if (!await authorizePrefs(interaction, mode as PrefsMode, uid)) return
+  await interaction.update(await renderMassPrefsEditor(interaction.guild!, uid, mode as PrefsMode) as any)
+}
+
+export async function renderMassPrefsEditor(guild: Guild, targetUserId: string, mode: PrefsMode) {
+  const member = await guild.members.fetch(targetUserId).catch(() => null)
+  const targetName = member?.displayName ?? `<@${targetUserId}>`
+  const prefs = await resolvePrefs(guild, member ?? targetUserId)
+  const defOn = gameDefaultViewOn()
+
+  const lines: string[] = [`### ⚡ Bulk Game Prefs — ${targetName}`]
+  lines.push(mode === 'sudo'
+    ? '_Sudo edit. Changes apply the moment you change a menu._'
+    : '_Set everything in one shot — your picks apply as soon as you change a menu._')
+  lines.push('')
+  lines.push(defOn
+    ? '👁️ **Channels are visible by default** — unselect one to hide it from yourself.'
+    : '👁️ **Channels** — select the game channels you want to see.')
+  lines.push('🔔 **Pings are opt-in** — select the games you want `/play` to ping you for.')
+
+  const container = new ContainerBuilder()
+    .setAccentColor(mode === 'sudo' ? 0xed4245 : 0x5865f2)
+    .addTextDisplayComponents(new TextDisplayBuilder().setContent(lines.join('\n')))
+
+  const components: any[] = [container]
+
+  const shown = prefs.slice(0, SELECT_MAX)
+  if (shown.length === 0) {
+    container.addSeparatorComponents(sep())
+    container.addTextDisplayComponents(new TextDisplayBuilder().setContent('_No games defined yet. Ask sudo to set up the catalog at `/sudo → Settings → Games`._'))
+  } else {
+    const viewable = shown.filter(p => matchedViewChannel(guild, p.game))
+    if (viewable.length > 0) {
+      components.push(new ActionRowBuilder<MessageActionRowComponentBuilder>().addComponents(
+        new StringSelectMenuBuilder()
+          .setCustomId(`games:mass:view:${mode}:${targetUserId}`)
+          .setPlaceholder('Channels you can see…')
+          .setMinValues(0).setMaxValues(viewable.length)
+          .addOptions(viewable.map(p => ({ label: p.game.name.slice(0, 100), value: p.game.id, default: p.wantsView, emoji: '👁️' })))
+      ))
+    }
+    const pingable = shown.filter(p => matchedPingRoleId(guild, p.game))
+    if (pingable.length > 0) {
+      components.push(new ActionRowBuilder<MessageActionRowComponentBuilder>().addComponents(
+        new StringSelectMenuBuilder()
+          .setCustomId(`games:mass:ping:${mode}:${targetUserId}`)
+          .setPlaceholder('Games to get LFG pings for…')
+          .setMinValues(0).setMaxValues(pingable.length)
+          .addOptions(pingable.map(p => ({ label: p.game.name.slice(0, 100), value: p.game.id, default: p.wantsPing, emoji: '🔔' })))
+      ))
+    }
+    if (prefs.length > SELECT_MAX) {
+      container.addSeparatorComponents(sep())
+      container.addTextDisplayComponents(new TextDisplayBuilder().setContent(`-# Showing first ${SELECT_MAX} of ${prefs.length} games. Ask sudo to archive unused ones.`))
+    }
+  }
+
+  components.push(
+    new ActionRowBuilder<MessageActionRowComponentBuilder>().addComponents(
+      new ButtonBuilder().setCustomId(`games:prefs:list:${mode}:${targetUserId}`).setLabel('Per-game view').setEmoji('📋').setStyle(ButtonStyle.Secondary),
+      new ButtonBuilder().setCustomId(`games:prefs:back:${mode}:${targetUserId}`).setLabel('Done').setStyle(ButtonStyle.Secondary),
+    )
+  )
+
+  return { flags: MessageFlags.IsComponentsV2 as number, components }
+}
+
+/** games:mass:{which}:{mode}:{uid} — apply a view/ping multi-select diff. */
+export async function handleMassSelect(interaction: StringSelectMenuInteraction): Promise<void> {
+  const [, , which, mode, uid] = interaction.customId.split(':')
+  if (!await authorizePrefs(interaction, mode as PrefsMode, uid)) return
+
+  const member = await interaction.guild!.members.fetch(uid).catch(() => null)
+  if (!member) {
+    await interaction.reply({ content: '❌ Could not resolve target member.', ephemeral: true })
+    return
+  }
+  const kind: 'view' | 'ping' = which === 'ping' ? 'ping' : 'view'
+  const selected = new Set(interaction.values)
+
+  const prefs = await resolvePrefs(interaction.guild!, member)
+  const shown = prefs.slice(0, SELECT_MAX).filter(p =>
+    kind === 'ping' ? matchedPingRoleId(interaction.guild!, p.game) : matchedViewChannel(interaction.guild!, p.game)
+  )
+
+  const failures: string[] = []
+  for (const p of shown) {
+    const desired = selected.has(p.game.id)
+    const current = kind === 'ping' ? p.wantsPing : p.wantsView
+    if (desired === current) continue
+    const res = await setPref(member, p.game.id, kind, desired, { editorDiscordId: interaction.user.id, mode: mode as PrefsMode })
+    if (!res.ok) failures.push(p.game.name)
+  }
+
+  await interaction.update(await renderMassPrefsEditor(interaction.guild!, uid, mode as PrefsMode) as any)
+  if (failures.length > 0) {
+    await interaction.followUp({
+      content: `⚠️ Couldn't enable pings for: ${failures.join(', ')} — turn View on for those first.`,
+      flags: MessageFlags.Ephemeral,
+    }).catch(() => {})
+  }
+}
+
+// ===========================================================================
+// GAME DEFAULTS (sudo) — /sudo → Settings → Game Defaults
+//
+// Toggle the "View defaults ON" model + a server-wide per-game bulk applier.
+// customId families: games:defaults:* (toggle) and games:bulk:* (per-game ops)
+// ===========================================================================
+
+export async function renderGameDefaultsPanel(guild: Guild, selectedGameId?: string) {
+  const defOn = gameDefaultViewOn()
+  const all = listGames({ includeArchived: true, includeHidden: true })
+
+  const lines: string[] = ['### 🎮 Game Defaults', '']
+  lines.push(`**View defaults ON for everyone** — ${defOn ? '🟢 enabled' : '🔴 disabled'}`)
+  lines.push(defOn
+    ? '_Game channels are visible to everyone by default; members opt **out** via `/games`. New members see them automatically._'
+    : '_Game channels are hidden by default; members opt **in** via `/games`._')
+  lines.push('')
+  lines.push('_Toggling runs a backfill that flips every game channel\'s @everyone visibility — reaching current and future members at once. Per-member opt-outs are preserved. **Pings stay opt-in either way.**_')
+
+  const container = new ContainerBuilder()
+    .setAccentColor(0xed4245)
+    .addTextDisplayComponents(new TextDisplayBuilder().setContent(lines.join('\n')))
+
+  const components: any[] = [container]
+
+  components.push(new ActionRowBuilder<MessageActionRowComponentBuilder>().addComponents(
+    new ButtonBuilder()
+      .setCustomId(`games:defaults:toggle:${defOn ? 'off' : 'on'}`)
+      .setLabel(defOn ? 'Turn default-view OFF (re-hide all)' : 'Turn default-view ON (show all)')
+      .setEmoji(defOn ? '🙈' : '👁️')
+      .setStyle(defOn ? ButtonStyle.Secondary : ButtonStyle.Success),
+  ))
+
+  if (all.length > 0) {
+    container.addSeparatorComponents(sep())
+    container.addTextDisplayComponents(new TextDisplayBuilder().setContent('**Bulk apply to one game** — pick a game, then choose an action.'))
+    const opts = all.slice(0, 25).map(g => ({
+      label: g.name.slice(0, 100),
+      value: g.id,
+      default: g.id === selectedGameId,
+      description: ((g.channelId ? 'has channel' : 'no channel') + (g.pingRoleId ? ' · ping role' : '')).slice(0, 100),
+    }))
+    components.push(new ActionRowBuilder<MessageActionRowComponentBuilder>().addComponents(
+      new StringSelectMenuBuilder().setCustomId('games:bulk:select').setPlaceholder('Pick a game for bulk actions…').addOptions(opts)
+    ))
+    if (selectedGameId && getGame(selectedGameId)) {
+      components.push(new ActionRowBuilder<MessageActionRowComponentBuilder>().addComponents(
+        new ButtonBuilder().setCustomId(`games:bulk:show:${selectedGameId}`).setLabel('Show to everyone').setEmoji('👁️').setStyle(ButtonStyle.Success),
+        new ButtonBuilder().setCustomId(`games:bulk:hide:${selectedGameId}`).setLabel('Hide from everyone').setEmoji('🙈').setStyle(ButtonStyle.Secondary),
+        new ButtonBuilder().setCustomId(`games:bulk:clearpings:${selectedGameId}`).setLabel('Clear pings for everyone').setEmoji('🔕').setStyle(ButtonStyle.Danger),
+      ))
+    }
+  }
+
+  components.push(new ActionRowBuilder<MessageActionRowComponentBuilder>().addComponents(
+    new ButtonBuilder().setCustomId('sudo:set:home').setLabel('Back').setStyle(ButtonStyle.Secondary),
+  ))
+
+  return { flags: MessageFlags.IsComponentsV2 as number, components }
+}
+
+/** games:bulk:select — pick a game for the server-wide bulk applier. */
+export async function handleGameDefaultsSelect(interaction: StringSelectMenuInteraction): Promise<void> {
+  if (!await requireSudo(interaction)) return
+  await interaction.update(await renderGameDefaultsPanel(interaction.guild!, interaction.values[0]) as any)
+}
+
+/** games:defaults:toggle:* and games:bulk:{show|hide|clearpings}:{gid} */
+export async function handleGameDefaultsButton(interaction: ButtonInteraction): Promise<void> {
+  if (!await requireSudo(interaction)) return
+  const id = interaction.customId
+
+  if (id.startsWith('games:defaults:toggle:')) {
+    const enable = id.split(':')[3] === 'on'
+    await interaction.deferUpdate()
+    await setSetting(GAMES_DEFAULT_VIEW_ON_KEY, enable ? 'true' : 'false', interaction.user.id)
+    const res = await applyDefaultViewBackfill(interaction.guild!, enable, interaction.user.id)
+    await interaction.editReply(await renderGameDefaultsPanel(interaction.guild!) as any)
+    await interaction.followUp({
+      content: `✅ Default-view **${enable ? 'ON' : 'OFF'}**. Backfilled ${res.changed}/${res.total} game channel(s)` +
+        (res.noChannel ? ` (${res.noChannel} without a channel)` : '') +
+        (res.failed ? ` · ⚠️ ${res.failed} failed` : '') + '.',
+      flags: MessageFlags.Ephemeral,
+    }).catch(() => {})
+    return
+  }
+
+  if (id.startsWith('games:bulk:')) {
+    const [, , action, gid] = id.split(':')
+    const g = getGame(gid)
+    if (!g) {
+      await interaction.reply({ content: '❌ Game not found.', ephemeral: true })
+      return
+    }
+    await interaction.deferUpdate()
+    let note = ''
+    if (action === 'show') {
+      const r = await bulkGrantViewEveryone(interaction.guild!, gid, interaction.user.id)
+      note = `👁️ **${g.name}** shown to everyone — cleared ${r.clearedDenies} opt-out(s); ${r.updatedRows} pref row(s) updated.`
+    } else if (action === 'hide') {
+      const r = await bulkRevokeViewEveryone(interaction.guild!, gid, interaction.user.id)
+      note = `🙈 **${g.name}** hidden from everyone — cleared ${r.clearedDenies} access overwrite(s); ${r.updatedRows} pref row(s) updated.`
+    } else if (action === 'clearpings') {
+      const r = await bulkClearPingsEveryone(interaction.guild!, gid, interaction.user.id)
+      note = `🔕 Cleared pings for **${g.name}** — removed the role from ${r.removed} member(s); ${r.updatedRows} pref row(s) updated.`
+    }
+    await interaction.editReply(await renderGameDefaultsPanel(interaction.guild!, gid) as any)
+    if (note) await interaction.followUp({ content: note, flags: MessageFlags.Ephemeral }).catch(() => {})
+    return
+  }
 }

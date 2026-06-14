@@ -246,6 +246,8 @@ Other customId families:
 - `sp:*` — scheduled posts (DB-backed): `sp:rsvp:{postId}:{state}`, `sp:own:{postId}:{state}`, `sp:cancel:{postId}`
 - `games:prefs:*` — game preferences editor: `games:prefs:set:`, `games:prefs:list:`, `games:prefs:back:`, `games:prefs:pick:`
 - `games:cat:*` — game catalog management (sudo): `games:cat:select`, `games:cat:channel:`, `games:cat:role:`, `games:cat:add_submit`, `games:cat:save:`, `games:cat:set_category`
+- `games:mass:*` — all-games single-user bulk prefs editor (self + sudo): `games:mass:open:{mode}:{uid}` (button → open), `games:mass:view:{mode}:{uid}` / `games:mass:ping:{mode}:{uid}` (multi-selects → apply diff)
+- `games:defaults:*` / `games:bulk:*` — Game Defaults panel (sudo, `/sudo → Settings → Game Defaults`): `games:defaults:toggle:{on|off}` (flip `games.default_view_on` + backfill), `games:bulk:select` (pick a game), `games:bulk:{show|hide|clearpings}:{gid}` (server-wide per-game apply). The `games.default_view_on` setting (default OFF) switches game-channel View between opt-in (hidden, per-member allow) and opt-out (visible to @everyone, per-member deny). Pings stay opt-in regardless.
 - `profile:*` — profile editor: `profile:edit:`, `profile:toggle:`, `profile:back:`, `profile:save:`, `profile:select_user`
 - `settings:staff_role:*` — staff-role self-service in `/settings`: `settings:staff_role`, `settings:staff_role:add:`, `settings:staff_role:remove:`
 - `color:pick` — color role string-select
