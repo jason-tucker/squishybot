@@ -15,6 +15,7 @@ import { and, count, eq } from 'drizzle-orm'
 import { requireSudo } from '../services/voice/permissions'
 import { env } from '../config/env'
 import { sep } from '../utils/cv2'
+import { appendPanelLink } from '../utils/panelLink'
 
 export const data = new SlashCommandBuilder()
   .setName('sudo')
@@ -62,6 +63,8 @@ export async function renderSudoHome(): Promise<{ flags: number; components: any
         { label: 'Restart instructions', value: 'restart', emoji: '🔁' },
       ])
   )
+
+  appendPanelLink(container, '/sudo', 'Open the admin panel on the website')
 
   return { flags: MessageFlags.IsComponentsV2 as number, components: [container, menu] }
 }

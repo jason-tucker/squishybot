@@ -13,6 +13,7 @@ import {
 import { sep } from '../utils/cv2'
 import { ensureProfile, formatBirthday } from '../services/userProfile'
 import { resolvePrefs } from '../services/games'
+import { appendPanelLink } from '../utils/panelLink'
 
 export const data = new SlashCommandBuilder()
   .setName('settings')
@@ -73,6 +74,8 @@ export async function renderSettingsHome(
       .setEmoji('🛡️')
       .setStyle(ButtonStyle.Primary),
   )
+
+  appendPanelLink(container, '/me', 'Manage your settings on the website')
 
   return {
     flags: MessageFlags.IsComponentsV2 as number,

@@ -5,6 +5,13 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [Unreleased]
+
+### Added
+- **Panel deep-links on slash command replies** — `/voice`, `/settings`, `/sudo`, and `/games` (self mode only) now append a subtext `-# 🌐 [label](url)` line pointing users at the matching botpanel page. New helper module `src/utils/panelLink.ts` (`panelBaseUrl`, `panelUrl`, `panelLinkLine`, `panelLinkDisplay`, `appendPanelLink`). Base URL is env-configurable via `PANEL_BASE_URL` (defaults to `https://bots.tucker.host`).
+
+---
+
 ## [0.8.9] — 2026-06-13
 
 ### Docs
