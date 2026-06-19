@@ -99,26 +99,55 @@ export function buildControlPanelPayload(
 
   const vcId = record.voiceChannelId
 
-  const customizeRow = new ActionRowBuilder<MessageActionRowComponentBuilder>().addComponents(
+  // Deliberately just three buttons. Everything else lives behind ⚙️ Options
+  // so the channel's top message stays clean.
+  //   ✏️ Rename  — set a custom name (blank reverts to Smart auto-naming)
+  //   📨 Post    — drop a fresh panel at the bottom of the channel
+  //   ⚙️ Options — lock / hide / hosts / claim / auto-name / delete
+  const actionRow = new ActionRowBuilder<MessageActionRowComponentBuilder>().addComponents(
     new ButtonBuilder()
       .setCustomId(encodeVcId(vcId, 'rename'))
       .setLabel('Rename')
       .setEmoji('✏️')
       .setStyle(ButtonStyle.Secondary),
     new ButtonBuilder()
-      .setCustomId(encodeVcId(vcId, 'hosts'))
-      .setLabel('Hosts')
-      .setEmoji('👑')
+      .setCustomId(encodeVcId(vcId, 'post'))
+      .setLabel('Post')
+      .setEmoji('📨')
       .setStyle(ButtonStyle.Secondary),
     new ButtonBuilder()
-      .setCustomId(encodeVcId(vcId, 'templates'))
-      .setLabel('Templates')
-      .setEmoji('📋')
+      .setCustomId(encodeVcId(vcId, 'options'))
+      .setLabel('Options')
+      .setEmoji('⚙️')
       .setStyle(ButtonStyle.Secondary),
   )
 
-  // Buttons show current state (label + color); clicking toggles.
-  const stateRow = new ActionRowBuilder<MessageActionRowComponentBuilder>().addComponents(
+  return {
+    flags: ((MessageFlags.IsComponentsV2 as number) | SUPPRESS_NOTIFICATIONS),
+    components: [container, actionRow],
+  }
+}
+
+/**
+ * Ephemeral ⚙️ Options sub-panel — the home for everything that used to clutter
+ * the main panel: lock/hide toggles (label + color reflect current state),
+ * Hosts, Claim, Auto Name, and Delete. Opened from the main panel's Options
+ * button; its toggle buttons re-render this same ephemeral message in place
+ * while also refreshing the public panel.
+ */
+export function buildOptionsPanelPayload(record: AutoChannelRecord) {
+  const vcId = record.voiceChannelId
+  const container = new ContainerBuilder().addTextDisplayComponents(
+    new TextDisplayBuilder().setContent(
+      '### ⚙️ Channel Options\n' +
+      `🔒 **${record.isLocked ? 'Locked' : 'Unlocked'}** · ` +
+      `${record.isHidden ? '🙈 **Hidden**' : '👁️ **Visible**'} · ` +
+      `🏷️ Auto-naming **${record.autoNameEnabled ? 'On' : 'Off'}**`,
+    ),
+  )
+
+  // Row 1 — toggles (label + color show the current state; clicking flips it).
+  const toggleRow = new ActionRowBuilder<MessageActionRowComponentBuilder>().addComponents(
     new ButtonBuilder()
       .setCustomId(encodeVcId(vcId, record.isLocked ? 'unlock' : 'lock'))
       .setLabel(record.isLocked ? 'Locked' : 'Unlocked')
@@ -129,9 +158,20 @@ export function buildControlPanelPayload(
       .setLabel(record.isHidden ? 'Hidden' : 'Visible')
       .setEmoji(record.isHidden ? '🙈' : '👁️')
       .setStyle(record.isHidden ? ButtonStyle.Danger : ButtonStyle.Success),
+    new ButtonBuilder()
+      .setCustomId(encodeVcId(vcId, 'auto_name'))
+      .setLabel('Auto Name')
+      .setEmoji('🏷️')
+      .setStyle(ButtonStyle.Secondary),
   )
 
+  // Row 2 — ownership + destructive.
   const ownerRow = new ActionRowBuilder<MessageActionRowComponentBuilder>().addComponents(
+    new ButtonBuilder()
+      .setCustomId(encodeVcId(vcId, 'hosts'))
+      .setLabel('Hosts')
+      .setEmoji('👑')
+      .setStyle(ButtonStyle.Secondary),
     new ButtonBuilder()
       .setCustomId(encodeVcId(vcId, 'claim'))
       .setLabel('Claim')
@@ -145,8 +185,45 @@ export function buildControlPanelPayload(
   )
 
   return {
-    flags: ((MessageFlags.IsComponentsV2 as number) | SUPPRESS_NOTIFICATIONS),
-    components: [container, customizeRow, stateRow, ownerRow],
+    flags: MessageFlags.IsComponentsV2 as number,
+    components: [container, toggleRow, ownerRow],
+  }
+}
+
+/**
+ * Ephemeral 🏷️ Auto Name sub-panel. Two controls: a toggle between **Smart**
+ * (rename the room after whatever game 2+ people share) and **Off** (freeze the
+ * name), plus a one-shot **🎲 Randomize** button. A manual Rename always wins
+ * and sticks until you rename to blank.
+ */
+export function buildAutoNamePanelPayload(record: AutoChannelRecord) {
+  const vcId = record.voiceChannelId
+  const on = record.autoNameEnabled
+  const container = new ContainerBuilder().addTextDisplayComponents(
+    new TextDisplayBuilder().setContent(
+      '### 🏷️ Auto Name\n' +
+      `Currently **${on ? 'On — Smart' : 'Off'}**.\n\n` +
+      '• **Smart** renames the room to whatever game **2 or more** people are playing.\n' +
+      '• **Off** leaves the name exactly as it is.\n' +
+      '• **🎲 Randomize** drops a fun random name on the room right now (and freezes it).\n\n' +
+      '_Tip: a custom **Rename** always wins — it stays put no matter what anyone plays. Rename to blank to hand control back to Smart._',
+    ),
+  )
+  const row = new ActionRowBuilder<MessageActionRowComponentBuilder>().addComponents(
+    new ButtonBuilder()
+      .setCustomId(encodeVcId(vcId, on ? 'auto_off' : 'auto_on'))
+      .setLabel(on ? 'Turn Off' : 'Turn On (Smart)')
+      .setEmoji(on ? '🚫' : '✨')
+      .setStyle(on ? ButtonStyle.Secondary : ButtonStyle.Success),
+    new ButtonBuilder()
+      .setCustomId(encodeVcId(vcId, 'randomize'))
+      .setLabel('Randomize')
+      .setEmoji('🎲')
+      .setStyle(ButtonStyle.Primary),
+  )
+  return {
+    flags: MessageFlags.IsComponentsV2 as number,
+    components: [container, row],
   }
 }
 

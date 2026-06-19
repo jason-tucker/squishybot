@@ -13,13 +13,17 @@ export const autoChannels = pgTable('auto_channels', {
   isLocked: boolean('is_locked').notNull().default(false),
   isHidden: boolean('is_hidden').notNull().default(false),
   userLimit: integer('user_limit').notNull().default(0),
+  // Smart auto-naming on/off. A manual rename or 🎲 Randomize sets this false
+  // (the name is frozen); a blank rename / Auto Name → Smart sets it true.
   autoNameEnabled: boolean('auto_name_enabled').notNull().default(true),
   manualName: text('manual_name'),
-  // Template tracking: null=manual, 'auto'=presence-based, 'counter'=show [x/y] member count
+  // Auto-naming mode tracker. Only two live values now: 'auto' (Smart) or null.
+  // Legacy rows may still hold old template keys (counter/squad/…) — they're
+  // treated as Smart since the dedicated templates were removed.
   nameTemplate: text('name_template'),
-  // Name to revert to when no member is playing anything that auto-rename can
-  // pull from. Updated on creation, manual rename, and the Tryhard/Chill
-  // templates. Stays null for legacy rows; rename fallback is skipped if so.
+  // Name to revert to when fewer than 2 members share a game (Smart can't pick
+  // a winner). Updated on creation, manual rename, and Randomize. Stays null
+  // for legacy rows; rename fallback is skipped if so.
   fallbackName: text('fallback_name'),
   controlPanelMsgId: text('control_panel_msg_id'),
   stickyMsgId: text('sticky_msg_id'),

@@ -14,6 +14,13 @@ export type VoiceAction =
   | 'show'
   | 'hosts'
   | 'claim'
-  | 'templates'
   | 'open_panel'
+  | 'post'          // re-post a fresh control panel at the bottom of the text channel
+  | 'options'       // open the ⚙️ Options sub-panel (lock/hide/hosts/claim/auto-name/delete)
+  | 'auto_name'     // open the 🏷️ Auto Name sub-panel
+  | 'auto_on'       // enable Smart auto-naming
+  | 'auto_off'      // disable auto-naming (freeze the current name)
+  | 'randomize'     // drop a random name and freeze it
+  // Legacy actions — kept so older in-flight panels still decode cleanly.
+  | 'templates'
   | 'template_apply'

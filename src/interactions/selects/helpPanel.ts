@@ -129,16 +129,17 @@ export async function handleHelpPanelSelect(interaction: StringSelectMenuInterac
         'The control panel posts **silently** in your private text channel as soon as the channel is ' +
         'created — no notification fires. It stays the top message in the channel and re-renders on ' +
         'every voice-state change so the **In channel** member list (with each person\'s join time and ' +
-        'current rich-presence game) is always current. The channel name follows the most-played game ' +
-        'across all members and prefixes a count when more than one is playing it (e.g. `(3) Overwatch`).\n\n' +
-        '**Panel buttons:**\n' +
-        '✏️ **Rename** — set a custom channel name via a popup form\n' +
-        '👑 **Hosts** — one panel to add or remove hosts. Each option shows their current rank: 👑 host · 🛡️ sudo · 👤 member.\n' +
-        '📋 **Templates** — Auto (follows your game) / Counter ([x/y]) / Comp 5-stack / Tryhard / Chill\n' +
-        '🔒/🔓 **Locked / Unlocked** — toggle. Label shows the current state — green when Unlocked, red when Locked.\n' +
-        '🙈/👁️ **Hidden / Visible** — toggle. Same status-flip convention.\n' +
-        '👤 **Claim** — become the owner if the previous owner left\n' +
-        '🗑️ **Delete** — immediately delete the channel and text channel\n\n' +
+        'current rich-presence game) is always current. With **Smart** auto-naming on, the room is named ' +
+        'after whatever game **2 or more** people are playing.\n\n' +
+        '**Panel buttons** (just three — everything else lives under Options):\n' +
+        '✏️ **Rename** — set a custom name via a popup. A custom name **sticks** no matter what anyone plays. Leave the box blank to hand control back to Smart auto-naming.\n' +
+        '📨 **Post** — drop a fresh copy of the panel at the bottom of the channel when chat has buried it.\n' +
+        '⚙️ **Options** — opens a private menu with everything else:\n' +
+        '   • 🔒/🔓 **Locked / Unlocked** and 🙈/👁️ **Hidden / Visible** — toggles (label + colour show the current state)\n' +
+        '   • 👑 **Hosts** — add/remove hosts (each shows their rank: 👑 host · 🛡️ sudo · 👤 member)\n' +
+        '   • 🏷️ **Auto Name** — switch between **Smart** (game-driven) and **Off**, or hit **🎲 Randomize** for a fun random name that freezes in place\n' +
+        '   • 👤 **Claim** — become the owner if the previous owner left\n' +
+        '   • 🗑️ **Delete** — immediately delete the voice + text channels\n\n' +
         'A silent **📋 Open Panel** sticky stays at the bottom of the text channel so the panel ' +
         'is always one click away. Use **/voice** from any channel for an ephemeral copy too.'
       ))

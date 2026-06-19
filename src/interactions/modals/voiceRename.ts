@@ -5,6 +5,7 @@ import { autoChannels } from '../../db/schema'
 import { eq } from 'drizzle-orm'
 import { canControlChannel, isSudo } from '../../services/voice/permissions'
 import { postOrUpdateControlPanel } from '../../services/voice/controlPanel'
+import { maybeRenameChannel } from '../../services/voice/autoRename'
 import { sanitizeChannelName } from '../../utils/channelName'
 import { decorateChannelName } from '../../services/voice/autoNaming'
 
@@ -27,12 +28,6 @@ export async function handleVoiceRenameModal(interaction: ModalSubmitInteraction
   }
 
   const rawName = interaction.fields.getTextInputValue('new_name')
-  const newName = sanitizeChannelName(rawName)
-
-  if (!newName) {
-    await interaction.reply({ content: '❌ Invalid channel name.', ephemeral: true })
-    return
-  }
 
   // interaction.isFromMessage() → deferUpdate, else deferReply
   if (interaction.isFromMessage()) {
@@ -40,6 +35,27 @@ export async function handleVoiceRenameModal(interaction: ModalSubmitInteraction
   } else {
     await interaction.deferReply({ ephemeral: true })
   }
+
+  // Blank rename → hand control back to Smart auto-naming. The name is no
+  // longer frozen; the next presence/voice change (or the immediate
+  // maybeRenameChannel below) re-derives it.
+  if (!rawName.trim()) {
+    await db.update(autoChannels)
+      .set({ autoNameEnabled: true, nameTemplate: 'auto', manualName: null })
+      .where(eq(autoChannels.voiceChannelId, voiceChannelId))
+    const reverted = { ...record, autoNameEnabled: true, nameTemplate: 'auto', manualName: null }
+    await maybeRenameChannel(interaction.client, reverted)
+    await postOrUpdateControlPanel(interaction.client, reverted)
+    const msg = '✅ Auto-naming is back **on** (Smart) — the room will follow whatever game 2+ people are playing.'
+    if (interaction.isFromMessage()) {
+      await interaction.editReply({ content: msg, components: [] })
+    } else {
+      await interaction.editReply({ content: msg })
+    }
+    return
+  }
+
+  const newName = sanitizeChannelName(rawName)
 
   const [vc, tc] = await Promise.all([
     interaction.guild!.channels.fetch(record.voiceChannelId).catch(() => null),
