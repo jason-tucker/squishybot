@@ -408,7 +408,7 @@ function renderHubs() {
   } else {
     for (const h of hubs) {
       const def: string[] = []
-      if (h.defaultTemplateKey) def.push(`template \`${h.defaultTemplateKey}\``)
+      if (h.defaultTemplateKey) def.push(`auto-naming \`${h.defaultTemplateKey === 'auto' ? 'Smart' : h.defaultTemplateKey}\``)
       if (h.defaultManualName) def.push(`name \`${h.defaultManualName}\``)
       if (h.defaultUserLimit && h.defaultUserLimit > 0) def.push(`limit \`${h.defaultUserLimit}\``)
       const defaultsLine = def.length > 0 ? `  · defaults: ${def.join(', ')}` : ''
@@ -455,7 +455,7 @@ function renderHubs() {
       label: (h.label || h.channelId).slice(0, 100),
       value: h.channelId,
       emoji: '✏️',
-      description: 'Edit defaults: template, name, user limit'.slice(0, 100),
+      description: 'Edit defaults: auto-naming, name, user limit'.slice(0, 100),
     }))
     components.push(
       new ActionRowBuilder<MessageActionRowComponentBuilder>().addComponents(
@@ -2519,11 +2519,11 @@ export async function handleSettingsStringSelect(interaction: StringSelectMenuIn
         new ActionRowBuilder<TextInputBuilder>().addComponents(
           new TextInputBuilder()
             .setCustomId('template')
-            .setLabel('Template (blank = bot default)')
+            .setLabel('Auto-naming (blank = off, "auto" = Smart)')
             .setStyle(TextInputStyle.Short)
             .setRequired(false)
             .setMaxLength(20)
-            .setPlaceholder('auto, counter, squad, detail, state, party, stealth')
+            .setPlaceholder('auto = Smart (game name when 2+ play); blank = off')
             .setValue(hub.defaultTemplateKey ?? '')
         ),
         new ActionRowBuilder<TextInputBuilder>().addComponents(
@@ -2926,9 +2926,11 @@ export async function handleSettingsModalSubmit(interaction: ModalSubmitInteract
     const rawName     = interaction.fields.getTextInputValue('manual_name').trim()
     const rawLimit    = interaction.fields.getTextInputValue('user_limit').trim()
 
-    const ALLOWED_TEMPLATES = new Set(['auto', 'counter', 'squad', 'detail', 'state', 'party', 'stealth'])
+    // Smart auto-naming is the only mode now: 'auto' turns it on, blank leaves
+    // it off (the room keeps its created/manual name).
+    const ALLOWED_TEMPLATES = new Set(['auto'])
     if (rawTemplate && !ALLOWED_TEMPLATES.has(rawTemplate)) {
-      await interaction.reply({ content: `❌ Template must be one of: ${[...ALLOWED_TEMPLATES].join(', ')}. Got: \`${rawTemplate}\``, ephemeral: true })
+      await interaction.reply({ content: `❌ Auto-naming must be \`auto\` (Smart) or blank (off). Got: \`${rawTemplate}\``, ephemeral: true })
       return
     }
     let parsedLimit: number | null = null

@@ -5,12 +5,25 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
-## [0.10.0] — 2026-06-19
+## [0.11.0] — 2026-06-19
 
 ### Added
 - **Self-assign role board** — a dedicated channel where the bot posts one Components-V2 embed per role, each with a toggle button (members click to add/remove without an admin). Two entry kinds: a plain Discord **role** (one Add/Remove button) and a **game** (Channel-access + LFG-pings buttons, wired through `setPref` so it does everything `/games` does). Destination channel is `bot_settings.selfassign.channel_id`; entries live in the new `self_assign_entries` table. New service `src/services/selfAssign.ts` (in-memory cache + DB CRUD + post/edit/delete of the per-entry messages), button handler `src/interactions/buttons/selfAssign.ts` (`sar:*` customIds), and admin surfaces on both **`/sudo → Settings → Self-assign Roles`** and botpanel (`/squishy/self-assign-roles`).
 - **Command-bus verbs** `selfassign.add` / `selfassign.update` / `selfassign.remove` / `selfassign.reorder` / `selfassign.set_channel` / `selfassign.publish` (`src/services/rpc/handlers/selfAssign/`) so the panel manages the board over Redis.
 - **Migration** `0001_dizzy_komodo` — creates `self_assign_entries`.
+
+## [0.10.0] — 2026-06-19
+
+### Changed
+- **Voice control panel slimmed to two buttons** — the channel's top message now shows only **✏️ Rename** and **⚙️ Options**. Lock/Unlock, Hidden/Visible, Hosts, Claim, Delete and the new Auto Name control moved into an ephemeral **⚙️ Options** sub-panel (`buildOptionsPanelPayload`). Toggle buttons there re-render the Options panel in place while refreshing the public panel. The bottom **📋 Open Panel** sticky still opens a private copy.
+- **Naming simplified to Smart + Off + Randomize** — the old 8-template picker (`auto/counter/squad/detail/state/party/stealth/chill`) is gone. New **🏷️ Auto Name** sub-panel (`buildAutoNamePanelPayload`) offers: **Smart** (rename the room to whatever game **2+** members share — bare game name, no `(N)` prefix), **Off** (freeze the current name), and a one-shot **🎲 Randomize** button (drops a random tech name and freezes it).
+- **Manual rename now sticks permanently** — a custom name set via **Rename** is frozen (`auto_name_enabled=false`) and never reverts, regardless of what anyone plays.
+- **Blank rename reverts to Smart** — clearing the Rename box (now optional/blank-allowed) turns auto-naming back on and immediately re-derives the name.
+- **`computeAutoName`** signature reduced to `(vc, ownerId)` and only returns a game name when **2+** members share it (else `null` → fallback). `autoRename` now gates purely on `auto_name_enabled`.
+- **Hub default "template"** field accepts only `auto` (Smart) or blank (off); the `/sudo → Settings → Hub Channels` defaults editor wording updated to match.
+
+### Removed
+- `src/interactions/selects/voiceTemplate.ts` and the `vc:*:template_apply` select route; `NameTemplate`, `TEMPLATE_LABELS`, `ALL_TEMPLATES` exports from `autoNaming.ts`. Legacy `vc:*:templates` buttons on older in-flight panels now open the new Auto Name sub-panel.
 
 ## [0.9.0] — 2026-06-14
 

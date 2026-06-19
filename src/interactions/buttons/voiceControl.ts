@@ -8,9 +8,6 @@ import {
   TextInputBuilder,
   TextInputStyle,
   StringSelectMenuBuilder,
-  ContainerBuilder,
-  TextDisplayBuilder,
-  MessageFlags,
 } from 'discord.js'
 import { decodeVcId } from '../../utils/customId'
 import { db } from '../../db/client'
@@ -18,8 +15,11 @@ import { autoChannels } from '../../db/schema'
 import { and, eq, sql } from 'drizzle-orm'
 import { canControlChannel, isOwner, isSudo } from '../../services/voice/permissions'
 import { postOrUpdateControlPanel, buildPanelPayloadForRecord } from '../../services/voice/controlPanel'
+import { buildOptionsPanelPayload, buildAutoNamePanelPayload } from '../../embeds/voiceControlPanel'
+import { maybeRenameChannel } from '../../services/voice/autoRename'
+import { decorateChannelName } from '../../services/voice/autoNaming'
+import { randomTechName } from '../../utils/randomName'
 import { deleteAutoChannel } from '../../services/voice/autoChannel'
-import { sep } from '../../utils/cv2'
 import { env } from '../../config/env'
 import {
   publish,
@@ -87,6 +87,69 @@ export async function handleVoiceControlButton(interaction: ButtonInteraction): 
     return
   }
 
+  if (action === 'options') {
+    if (!await requireControl(interaction, member, record)) return
+    await interaction.reply({ ...buildOptionsPanelPayload(record), ephemeral: true } as any)
+    return
+  }
+
+  // 'auto_name' is the current entry point; 'templates' is the legacy button on
+  // older in-flight panels — both open the Auto Name sub-panel.
+  if (action === 'auto_name' || action === 'templates') {
+    if (!await requireControl(interaction, member, record)) return
+    await interaction.reply({ ...buildAutoNamePanelPayload(record), ephemeral: true } as any)
+    return
+  }
+
+  if (action === 'auto_on') {
+    if (!await requireControl(interaction, member, record)) return
+    await db.update(autoChannels)
+      .set({ autoNameEnabled: true, nameTemplate: 'auto', manualName: null })
+      .where(eq(autoChannels.voiceChannelId, voiceChannelId))
+    const updated = { ...record, autoNameEnabled: true, nameTemplate: 'auto', manualName: null }
+    await interaction.update({ ...buildAutoNamePanelPayload(updated), content: null } as any).catch(() => {})
+    // Apply the smart name right away (no-op unless 2+ share a game; honours the
+    // per-channel rename cooldown internally).
+    await maybeRenameChannel(interaction.client, updated)
+    await postOrUpdateControlPanel(interaction.client, updated)
+    return
+  }
+
+  if (action === 'auto_off') {
+    if (!await requireControl(interaction, member, record)) return
+    await db.update(autoChannels)
+      .set({ autoNameEnabled: false })
+      .where(eq(autoChannels.voiceChannelId, voiceChannelId))
+    const updated = { ...record, autoNameEnabled: false }
+    await interaction.update({ ...buildAutoNamePanelPayload(updated), content: null } as any).catch(() => {})
+    await postOrUpdateControlPanel(interaction.client, updated)
+    return
+  }
+
+  if (action === 'randomize') {
+    if (!await requireControl(interaction, member, record)) return
+    const guild = interaction.guild!
+    const vc = await guild.channels.fetch(record.voiceChannelId).catch(() => null)
+    const baseName = randomTechName()
+    const finalName = vc?.isVoiceBased() ? decorateChannelName(guild, baseName, vc.id) : baseName
+    if (vc?.isVoiceBased()) {
+      await vc.setName(finalName).catch(() => {})
+      const tc = await guild.channels.fetch(record.textChannelId).catch(() => null)
+      if (tc?.isTextBased()) {
+        const textName = finalName.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'voice-chat'
+        await (tc as any).setName(textName).catch(() => {})
+      }
+    }
+    // Freeze it: a randomized name behaves like a manual rename (auto-naming off).
+    await db.update(autoChannels)
+      .set({ manualName: baseName, autoNameEnabled: false, nameTemplate: null, fallbackName: baseName })
+      .where(eq(autoChannels.voiceChannelId, voiceChannelId))
+    const updated = { ...record, manualName: baseName, autoNameEnabled: false, nameTemplate: null, fallbackName: baseName }
+    await interaction.update({ ...buildAutoNamePanelPayload(updated), content: null } as any).catch(() => {})
+    await postOrUpdateControlPanel(interaction.client, updated)
+    return
+  }
+
   if (action === 'delete') {
     if (!await requireOwnerOrSudo(interaction, member, record, '❌ Only the original host (or a sudo) can delete this channel.')) return
     const row = new ActionRowBuilder<ButtonBuilder>().addComponents(
@@ -120,11 +183,11 @@ export async function handleVoiceControlButton(interaction: ButtonInteraction): 
         new ActionRowBuilder<TextInputBuilder>().addComponents(
           new TextInputBuilder()
             .setCustomId('new_name')
-            .setLabel('New channel name')
+            .setLabel('New name (leave blank for auto-naming)')
+            .setPlaceholder('Type a name to lock it in, or clear this to go back to Smart')
             .setStyle(TextInputStyle.Short)
-            .setMinLength(1)
             .setMaxLength(100)
-            .setRequired(true)
+            .setRequired(false)
         )
       )
     await interaction.showModal(modal)
@@ -151,15 +214,10 @@ export async function handleVoiceControlButton(interaction: ButtonInteraction): 
       voiceChannelId, isLocked, ts: new Date().toISOString(),
     })
 
-    // Update the clicked panel directly via interaction.update so the button
-    // changes immediately even if the user is clicking on a duplicate/stale panel
-    const payload = await buildPanelPayloadForRecord(interaction.client, updated)
-    await interaction.update({ ...payload, content: null } as any).catch(() => {})
-
-    // Also sync the tracked panel if it's a different message (duplicate panels case)
-    if (interaction.message.id !== record.controlPanelMsgId) {
-      await postOrUpdateControlPanel(interaction.client, updated)
-    }
+    // This toggle lives on the ephemeral ⚙️ Options panel — re-render it in
+    // place so the button flips immediately, then refresh the public panel.
+    await interaction.update({ ...buildOptionsPanelPayload(updated), content: null } as any).catch(() => {})
+    await postOrUpdateControlPanel(interaction.client, updated)
     return
   }
 
@@ -201,12 +259,8 @@ export async function handleVoiceControlButton(interaction: ButtonInteraction): 
       voiceChannelId, isHidden, ts: new Date().toISOString(),
     })
 
-    const payload = await buildPanelPayloadForRecord(interaction.client, updated)
-    await interaction.update({ ...payload, content: null } as any).catch(() => {})
-
-    if (interaction.message.id !== record.controlPanelMsgId) {
-      await postOrUpdateControlPanel(interaction.client, updated)
-    }
+    await interaction.update({ ...buildOptionsPanelPayload(updated), content: null } as any).catch(() => {})
+    await postOrUpdateControlPanel(interaction.client, updated)
     return
   }
 
@@ -269,44 +323,6 @@ export async function handleVoiceControlButton(interaction: ButtonInteraction): 
     return
   }
 
-  if (action === 'templates') {
-    if (!await requireControl(interaction, member, record)) return
-
-    const { ALL_TEMPLATES, TEMPLATE_LABELS } = await import('../../services/voice/autoNaming')
-
-    const header = new ContainerBuilder()
-      .addTextDisplayComponents(
-        new TextDisplayBuilder().setContent(
-          '### 📋 Naming Templates\n_All templates are **naming only** — none of them touch the channel\'s user limit. ' +
-          'Set a user limit yourself via Discord\'s channel settings if you want one._'
-        )
-      )
-      .addSeparatorComponents(sep())
-
-    const presenceOptions = ALL_TEMPLATES.map(t => ({
-      label: `${TEMPLATE_LABELS[t].emoji} ${TEMPLATE_LABELS[t].label}`,
-      value: t,
-      description: TEMPLATE_LABELS[t].description.slice(0, 100),
-    }))
-
-    const row = new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(
-      new StringSelectMenuBuilder()
-        .setCustomId(`vc:${voiceChannelId}:template_apply`)
-        .setPlaceholder('Choose a naming template…')
-        .addOptions([
-          ...presenceOptions,
-          { label: '💬 Chill', value: 'chill', description: 'Fixed name "{member}\'s Chill Session" — turns auto-rename off' },
-        ])
-    )
-
-    await interaction.reply({
-      flags: MessageFlags.IsComponentsV2 as number,
-      components: [header, row],
-      ephemeral: true,
-    } as any)
-    return
-  }
-
   if (action === 'claim') {
     const vc = await interaction.guild!.channels.fetch(record.voiceChannelId).catch(() => null)
     if (!vc?.isVoiceBased()) {
@@ -365,12 +381,10 @@ export async function handleVoiceControlButton(interaction: ButtonInteraction): 
       await vc.permissionOverwrites.edit(member.id, { ViewChannel: true }).catch(() => {})
     }
 
-    const payload = await buildPanelPayloadForRecord(interaction.client, updated)
-    await interaction.update({ ...payload, content: null } as any).catch(() => {})
-
-    if (interaction.message.id !== record.controlPanelMsgId) {
-      await postOrUpdateControlPanel(interaction.client, updated)
-    }
+    // Claim lives on the ⚙️ Options panel — re-render it, then refresh the
+    // public panel so the new owner shows everywhere.
+    await interaction.update({ ...buildOptionsPanelPayload(updated), content: null } as any).catch(() => {})
+    await postOrUpdateControlPanel(interaction.client, updated)
     return
   }
 }
