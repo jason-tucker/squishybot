@@ -6,6 +6,7 @@ import { initPresence, refreshPresence } from '../../services/presence'
 import { env } from '../../config/env'
 import { loadSettings } from '../../services/settings'
 import { loadGames } from '../../services/games'
+import { loadSelfAssign } from '../../services/selfAssign'
 import { loadSocialFeeds } from '../../services/socialFeeds'
 import { startSocialPoller } from '../../services/social/poller'
 import { startBirthdayScheduler } from '../../services/birthdayScheduler'
@@ -56,6 +57,8 @@ import '../../services/rpc/handlers/color'
 // scheduled_post.send / .cancel verbs — panel "Send now" + live-post retract.
 import '../../services/rpc/handlers/scheduledPosts/send'
 import '../../services/rpc/handlers/scheduledPosts/cancel'
+// Self-assign board verbs (add / update / remove / reorder / set_channel / publish).
+import '../../services/rpc/handlers/selfAssign'
 
 const SUPPRESS_NOTIFICATIONS = 1 << 12  // MessageFlags.SuppressNotifications
 
@@ -84,6 +87,7 @@ export function registerReadyEvent(client: Client) {
       loadGames().catch(err => logger.error('Failed to load games on startup', err)),
       loadSocialFeeds().catch(err => logger.error('Failed to load social feeds on startup', err)),
       logResolvedBotOwners(c).catch(err => logger.warn('Bot-owner resolution failed on startup', err)),
+      loadSelfAssign().catch(err => logger.error('Failed to load self-assign board on startup', err)),
     ])
     startBirthdayScheduler(c)
     startSocialPoller(c)

@@ -224,6 +224,7 @@ The "Request a Staff Role" button (on `/settings → Staff Role`) goes through a
 | `scheduled_posts` | Generic scheduled/on-demand CV2 posts (`kind` discriminator; first consumer: `game_night`). Carries portable `spec` JSON, `variables`, `fire_at`, status, persisted RSVP/ownership maps. |
 | `auto_join_roles` | Roles auto-granted to every new member on `guildMemberAdd`. Feature-flagged (`feature.auto_role_on_join`, default OFF). |
 | `color_roles` | Curated list of color-only roles for `/color`. Feature-flagged (`feature.color_roles`, default OFF). |
+| `self_assign_entries` | Self-assign role board — one embed-per-entry (a Discord role, or a game with channel-access + ping toggles) posted into `selfassign.channel_id` with toggle buttons. Managed via `/sudo → Settings → Self-assign Roles` and botpanel `/squishy/self-assign-roles`. |
 | `archive_eligible_categories` | Discord categories opted into the channel-archive workflow via `/sudo → Archive` |
 | `archived_channels` | Channels currently in the archived state (original name + category + timestamp for unarchive) |
 
@@ -262,6 +263,8 @@ Other customId families:
 - `settings:staff_role:*` — staff-role self-service in `/settings`: `settings:staff_role`, `settings:staff_role:add:`, `settings:staff_role:remove:`
 - `color:pick` — color role string-select
 - `play:*` — LFG ping interactions: `play:join:`, `play:cancel:`, `play:help:`, `play:notify:`
+- `sar:*` — self-assign role board (public buttons in the configured channel): `sar:role:{roleId}` (toggle a plain role), `sar:gview:{gameId}` / `sar:gping:{gameId}` (toggle a game's channel access / LFG pings)
+- `sudo:set:selfassign:*` — self-assign board admin (`/sudo → Settings → Self-assign Roles`): `channel`, `add_role`, `add_game`, `remove`, `publish`
 
 ---
 
@@ -282,6 +285,7 @@ Other customId families:
 | `src/services/cacheInvalidator.ts` | Subscribes to `cmd.squishy.cache.invalidate` and refreshes in-memory caches (bot settings, reaction roles, etc.) |
 | `src/services/scheduledPosts/` | `scheduler.ts` (15s tick, status-claim), `gameNight.ts` (RSVP/ownership context builder), `service.ts` (post/cancel helpers) |
 | `src/services/msgspec/` | Portable MessageSpec JSON renderer — `render.ts` converts spec JSON to discord.js CV2 builders with `{{variable}}` substitution and `<t:UNIX:style>` timestamp support |
+| `src/services/selfAssign.ts` | Self-assign role board — in-memory cache, DB CRUD, and posting/editing/deleting the per-entry toggle-button embeds in the configured channel (`sar:*` button family) |
 
 ---
 
@@ -335,7 +339,7 @@ The bot exposes most flows as RPC verbs over a Redis command bus:
 - **Cache invalidation** → `cmd.squishy.cache.invalidate` — panel triggers; `src/services/cacheInvalidator.ts` refreshes in-memory caches.
 - **Schema sync** → when a push to `main` touches `src/db/schema/**`, `.github/workflows/notify-panel-schema-change.yml` fires a `repository_dispatch` at `jason-tucker/botpanel` so the panel re-vendors the Drizzle schemas automatically.
 
-RPC verb handlers live under `src/services/rpc/handlers/` (organized by domain: `voice/`, `games/`, `staff/`, `scheduledPosts/`, `rxnroles/`, `admin/`, `discord/`, `hubs/`, and top-level verbs).
+RPC verb handlers live under `src/services/rpc/handlers/` (organized by domain: `voice/`, `games/`, `staff/`, `scheduledPosts/`, `rxnroles/`, `selfAssign/`, `admin/`, `discord/`, `hubs/`, and top-level verbs).
 
 Both `REDIS_URL` and `BOTPANEL_RPC_SECRET` are optional — with either unset the bot runs standalone with no RPC or event bus.
 

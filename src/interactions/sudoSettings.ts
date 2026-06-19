@@ -60,6 +60,20 @@ import {
   unregisterHubChannel,
 } from '../services/settings'
 import { STAFF_ROLE_DEFS } from '../services/staffRoles'
+import {
+  addEntry as selfAssignAddEntry,
+  deleteEntryMessage as selfAssignDeleteMessage,
+  findEntryByRef,
+  getChannelId as selfAssignGetChannelId,
+  getEntry as selfAssignGetEntry,
+  listEntries as selfAssignListEntries,
+  postOrUpdateEntry as selfAssignPostOrUpdate,
+  publishBoard as selfAssignPublishBoard,
+  removeEntry as selfAssignRemoveEntry,
+  setChannelId as selfAssignSetChannelId,
+} from '../services/selfAssign'
+import { getGame, listGames } from '../services/games'
+import { checkAssignableRole } from '../utils/roleGuard'
 
 // ---------------------------------------------------------------------------
 // Setting key registry — adding a new setting is mostly just adding a row here
@@ -192,6 +206,7 @@ function renderHome() {
   )
   const row5 = new ActionRowBuilder<MessageActionRowComponentBuilder>().addComponents(
     new ButtonBuilder().setCustomId('sudo:set:nav:game_defaults').setLabel('Game Defaults').setEmoji('🎮').setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder().setCustomId('sudo:set:nav:selfassign').setLabel('Self-assign Roles').setEmoji('🎟️').setStyle(ButtonStyle.Secondary),
   )
   const navRow = new ActionRowBuilder<MessageActionRowComponentBuilder>().addComponents(
     new ButtonBuilder().setCustomId('sudo:home').setLabel('Back to /sudo').setEmoji('🏠').setStyle(ButtonStyle.Secondary),
@@ -888,6 +903,119 @@ async function renderReactionRoles() {
       new ButtonBuilder().setCustomId('sudo:set:home').setLabel('Back').setStyle(ButtonStyle.Secondary),
     ),
   )
+  return { flags: MessageFlags.IsComponentsV2 as number, components }
+}
+
+async function renderSelfAssign(guild: Guild) {
+  const channelId = selfAssignGetChannelId()
+  const entries = selfAssignListEntries()
+
+  const lines: string[] = [
+    '### 🎟️ Self-assign Roles',
+    '_Post one embed per role into a channel; members toggle roles via buttons._\n',
+    `**Board channel:** ${channelId ? `<#${channelId}>` : '_not set — pick one below_'}`,
+    '',
+    `**Entries (${entries.length}):**`,
+  ]
+  if (entries.length === 0) {
+    lines.push('_No roles added yet._')
+  } else {
+    for (const e of entries) {
+      let displayName: string
+      if (e.kind === 'role') {
+        displayName = guild.roles.cache.get(e.refId)?.name ?? e.label ?? e.refId
+      } else {
+        displayName = getGame(e.refId)?.name ?? e.label ?? e.refId
+      }
+      const kindIcon = e.kind === 'role' ? '🎭' : '🎮'
+      const markers: string[] = []
+      if (!e.enabled) markers.push('disabled')
+      if (e.postedMessageId) markers.push('📭 posted')
+      const markerStr = markers.length > 0 ? ` · ${markers.join(' · ')}` : ''
+      lines.push(`• ${kindIcon} **${displayName}**${markerStr}`)
+    }
+  }
+
+  const container = new ContainerBuilder()
+    .setAccentColor(0x9b59b6)
+    .addTextDisplayComponents(new TextDisplayBuilder().setContent(lines.join('\n')))
+
+  const components: any[] = [container]
+
+  // Row 1 — channel select (always present)
+  components.push(
+    new ActionRowBuilder<MessageActionRowComponentBuilder>().addComponents(
+      new ChannelSelectMenuBuilder()
+        .setCustomId('sudo:set:selfassign:channel')
+        .setPlaceholder('Set board channel…')
+        .setChannelTypes([ChannelType.GuildText])
+        .setMinValues(0).setMaxValues(1),
+    ),
+  )
+
+  // Row 2 — role select (always present)
+  const { RoleSelectMenuBuilder } = await import('discord.js')
+  components.push(
+    new ActionRowBuilder<MessageActionRowComponentBuilder>().addComponents(
+      new RoleSelectMenuBuilder()
+        .setCustomId('sudo:set:selfassign:add_role')
+        .setPlaceholder('Add a role…')
+        .setMinValues(0).setMaxValues(1),
+    ),
+  )
+
+  // Row 3 — game select (only when there are addable games)
+  const addableGames = listGames().filter(g => !findEntryByRef('game', g.id))
+  if (addableGames.length > 0) {
+    components.push(
+      new ActionRowBuilder<MessageActionRowComponentBuilder>().addComponents(
+        new StringSelectMenuBuilder()
+          .setCustomId('sudo:set:selfassign:add_game')
+          .setPlaceholder('Add a game…')
+          .setMinValues(1).setMaxValues(1)
+          .addOptions(addableGames.slice(0, 25).map(g => ({
+            label: g.name.slice(0, 100),
+            value: g.id,
+            emoji: '🎮',
+          }))),
+      ),
+    )
+  }
+
+  // Row 4 — remove select (only when there are entries)
+  if (entries.length > 0) {
+    components.push(
+      new ActionRowBuilder<MessageActionRowComponentBuilder>().addComponents(
+        new StringSelectMenuBuilder()
+          .setCustomId('sudo:set:selfassign:remove')
+          .setPlaceholder('Remove an entry…')
+          .setMinValues(1).setMaxValues(1)
+          .addOptions(entries.slice(0, 25).map(e => {
+            let displayName: string
+            if (e.kind === 'role') {
+              displayName = guild.roles.cache.get(e.refId)?.name ?? e.label ?? e.refId
+            } else {
+              displayName = getGame(e.refId)?.name ?? e.label ?? e.refId
+            }
+            return {
+              label: displayName.slice(0, 100),
+              value: e.id,
+              emoji: e.kind === 'role' ? '🎭' : '🎮',
+              description: e.kind,
+            }
+          })),
+      ),
+    )
+  }
+
+  // Final row — action buttons (always the last row)
+  components.push(
+    new ActionRowBuilder<MessageActionRowComponentBuilder>().addComponents(
+      new ButtonBuilder().setCustomId('sudo:set:selfassign:publish').setLabel('Publish / Refresh').setEmoji('📤').setStyle(ButtonStyle.Primary),
+      new ButtonBuilder().setCustomId('sudo:set:home').setLabel('Back').setStyle(ButtonStyle.Secondary),
+    ),
+  )
+
   return { flags: MessageFlags.IsComponentsV2 as number, components }
 }
 
@@ -1848,6 +1976,8 @@ export async function handleSettingsButton(interaction: ButtonInteraction): Prom
     } else if (category === 'game_defaults') {
       const { renderGameDefaultsPanel } = await import('./gamesEditor')
       await interaction.editReply((await renderGameDefaultsPanel(interaction.guild!)) as any)
+    } else if (category === 'selfassign') {
+      await interaction.editReply((await renderSelfAssign(interaction.guild!)) as any)
     } else {
       await interaction.followUp({ content: `Unknown category: ${category}`, flags: MessageFlags.Ephemeral })
     }
@@ -2152,6 +2282,13 @@ export async function handleSettingsButton(interaction: ButtonInteraction): Prom
     return
   }
 
+  // sudo:set:selfassign:publish — wipe + repost all enabled entries in board channel
+  if (id === 'sudo:set:selfassign:publish') {
+    await selfAssignPublishBoard(interaction.client, interaction.guildId!)
+    await interaction.editReply((await renderSelfAssign(interaction.guild!)) as any)
+    return
+  }
+
   // sudo:set:reset:{key}  — clear a numeric or voice-side setting override
   if (id.startsWith('sudo:set:reset:')) {
     const key = id.slice('sudo:set:reset:'.length)
@@ -2245,6 +2382,18 @@ export async function handleSettingsChannelSelect(interaction: ChannelSelectMenu
     return
   }
 
+  if (id === 'sudo:set:selfassign:channel') {
+    // Defer first: publishBoard posts/deletes several messages and can run past
+    // the 3s interaction window. Always re-publish — clearing the channel
+    // (min 0) tears the board down via publishBoard's no-channel path.
+    await interaction.deferUpdate()
+    const channelId = interaction.values[0] ?? null
+    await selfAssignSetChannelId(channelId, interaction.user.id)
+    await selfAssignPublishBoard(interaction.client, interaction.guild!.id)
+    await interaction.editReply((await renderSelfAssign(interaction.guild!)) as any)
+    return
+  }
+
   const key = id.slice('sudo:set:channel:'.length)
   const def = CHANNEL_SETTINGS.find(d => d.key === key) ?? (key === VOICE_CATEGORY_SETTING.key ? VOICE_CATEGORY_SETTING : null)
   if (!def) {
@@ -2268,9 +2417,13 @@ export async function handleSettingsRoleSelect(interaction: import('discord.js')
   const id = interaction.customId
   const roleId = interaction.values[0]
   if (!roleId) {
-    await interaction.update(id === 'sudo:set:auto_role:add'
-      ? (await renderAutoRoles(interaction.guildId!)) as any
-      : (await renderColorRoles(interaction.guildId!)) as any)
+    if (id === 'sudo:set:auto_role:add') {
+      await interaction.update((await renderAutoRoles(interaction.guildId!)) as any)
+    } else if (id === 'sudo:set:selfassign:add_role') {
+      await interaction.update((await renderSelfAssign(interaction.guild!)) as any)
+    } else {
+      await interaction.update((await renderColorRoles(interaction.guildId!)) as any)
+    }
     return
   }
   const { db } = await import('../db/client')
@@ -2286,6 +2439,29 @@ export async function handleSettingsRoleSelect(interaction: import('discord.js')
     const { colorRoles } = await import('../db/schema')
     await db.insert(colorRoles).values({ roleId, guildId: interaction.guildId!, label }).onConflictDoNothing()
     await interaction.update((await renderColorRoles(interaction.guildId!)) as any)
+    return
+  }
+  if (id === 'sudo:set:selfassign:add_role') {
+    const guild = interaction.guild!
+    const verdict = checkAssignableRole(guild, roleId)
+    if (!verdict.ok) {
+      const reasons: Record<string, string> = {
+        everyone: 'cannot assign @everyone',
+        'not-found': 'role not found in this guild',
+        managed: 'managed/integration roles cannot be assigned',
+        privileged: 'that role carries privileged permissions',
+        'above-bot': 'that role is at or above the bot\'s highest role',
+      }
+      await interaction.update((await renderSelfAssign(guild)) as any)
+      await interaction.followUp({ content: `❌ Cannot add role: ${reasons[verdict.reason] ?? verdict.reason}`, flags: MessageFlags.Ephemeral })
+      return
+    }
+    if (!findEntryByRef('role', roleId)) {
+      const entry = await selfAssignAddEntry({ kind: 'role', refId: roleId, byUserId: interaction.user.id })
+      const ch = selfAssignGetChannelId()
+      if (ch) await selfAssignPostOrUpdate(interaction.client, guild, ch, entry)
+    }
+    await interaction.update((await renderSelfAssign(guild)) as any)
     return
   }
 }
@@ -2530,6 +2706,28 @@ export async function handleSettingsStringSelect(interaction: StringSelectMenuIn
     await interaction.editReply((await renderArchive(interaction.client, interaction.guildId!)) as any)
     const summary = `Archived **${ok}**${fail.length > 0 ? ` · Failed **${fail.length}**:\n` + fail.map(f => `<#${f.id}> — ${f.reason}`).join('\n') : ''}`
     await interaction.followUp({ content: summary, flags: MessageFlags.Ephemeral })
+    return
+  }
+  if (id === 'sudo:set:selfassign:add_game') {
+    const gameId = interaction.values[0]
+    if (gameId) {
+      if (!findEntryByRef('game', gameId)) {
+        const entry = await selfAssignAddEntry({ kind: 'game', refId: gameId, byUserId: interaction.user.id })
+        const ch = selfAssignGetChannelId()
+        if (ch) await selfAssignPostOrUpdate(interaction.client, interaction.guild!, ch, entry)
+      }
+    }
+    await interaction.update((await renderSelfAssign(interaction.guild!)) as any)
+    return
+  }
+  if (id === 'sudo:set:selfassign:remove') {
+    const entryId = interaction.values[0]
+    if (entryId) {
+      const existing = selfAssignGetEntry(entryId)
+      if (existing) await selfAssignDeleteMessage(interaction.client, existing)
+      await selfAssignRemoveEntry(entryId)
+    }
+    await interaction.update((await renderSelfAssign(interaction.guild!)) as any)
     return
   }
 }
