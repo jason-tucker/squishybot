@@ -118,46 +118,26 @@ function explainName(
   liveChannelName: string,
 ): { currentName: string; reason: string } {
   if (!record.autoNameEnabled) {
-    return { currentName: liveChannelName, reason: 'Auto-rename **off** — name was set manually or by a fixed template.' }
+    return { currentName: liveChannelName, reason: 'Auto-naming is **off** — this name is frozen (set via Rename or 🎲 Randomize). Rename to blank to hand control back to Smart.' }
   }
-  const template = record.nameTemplate ?? 'auto'
-  if (template === 'chill') {
-    return { currentName: liveChannelName, reason: 'Chill template — fixed name, auto-rename disabled.' }
-  }
-  const playing = members.filter(m => m.game)
-  if (playing.length === 0) {
-    return {
-      currentName: liveChannelName,
-      reason: `Nobody is playing anything → falling back to **${record.fallbackName ?? '(unset)'}**.`,
-    }
-  }
-  // Top game (owner wins ties).
+  // Smart auto-naming: name the room after whatever game 2+ members share.
   const counts = new Map<string, number>()
-  for (const m of playing) counts.set(m.game!, (counts.get(m.game!) ?? 0) + 1)
-  const ownerGame = playing.find(m => m.userId === record.ownerUserId)?.game ?? null
+  for (const m of members) if (m.game) counts.set(m.game, (counts.get(m.game) ?? 0) + 1)
+  const ownerGame = members.find(m => m.userId === record.ownerUserId)?.game ?? null
   let top: string | null = null
   let topCount = 0
   for (const [g, c] of counts) {
     if (c > topCount || (c === topCount && g === ownerGame)) { top = g; topCount = c }
   }
-  if (!top) {
-    return { currentName: liveChannelName, reason: `Template \`${template}\` — no winner from presence; using fallback **${record.fallbackName ?? '(unset)'}**.` }
-  }
-  const memberCount = members.length
-  let templateDetail = ''
-  switch (template) {
-    case 'auto':    templateDetail = topCount > 1 ? `prefixes with \`(${topCount})\` since 2+ are playing` : 'just the game name (only 1 player)'; break
-    case 'counter': templateDetail = `appends \`[${memberCount}]\` (channel member count)`; break
-    case 'squad':   templateDetail = memberCount > 1 ? `appends \`· ${memberCount} squad\`` : 'just the game name (only 1 member)'; break
-    case 'detail':  templateDetail = 'appends rich-presence `details` (if present)'; break
-    case 'state':   templateDetail = 'appends rich-presence `state` (if present)'; break
-    case 'party':   templateDetail = 'appends `(X/Y party)` when rich presence reports a party'; break
-    case 'stealth': templateDetail = 'just the game name, no decoration'; break
-    default:        templateDetail = '_(unknown template)_'
+  if (top && topCount >= 2) {
+    return {
+      currentName: liveChannelName,
+      reason: `🏷️ Smart auto-naming — **${topCount}** people playing **${top}**, so the room is named after it.`,
+    }
   }
   return {
     currentName: liveChannelName,
-    reason: `Template \`${template}\` · **${topCount}/${memberCount}** playing **${top}** wins. ${templateDetail}.`,
+    reason: `🏷️ Smart auto-naming **on** — waiting for **2+** people on the same game. Until then it stays **${record.fallbackName ?? liveChannelName}**.`,
   }
 }
 

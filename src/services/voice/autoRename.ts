@@ -16,16 +16,11 @@ import { autoChannels } from '../../db/schema'
 import { eq } from 'drizzle-orm'
 import type { AutoChannelRecord } from '../../types/voice'
 import { logger } from '../logger'
-import { computeAutoName, decorateChannelName, ALL_TEMPLATES } from './autoNaming'
+import { computeAutoName, decorateChannelName } from './autoNaming'
 
 const RENAME_COOLDOWN_MS = 10 * 60 * 1000
 const lastRename = new Map<string, number>()
 const pendingRetries = new Map<string, NodeJS.Timeout>()
-
-// Set of template keys that drive renames from presence. Everything else
-// (e.g. legacy 'tryhard', 'chill', or anything we don't recognize) is treated
-// as manual mode and skipped — auto_name_enabled also gates this layer.
-const PRESENCE_TEMPLATES = new Set<string | null>([null, ...ALL_TEMPLATES])
 
 export function clearRenameState(voiceChannelId: string): void {
   lastRename.delete(voiceChannelId)
@@ -56,8 +51,9 @@ export async function maybeRenameChannel(
   }
   if (!record) return
   const voiceChannelId = record.voiceChannelId
+  // Smart auto-naming runs only while it's enabled. A manual rename or the
+  // Randomize button sets auto_name_enabled=false, which freezes the name.
   if (!record.autoNameEnabled) return
-  if (!PRESENCE_TEMPLATES.has(record.nameTemplate)) return
 
   const guild = client.guilds.cache.get(record.guildId)
   if (!guild) return
@@ -65,7 +61,7 @@ export async function maybeRenameChannel(
     ?? await guild.channels.fetch(voiceChannelId).catch(() => null)
   if (!vc?.isVoiceBased()) return
 
-  const computed = computeAutoName(vc, record.ownerUserId, record.nameTemplate)
+  const computed = computeAutoName(vc, record.ownerUserId)
   const base = computed ?? record.fallbackName
   if (!base) return
   // Append a trailing emoji and dodge any collision with another channel name.

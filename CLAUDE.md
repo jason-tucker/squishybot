@@ -97,13 +97,21 @@ chat scrolls; clicking it gives you an ephemeral copy of the panel.
 
 ### Voice control panel buttons
 
+The public panel (the channel's top message) is deliberately **two buttons only** — everything else lives behind ⚙️ Options to keep it clean. The bottom silent **📋 Open Panel** sticky (`open_panel`) remains the way to (re)open a private ephemeral copy when chat buries the panel.
+
 | Button | What it does |
 |---|---|
-| ✏️ **Rename** | Modal to set a custom name |
+| ✏️ **Rename** | Modal to set a custom name. A typed name **freezes** (`auto_name_enabled=false`) and never reverts. Leaving the box **blank** flips auto-naming back **on** (Smart) and re-derives the name. |
+| ⚙️ **Options** | Opens an ephemeral sub-panel (`buildOptionsPanelPayload`) holding everything below. Its toggle buttons re-render the Options panel in place and refresh the public panel. |
+
+**Inside ⚙️ Options:**
+
+| Button | What it does |
+|---|---|
 | 🔒 **Locked** / 🔓 **Unlocked** | Toggle Connect permission on `@everyone` (label shows current state) |
 | 🙈 **Hidden** / 👁️ **Visible** | Toggle `ViewChannel` on `@everyone` (label shows current state) |
 | 👑 **Hosts** | One panel listing each member with their current rank emoji (👑 host · 🛡️ sudo · 👤 member). Clicking toggles host status. |
-| 📋 **Templates** | Naming-only. Auto (default `(N) Game`) / Counter `Game [N]` / Squad `Game · N squad` / Detail `Game — {details}` / State `Game — {state}` / Party `Game (X/Y party)` / Stealth (bare) / Chill (fixed `{member}'s Chill Session`, disables auto-rename). **No template ever touches user limit** — set it in Discord's channel settings if you want one. |
+| 🏷️ **Auto Name** | Opens the Auto Name sub-panel (`buildAutoNamePanelPayload`): **Smart** (rename the room to whatever game **2+** members share — bare game name, no `(N)` prefix) / **Off** (freeze the name) / one-shot **🎲 Randomize** (random tech name, frozen). **Never touches user limit.** |
 | 👤 **Claim** | Take ownership when the owner has left |
 | 🗑️ **Delete** | Delete the voice + text channels right away |
 
@@ -225,7 +233,9 @@ The "Request a Staff Role" button (on `/settings → Staff Role`) goes through a
 
 All voice control interactions use: `vc:{voiceChannelId}:{action}`
 
-Actions: `delete`, `delete_confirm`, `rename`, `rename_submit`, `lock`, `unlock`, `hide`, `show`, `hosts` (button + select), `claim`, `templates`, `template_apply` (select), `open_panel` (sticky button)
+Actions: `delete`, `delete_confirm`, `rename` (button + modal), `lock`, `unlock`, `hide`, `show`, `hosts` (button + select), `claim`, `open_panel` (sticky button), `options` (open ⚙️ Options sub-panel), `auto_name` (open 🏷️ Auto Name sub-panel), `auto_on` / `auto_off` (toggle Smart auto-naming), `randomize` (random frozen name)
+
+Legacy/removed: `templates` (now aliases to `auto_name`) and `template_apply` (the old naming-template select — removed; `voiceTemplate.ts` deleted).
 
 `/report` uses three customIds (no vc prefix):
 - `report:submit` — modal submission

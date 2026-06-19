@@ -195,10 +195,9 @@ export function registerInteractionCreate(client: Client) {
 
       } else if (interaction.isStringSelectMenu()) {
         const id = interaction.customId
-        if (isVcCustomId(id) && id.endsWith(':template_apply')) {
-          const { handleVoiceTemplateSelect } = await import('../../interactions/selects/voiceTemplate')
-          await handleVoiceTemplateSelect(interaction as StringSelectMenuInteraction)
-        } else if (isVcCustomId(id)) {
+        if (isVcCustomId(id)) {
+          // All vc:* selects route here (currently just the Hosts picker; the
+          // legacy template_apply select was removed with the templates redesign).
           const { handleVoiceControlSelect } = await import('../../interactions/selects/voiceControl')
           await handleVoiceControlSelect(interaction as StringSelectMenuInteraction)
         } else if (id === 'sudo:action') {
