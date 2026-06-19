@@ -97,12 +97,11 @@ chat scrolls; clicking it gives you an ephemeral copy of the panel.
 
 ### Voice control panel buttons
 
-The public panel (the channel's top message) is deliberately **three buttons only** — everything else lives behind ⚙️ Options to keep it clean.
+The public panel (the channel's top message) is deliberately **two buttons only** — everything else lives behind ⚙️ Options to keep it clean. The bottom silent **📋 Open Panel** sticky (`open_panel`) remains the way to (re)open a private ephemeral copy when chat buries the panel.
 
 | Button | What it does |
 |---|---|
 | ✏️ **Rename** | Modal to set a custom name. A typed name **freezes** (`auto_name_enabled=false`) and never reverts. Leaving the box **blank** flips auto-naming back **on** (Smart) and re-derives the name. |
-| 📨 **Post** | Re-posts a fresh control panel at the bottom of the text channel (deletes the old tracked panel, posts new, repoints `control_panel_msg_id`). For when chat has buried the panel. |
 | ⚙️ **Options** | Opens an ephemeral sub-panel (`buildOptionsPanelPayload`) holding everything below. Its toggle buttons re-render the Options panel in place and refresh the public panel. |
 
 **Inside ⚙️ Options:**
@@ -234,7 +233,7 @@ The "Request a Staff Role" button (on `/settings → Staff Role`) goes through a
 
 All voice control interactions use: `vc:{voiceChannelId}:{action}`
 
-Actions: `delete`, `delete_confirm`, `rename` (button + modal), `lock`, `unlock`, `hide`, `show`, `hosts` (button + select), `claim`, `open_panel` (sticky button), `post` (re-post panel), `options` (open ⚙️ Options sub-panel), `auto_name` (open 🏷️ Auto Name sub-panel), `auto_on` / `auto_off` (toggle Smart auto-naming), `randomize` (random frozen name)
+Actions: `delete`, `delete_confirm`, `rename` (button + modal), `lock`, `unlock`, `hide`, `show`, `hosts` (button + select), `claim`, `open_panel` (sticky button), `options` (open ⚙️ Options sub-panel), `auto_name` (open 🏷️ Auto Name sub-panel), `auto_on` / `auto_off` (toggle Smart auto-naming), `randomize` (random frozen name)
 
 Legacy/removed: `templates` (now aliases to `auto_name`) and `template_apply` (the old naming-template select — removed; `voiceTemplate.ts` deleted).
 

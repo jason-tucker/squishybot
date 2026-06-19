@@ -131,9 +131,8 @@ export async function handleHelpPanelSelect(interaction: StringSelectMenuInterac
         'every voice-state change so the **In channel** member list (with each person\'s join time and ' +
         'current rich-presence game) is always current. With **Smart** auto-naming on, the room is named ' +
         'after whatever game **2 or more** people are playing.\n\n' +
-        '**Panel buttons** (just three — everything else lives under Options):\n' +
+        '**Panel buttons** (just two — everything else lives under Options):\n' +
         '✏️ **Rename** — set a custom name via a popup. A custom name **sticks** no matter what anyone plays. Leave the box blank to hand control back to Smart auto-naming.\n' +
-        '📨 **Post** — drop a fresh copy of the panel at the bottom of the channel when chat has buried it.\n' +
         '⚙️ **Options** — opens a private menu with everything else:\n' +
         '   • 🔒/🔓 **Locked / Unlocked** and 🙈/👁️ **Hidden / Visible** — toggles (label + colour show the current state)\n' +
         '   • 👑 **Hosts** — add/remove hosts (each shows their rank: 👑 host · 🛡️ sudo · 👤 member)\n' +

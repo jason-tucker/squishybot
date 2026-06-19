@@ -99,21 +99,16 @@ export function buildControlPanelPayload(
 
   const vcId = record.voiceChannelId
 
-  // Deliberately just three buttons. Everything else lives behind ⚙️ Options
-  // so the channel's top message stays clean.
+  // Deliberately just two buttons. Everything else lives behind ⚙️ Options so
+  // the channel's top message stays clean. The bottom 📋 Open Panel sticky is
+  // the way to (re)open a private copy when chat buries this one.
   //   ✏️ Rename  — set a custom name (blank reverts to Smart auto-naming)
-  //   📨 Post    — drop a fresh panel at the bottom of the channel
   //   ⚙️ Options — lock / hide / hosts / claim / auto-name / delete
   const actionRow = new ActionRowBuilder<MessageActionRowComponentBuilder>().addComponents(
     new ButtonBuilder()
       .setCustomId(encodeVcId(vcId, 'rename'))
       .setLabel('Rename')
       .setEmoji('✏️')
-      .setStyle(ButtonStyle.Secondary),
-    new ButtonBuilder()
-      .setCustomId(encodeVcId(vcId, 'post'))
-      .setLabel('Post')
-      .setEmoji('📨')
       .setStyle(ButtonStyle.Secondary),
     new ButtonBuilder()
       .setCustomId(encodeVcId(vcId, 'options'))

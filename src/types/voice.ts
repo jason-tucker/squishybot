@@ -15,7 +15,6 @@ export type VoiceAction =
   | 'hosts'
   | 'claim'
   | 'open_panel'
-  | 'post'          // re-post a fresh control panel at the bottom of the text channel
   | 'options'       // open the ⚙️ Options sub-panel (lock/hide/hosts/claim/auto-name/delete)
   | 'auto_name'     // open the 🏷️ Auto Name sub-panel
   | 'auto_on'       // enable Smart auto-naming

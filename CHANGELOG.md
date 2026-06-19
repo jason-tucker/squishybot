@@ -8,8 +8,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ## [0.10.0] — 2026-06-19
 
 ### Changed
-- **Voice control panel slimmed to three buttons** — the channel's top message now shows only **✏️ Rename**, **📨 Post**, and **⚙️ Options**. Lock/Unlock, Hidden/Visible, Hosts, Claim, Delete and the new Auto Name control moved into an ephemeral **⚙️ Options** sub-panel (`buildOptionsPanelPayload`). Toggle buttons there re-render the Options panel in place while refreshing the public panel.
-- **📨 Post button** — re-posts a fresh control panel at the bottom of the text channel (deletes the old tracked panel, posts a new one, repoints `control_panel_msg_id`). Handy when chat has buried the panel.
+- **Voice control panel slimmed to two buttons** — the channel's top message now shows only **✏️ Rename** and **⚙️ Options**. Lock/Unlock, Hidden/Visible, Hosts, Claim, Delete and the new Auto Name control moved into an ephemeral **⚙️ Options** sub-panel (`buildOptionsPanelPayload`). Toggle buttons there re-render the Options panel in place while refreshing the public panel. The bottom **📋 Open Panel** sticky still opens a private copy.
 - **Naming simplified to Smart + Off + Randomize** — the old 8-template picker (`auto/counter/squad/detail/state/party/stealth/chill`) is gone. New **🏷️ Auto Name** sub-panel (`buildAutoNamePanelPayload`) offers: **Smart** (rename the room to whatever game **2+** members share — bare game name, no `(N)` prefix), **Off** (freeze the current name), and a one-shot **🎲 Randomize** button (drops a random tech name and freezes it).
 - **Manual rename now sticks permanently** — a custom name set via **Rename** is frozen (`auto_name_enabled=false`) and never reverts, regardless of what anyone plays.
 - **Blank rename reverts to Smart** — clearing the Rename box (now optional/blank-allowed) turns auto-naming back on and immediately re-derives the name.

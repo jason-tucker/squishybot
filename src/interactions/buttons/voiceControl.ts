@@ -14,7 +14,7 @@ import { db } from '../../db/client'
 import { autoChannels } from '../../db/schema'
 import { and, eq, sql } from 'drizzle-orm'
 import { canControlChannel, isOwner, isSudo } from '../../services/voice/permissions'
-import { postOrUpdateControlPanel, buildPanelPayloadForRecord, clearPanelHash } from '../../services/voice/controlPanel'
+import { postOrUpdateControlPanel, buildPanelPayloadForRecord } from '../../services/voice/controlPanel'
 import { buildOptionsPanelPayload, buildAutoNamePanelPayload } from '../../embeds/voiceControlPanel'
 import { maybeRenameChannel } from '../../services/voice/autoRename'
 import { decorateChannelName } from '../../services/voice/autoNaming'
@@ -84,24 +84,6 @@ export async function handleVoiceControlButton(interaction: ButtonInteraction): 
       ...payload,
       ephemeral: true,
     } as any)
-    return
-  }
-
-  if (action === 'post') {
-    if (!await requireControl(interaction, member, record)) return
-    await interaction.deferReply({ ephemeral: true })
-    // Drop a fresh panel at the bottom of the channel: delete the old tracked
-    // panel (if any), clear its dedupe hash, and let postOrUpdateControlPanel
-    // create a new message (it persists the new id).
-    const tc = await interaction.guild!.channels.fetch(record.textChannelId).catch(() => null)
-    if (record.controlPanelMsgId && tc?.isTextBased()) {
-      const old = await (tc as any).messages.fetch(record.controlPanelMsgId).catch(() => null)
-      if (old) await old.delete().catch(() => {})
-    }
-    clearPanelHash(voiceChannelId)
-    await db.update(autoChannels).set({ controlPanelMsgId: null }).where(eq(autoChannels.voiceChannelId, voiceChannelId)).catch(() => {})
-    await postOrUpdateControlPanel(interaction.client, { ...record, controlPanelMsgId: null })
-    await interaction.editReply({ content: '✅ Posted a fresh panel at the bottom of the channel.' })
     return
   }
 
