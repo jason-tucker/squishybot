@@ -5,6 +5,13 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [0.10.0] — 2026-06-19
+
+### Added
+- **Self-assign role board** — a dedicated channel where the bot posts one Components-V2 embed per role, each with a toggle button (members click to add/remove without an admin). Two entry kinds: a plain Discord **role** (one Add/Remove button) and a **game** (Channel-access + LFG-pings buttons, wired through `setPref` so it does everything `/games` does). Destination channel is `bot_settings.selfassign.channel_id`; entries live in the new `self_assign_entries` table. New service `src/services/selfAssign.ts` (in-memory cache + DB CRUD + post/edit/delete of the per-entry messages), button handler `src/interactions/buttons/selfAssign.ts` (`sar:*` customIds), and admin surfaces on both **`/sudo → Settings → Self-assign Roles`** and botpanel (`/squishy/self-assign-roles`).
+- **Command-bus verbs** `selfassign.add` / `selfassign.update` / `selfassign.remove` / `selfassign.reorder` / `selfassign.set_channel` / `selfassign.publish` (`src/services/rpc/handlers/selfAssign/`) so the panel manages the board over Redis.
+- **Migration** `0001_dizzy_komodo` — creates `self_assign_entries`.
+
 ## [0.9.0] — 2026-06-14
 
 ### Added
