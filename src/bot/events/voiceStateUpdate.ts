@@ -15,6 +15,8 @@ import { logger } from '../../services/logger'
 import { recordActivity } from '../../services/presence'
 import { env } from '../../config/env'
 import { publish, voiceCh, type VoiceOwnerChangedEvent } from '../../services/eventBus'
+import { isStaticChannel } from '../../services/voice/staticChannels'
+import { createStaticChannelText } from '../../services/voice/autoChannel'
 
 export function registerVoiceStateUpdate(client: Client): void {
   client.on('voiceStateUpdate', async (oldState: VoiceState, newState: VoiceState) => {
@@ -102,6 +104,23 @@ async function handleVoiceStateUpdate(client: Client, oldState: VoiceState, newS
         // New member arrived — they may be playing something that should
         // change the channel name. Re-evaluate (handles throttle internally).
         await maybeRenameChannel(client, updatedRecord).catch(() => {})
+        return
+      }
+
+      // Static-channel join: if the joined channel is a static VC and it has no
+      // active companion text channel yet, create one now. If the static record
+      // already exists we fall through to the "joined an existing auto channel"
+      // block above (which already handled it via the isAutoChannelVoice check).
+      // A static VC that is also (mis)configured as a hub gets static treatment
+      // first — the check runs before isHubChannel.
+      if (isStaticChannel(joinedChannelId) && !isAutoChannelVoice(joinedChannelId)) {
+        const vc = guild.channels.cache.get(joinedChannelId)
+          ?? await guild.channels.fetch(joinedChannelId).catch(() => null)
+        if (vc?.isVoiceBased()) {
+          await createStaticChannelText(client, guild, member, vc as any).catch(err =>
+            logger.warn('Failed to create static channel text:', err)
+          )
+        }
         return
       }
 

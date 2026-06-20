@@ -19,7 +19,7 @@ import { buildOptionsPanelPayload, buildAutoNamePanelPayload } from '../../embed
 import { maybeRenameChannel } from '../../services/voice/autoRename'
 import { decorateChannelName } from '../../services/voice/autoNaming'
 import { randomTechName } from '../../utils/randomName'
-import { deleteAutoChannel } from '../../services/voice/autoChannel'
+import { deleteAutoChannel, deleteStaticText } from '../../services/voice/autoChannel'
 import { env } from '../../config/env'
 import {
   publish,
@@ -152,14 +152,19 @@ export async function handleVoiceControlButton(interaction: ButtonInteraction): 
 
   if (action === 'delete') {
     if (!await requireOwnerOrSudo(interaction, member, record, '❌ Only the original host (or a sudo) can delete this channel.')) return
+    const isStatic = record.sourceHubId === 'static'
+    const confirmLabel = isStatic ? 'Yes, close this session' : 'Yes, delete it'
+    const confirmMsg = isStatic
+      ? `⚠️ This is a **static voice channel** — it will stay, but the text chat and panel will be removed. Continue?`
+      : `⚠️ Are you sure you want to delete **this auto voice channel**? This cannot be undone.`
     const row = new ActionRowBuilder<ButtonBuilder>().addComponents(
       new ButtonBuilder()
         .setCustomId(`vc:${voiceChannelId}:delete_confirm`)
-        .setLabel('Yes, delete it')
+        .setLabel(confirmLabel)
         .setStyle(ButtonStyle.Danger),
     )
     await interaction.reply({
-      content: `⚠️ Are you sure you want to delete **this auto voice channel**? This cannot be undone.`,
+      content: confirmMsg,
       components: [row],
       ephemeral: true,
     })
@@ -169,8 +174,14 @@ export async function handleVoiceControlButton(interaction: ButtonInteraction): 
   if (action === 'delete_confirm') {
     if (!await requireOwnerOrSudo(interaction, member, record)) return
     await interaction.deferReply({ ephemeral: true })
-    await deleteAutoChannel(interaction.client, record)
-    await interaction.editReply({ content: '✅ Channel deleted.' })
+    if (record.sourceHubId === 'static') {
+      // Static VC: remove only the companion text channel; keep the voice channel.
+      await deleteStaticText(interaction.client, record)
+      await interaction.editReply({ content: '✅ Text channel closed. The voice channel was kept (static channel).' })
+    } else {
+      await deleteAutoChannel(interaction.client, record)
+      await interaction.editReply({ content: '✅ Channel deleted.' })
+    }
     return
   }
 

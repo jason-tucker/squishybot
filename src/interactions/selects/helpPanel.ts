@@ -26,7 +26,7 @@ export async function handleHelpPanelSelect(interaction: StringSelectMenuInterac
         '3. A new hub is created instantly to replace it\n' +
         '4. A private **text channel** appears, only visible to people in your voice channel\n' +
         '5. A **control panel** posts in that text channel with all your options\n' +
-        '6. When everyone leaves, both channels delete themselves after 30 seconds'
+        '6. When everyone leaves, both channels delete themselves after 90 seconds'
       ))
       .addSeparatorComponents(sep())
       .addTextDisplayComponents(new TextDisplayBuilder().setContent(
@@ -51,11 +51,14 @@ export async function handleHelpPanelSelect(interaction: StringSelectMenuInterac
       .addTextDisplayComponents(new TextDisplayBuilder().setContent(
         '**/games** opens a panel listing every game on this server. Each row shows ' +
         'how many people are signed up. Pick a game from the dropdown to:\n\n' +
-        '• Toggle **View access** — gives you the game role so its channel shows up for you\n' +
+        '• Toggle **View access** — opt out of seeing the game\'s channel (channels are **visible by default**)\n' +
         '• Toggle **LFG pings** — gives you the ping role so /play notifies you\n\n' +
         '**/play <game>** posts a "🎮 I want to play!" button in the game\'s channel and ' +
         'pings whoever has LFG on. Other people click the button to join you. There\'s a ' +
         'short cooldown so the channel doesn\'t get spammed.\n\n' +
+        'You can also add and remove game roles directly from the **self-assign board** — ' +
+        'a dedicated channel where each game has its own embed with 👁️ Channel access and ' +
+        '🔔 LFG pings toggle buttons, no commands needed.\n\n' +
         '_If you already had a game role from before the bot was set up, /games will ' +
         'show that and let you make it explicit (or remove it)._'
       ))
@@ -171,6 +174,27 @@ export async function handleHelpPanelSelect(interaction: StringSelectMenuInterac
     )
     await interaction.update({ flags: MessageFlags.IsComponentsV2, components: [container, backRow] } as any)
 
+  } else if (section === 'selfassign') {
+    const container = new ContainerBuilder()
+      .setAccentColor(0x1abc9c)
+      .addTextDisplayComponents(new TextDisplayBuilder().setContent('## 🏷️ Self-assign Roles'))
+      .addSeparatorComponents(sep())
+      .addTextDisplayComponents(new TextDisplayBuilder().setContent(
+        'Look for a dedicated **self-assign** channel — it lists every role you can pick up ' +
+        'yourself, no commands needed. Each entry has one or two toggle buttons:\n\n' +
+        '• **Plain roles** — one **Add / Remove** button. Click once to get the role, click again to drop it.\n' +
+        '• **Game entries** — two buttons: 👁️ **Channel access** (opt out of the game\'s channel) and ' +
+        '🔔 **LFG pings** (get pinged when someone runs `/play`). These do the same thing as the ' +
+        'toggles in **/games**, so either surface works.\n\n' +
+        '_You\'ll only see the channel if an admin has set one up. The board updates automatically ' +
+        'when admins add or remove entries._'
+      ))
+
+    const backRow = new ActionRowBuilder<ButtonBuilder>().addComponents(
+      new ButtonBuilder().setCustomId('help:back').setLabel('Back').setStyle(ButtonStyle.Secondary)
+    )
+    await interaction.update({ flags: MessageFlags.IsComponentsV2, components: [container, backRow] } as any)
+
   } else if (section === 'admin' && isSudo(member)) {
     const container = new ContainerBuilder()
       .setAccentColor(0xed4245)
@@ -185,6 +209,16 @@ export async function handleHelpPanelSelect(interaction: StringSelectMenuInterac
         '📥 Pending approvals — view pending staff requests\n' +
         '🔧 Run reconciler — repair channels on restart\n' +
         '🔁 Restart instructions — terminal commands\n\n' +
+        '**Notable settings panels** (under `/sudo → Settings`):\n' +
+        '- **Static Channels** — designate existing voice channels as "static". ' +
+        'When someone joins, the bot attaches the same text channel + control panel as a normal auto channel. ' +
+        'The voice channel is never renamed, replaced, or deleted — only the companion text channel cleans up when the VC empties.\n' +
+        '- **Game Defaults** — toggle the default-visible model for game channels (`games.default_view_on`); ' +
+        'run server-wide per-game bulk operations (Show / Hide / Clear pings).\n' +
+        '- **Games** — manage the game catalog. The **Batch Reprovision** button creates/links missing roles+channels, ' +
+        'renames channels to match game names, and moves them under the configured category in one pass. ' +
+        'Each game\'s detail panel has an **Add to self-assign board** button.\n' +
+        '- **Self-assign Roles** — configure the self-assign board channel and add/remove/reorder entries.\n\n' +
         '**Right-click any user → Apps → Manage** to:\n' +
         '- View their roles, voice status, and owned channels\n' +
         '- Edit their profile or game prefs\n' +

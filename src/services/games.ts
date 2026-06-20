@@ -13,7 +13,7 @@ import { and, eq, inArray } from 'drizzle-orm'
 import { db } from '../db/client'
 import { games, userGamePrefs } from '../db/schema'
 import { logger } from './logger'
-import { getBoolSetting, getSetting } from './settings'
+import { getBoolSetting, getSetting, setSetting } from './settings'
 
 /**
  * Master switch for the "View defaults ON" model (opt-out instead of opt-in).
@@ -29,7 +29,30 @@ import { getBoolSetting, getSetting } from './settings'
  */
 export const GAMES_DEFAULT_VIEW_ON_KEY = 'games.default_view_on'
 export function gameDefaultViewOn(): boolean {
-  return getBoolSetting(GAMES_DEFAULT_VIEW_ON_KEY, false)
+  return getBoolSetting(GAMES_DEFAULT_VIEW_ON_KEY, true)
+}
+
+/**
+ * One-shot startup backfill: if the `games.default_view_on` model is ON and
+ * the backfill has never been run (flag `games.default_view_on.backfill_v1`
+ * absent from bot_settings), flip every game channel to @everyone visible.
+ *
+ * Guarded by a bot_settings flag so it runs at most once across all deploys.
+ * Any error is caught and logged; the function never throws at boot.
+ *
+ * Caller (ready.ts) should await this after loadGames().
+ */
+export async function ensureDefaultViewOnBackfillOnce(guild: Guild): Promise<void> {
+  try {
+    const alreadyDone = getBoolSetting('games.default_view_on.backfill_v1', false)
+    if (alreadyDone) return
+    if (!gameDefaultViewOn()) return
+    const res = await applyDefaultViewBackfill(guild, true, 'system-default-on')
+    await setSetting('games.default_view_on.backfill_v1', 'true')
+    logger.info(`games default-view-on backfill_v1: changed=${res.changed} noChannel=${res.noChannel} failed=${res.failed}`)
+  } catch (err) {
+    logger.warn('ensureDefaultViewOnBackfillOnce: error during startup backfill (non-fatal):', err)
+  }
 }
 
 export type Game = typeof games.$inferSelect
@@ -249,6 +272,115 @@ export async function provisionGameDiscord(
     if (row) updated = row
   }
   return { game: updated, result }
+}
+
+// ---------------------------------------------------------------------------
+// Batch reprovision — ensure every game has a role + channel, then rename/move
+// channels that are out of place. Called from the "Batch Reprovision" button
+// in the catalog panel (gamesEditor.ts → handleCatalogButton).
+// ---------------------------------------------------------------------------
+
+export interface ReprovisionAllResult {
+  created: number
+  renamed: number
+  moved: number
+  linked: number
+  failed: number
+  skippedNoCategory: boolean
+}
+
+/**
+ * For every game (including archived + hidden):
+ *   1. Call provisionGameDiscord to create/link any missing role + channel.
+ *   2. If the game now has a linked GuildText channel:
+ *      - Rename to gameChannelSlug(game.name) if name differs.
+ *      - Move under the games category if parentId differs.
+ *      - Apply @everyone ViewChannel based on gameDefaultViewOn().
+ *
+ * Returns totals for a caller-supplied summary message.
+ * When the games category is unset/invalid, returns { ...zero, skippedNoCategory: true }.
+ */
+export async function reprovisionAllGames(
+  guild: Guild,
+  byUserId: string,
+): Promise<ReprovisionAllResult> {
+  const result: ReprovisionAllResult = {
+    created: 0,
+    renamed: 0,
+    moved: 0,
+    linked: 0,
+    failed: 0,
+    skippedNoCategory: false,
+  }
+
+  const categorySetting = getSetting('channel.games_category')
+  const categoryChannel = categorySetting ? guild.channels.cache.get(categorySetting) : null
+  if (!categorySetting || !categoryChannel) {
+    result.skippedNoCategory = true
+    return result
+  }
+
+  const all = listGames({ includeArchived: true, includeHidden: true })
+  for (const game of all) {
+    // Step 1: provision role + channel (idempotent).
+    let provisioned: Game
+    try {
+      const { game: g, result: r } = await provisionGameDiscord(guild, game, byUserId)
+      provisioned = g
+      if (r.role.action === 'created') result.created++
+      if (r.role.action === 'linked') result.linked++
+      if (r.channel.action === 'created') result.created++
+      if (r.channel.action === 'linked') result.linked++
+      if (r.role.action === 'failed' || r.channel.action === 'failed') result.failed++
+    } catch (err) {
+      logger.warn(`reprovisionAllGames: provision failed for game ${game.name}:`, err)
+      result.failed++
+      continue
+    }
+
+    // Step 2: rename/move the channel if needed.
+    if (!provisioned.channelId) continue
+    const ch = guild.channels.cache.get(provisioned.channelId)
+    if (!ch || ch.type !== ChannelType.GuildText || !('permissionOverwrites' in ch)) continue
+
+    const expectedSlug = gameChannelSlug(provisioned.name)
+
+    try {
+      // Apply @everyone visibility consistent with gameDefaultViewOn().
+      const visible = gameDefaultViewOn()
+      await (ch as any).permissionOverwrites.edit(
+        guild.roles.everyone.id,
+        { ViewChannel: visible },
+        { reason: `reprovisionAllGames by ${byUserId}` },
+      )
+    } catch (err) {
+      logger.warn(`reprovisionAllGames: failed to set @everyone view on ${ch.id}:`, err)
+      result.failed++
+    }
+
+    if (ch.name !== expectedSlug) {
+      try {
+        await (ch as any).setName(expectedSlug, `reprovisionAllGames rename by ${byUserId}`)
+        result.renamed++
+      } catch (err) {
+        logger.warn(`reprovisionAllGames: failed to rename channel ${ch.id}:`, err)
+        result.failed++
+      }
+    }
+
+    if ((ch as any).parentId !== categorySetting) {
+      try {
+        await (ch as any).setParent(categorySetting, { lockPermissions: false, reason: `reprovisionAllGames move by ${byUserId}` })
+        result.moved++
+      } catch (err) {
+        logger.warn(`reprovisionAllGames: failed to move channel ${ch.id}:`, err)
+        result.failed++
+      }
+    }
+  }
+
+  logger.info(`reprovisionAllGames by=${byUserId} created=${result.created} linked=${result.linked} renamed=${result.renamed} moved=${result.moved} failed=${result.failed}`)
+  return result
 }
 
 // ---------------------------------------------------------------------------

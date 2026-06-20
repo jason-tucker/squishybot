@@ -155,7 +155,7 @@ then use (run `squishybot` with no args for the full list):
 | `SUDO_USER_IDS` | No | Comma-separated user IDs with bot-admin powers |
 | `AUTO_VOICE_CATEGORY_ID` | Yes | Default Discord category for hubs and auto channels. Overridable at runtime via `/sudo → Settings → Voice → Auto-voice category` (`channel.auto_voice_category` key in `bot_settings`). |
 | `HUB_CHANNEL_IDS` | No | Legacy seed list of hub voice channel IDs. Authoritative source is now the `hub_channels` table; manage via `/sudo → Settings → Hub Channels`. Env is only consulted on boot to seed any IDs not yet in DB. |
-| `VOICE_CLEANUP_DELAY_MS` | No | ms before empty channel cleanup (default: 30000) |
+| `VOICE_CLEANUP_DELAY_MS` | No | ms before empty channel cleanup (default: 90000) |
 | `LOG_CHANNEL_ID` | No | Bot posts structured log messages here |
 | `ADMIN_CHANNEL_ID` | No | Sudo-only bot admin channel |
 | `STAFF_APPROVAL_THREAD_ID` | No | Thread where `/staff request` posts go |
@@ -179,10 +179,10 @@ then use (run `squishybot` with no args for the full list):
 
 | Table | Purpose |
 |---|---|
-| `auto_channels` | Tracks active auto voice channels and their state |
+| `auto_channels` | Tracks active auto voice channels and their state. Static-channel companions use `sourceHubId='static'` as a sentinel — the voice channel itself is never renamed, replaced, or deleted; only the companion text channel follows normal cleanup. No new table. |
 | `auto_channel_members` | Per-channel join times (`voice_channel_id, user_id, joined_at`) — drives the panel's "In channel" list with `<t:N:R>` timestamps |
 | `hub_channels` | Registry of managed hub voice channels |
-| `bot_settings` | Runtime key/value config overrides edited via `/sudo → Settings` |
+| `bot_settings` | Runtime key/value config overrides edited via `/sudo → Settings`. Notable keys: `voice.static_channel_ids` (JSON array of voice channel IDs designated as static channels), `games.default_view_on` (bool, **default true** — game channels visible to @everyone by default). |
 | `sudo_users` | Members granted sudo at runtime (beyond the immutable `SUDO_USER_IDS` env list) |
 | `auto_thread_channels` | Channels where every non-bot message gets an auto-thread (managed via `/sudo → Settings → Auto Threads`) |
 | `social_feeds` | RSS-driven social feeds the poller reposts into a Discord channel. Managed via `/sudo → Settings → Socials`. Polled every 30 min (override via `bot_settings.social.poll_interval_ms`). Dedup keyed by RSS `<guid>` stored in `last_seen_id`; first poll seeds without posting so backlog isn't replayed. |
@@ -256,15 +256,16 @@ Other customId families:
 - `gn:*` — game night: `gn:setup_submit[:{sessionKey}]` (modal), `gn:preview:{send|edit|cancel}:{key}`, `gn:rsvp:{state}`, `gn:own:{state}`, `gn:cancel:{hostId}`
 - `sp:*` — scheduled posts (DB-backed): `sp:rsvp:{postId}:{state}`, `sp:own:{postId}:{state}`, `sp:cancel:{postId}`
 - `games:prefs:*` — game preferences editor: `games:prefs:set:`, `games:prefs:list:`, `games:prefs:back:`, `games:prefs:pick:`
-- `games:cat:*` — game catalog management (sudo): `games:cat:select`, `games:cat:channel:`, `games:cat:role:`, `games:cat:add_submit`, `games:cat:save:`, `games:cat:set_category`
+- `games:cat:*` — game catalog management (sudo): `games:cat:select`, `games:cat:channel:`, `games:cat:role:`, `games:cat:add_submit`, `games:cat:save:`, `games:cat:set_category`, `games:cat:reprovision` (batch reprovision all games), `games:cat:addboard:{gameId}` (add game to self-assign board)
 - `games:mass:*` — all-games single-user bulk prefs editor (self + sudo): `games:mass:open:{mode}:{uid}` (button → open), `games:mass:view:{mode}:{uid}` / `games:mass:ping:{mode}:{uid}` (multi-selects → apply diff)
-- `games:defaults:*` / `games:bulk:*` — Game Defaults panel (sudo, `/sudo → Settings → Game Defaults`): `games:defaults:toggle:{on|off}` (flip `games.default_view_on` + backfill), `games:bulk:select` (pick a game), `games:bulk:{show|hide|clearpings}:{gid}` (server-wide per-game apply). The `games.default_view_on` setting (default OFF) switches game-channel View between opt-in (hidden, per-member allow) and opt-out (visible to @everyone, per-member deny). Pings stay opt-in regardless.
+- `games:defaults:*` / `games:bulk:*` — Game Defaults panel (sudo, `/sudo → Settings → Game Defaults`): `games:defaults:toggle:{on|off}` (flip `games.default_view_on` + backfill), `games:bulk:select` (pick a game), `games:bulk:{show|hide|clearpings}:{gid}` (server-wide per-game apply). The `games.default_view_on` setting (**default ON**) switches game-channel View between opt-out (visible to @everyone, per-member deny) and opt-in (hidden, per-member allow). Pings stay opt-in regardless. A one-time startup backfill runs when the setting is ON, flipping all existing game channels visible.
 - `profile:*` — profile editor: `profile:edit:`, `profile:toggle:`, `profile:back:`, `profile:save:`, `profile:select_user`
 - `settings:staff_role:*` — staff-role self-service in `/settings`: `settings:staff_role`, `settings:staff_role:add:`, `settings:staff_role:remove:`
 - `color:pick` — color role string-select
 - `play:*` — LFG ping interactions: `play:join:`, `play:cancel:`, `play:help:`, `play:notify:`
 - `sar:*` — self-assign role board (public buttons in the configured channel): `sar:role:{roleId}` (toggle a plain role), `sar:gview:{gameId}` / `sar:gping:{gameId}` (toggle a game's channel access / LFG pings)
 - `sudo:set:selfassign:*` — self-assign board admin (`/sudo → Settings → Self-assign Roles`): `channel`, `add_role`, `add_game`, `remove`, `publish`
+- `sudo:set:static:*` — static channel admin (`/sudo → Settings → Static Channels`): `sudo:set:nav:static` (open panel), `sudo:set:static:add` (channel-select → designate static), `sudo:set:static:remove` (remove from static list)
 
 ---
 
@@ -279,6 +280,7 @@ Other customId families:
 | `src/services/voice/reconciler.ts` | Startup recovery: orphan cleanup, hub recreation, panel repair |
 | `src/services/voice/permissions.ts` | `isSudo`, `isOwner`, `isHost`, `updateTextPermissions` |
 | `src/services/voice/autoNaming.ts` | Rich-presence-driven auto-rename, channel name decoration (trailing emoji dedup) |
+| `src/services/voice/staticChannels.ts` | Static channel management — reads `voice.static_channel_ids` from `bot_settings`, handles join events for designated VCs (attaches text channel + control panel without renaming or replacing the VC), and routes cleanup of the companion text channel on empty |
 | `src/services/logger.ts` | Structured logging to console + optional LOG_CHANNEL_ID |
 | `src/services/rpc/registry.ts` | Redis command-bus RPC server — HMAC-verifies incoming `cmd.squishy.*` messages and dispatches to handlers under `src/services/rpc/handlers/` |
 | `src/services/eventBus.ts` | Redis fan-out event publisher — `bot.squishy.*` events (ready, heartbeat, voice, member) |

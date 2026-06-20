@@ -209,7 +209,6 @@ export function buildEntryPayload(guild: Guild, entry: SelfAssignEntry): { flags
     const name = entry.label?.trim() || role?.name || 'Unknown role'
     const lines = [`### ${name}`]
     if (entry.description?.trim()) lines.push(entry.description.trim())
-    lines.push('_Use the button below to add or remove this role._')
     container.addTextDisplayComponents(new TextDisplayBuilder().setContent(lines.join('\n')))
 
     const btn = new ButtonBuilder()
@@ -226,14 +225,9 @@ export function buildEntryPayload(guild: Guild, entry: SelfAssignEntry): { flags
     const hasPing = Boolean(game && matchedPingRoleId(guild, game))
     const lines = [`### 🎮 ${name}`]
     if (entry.description?.trim()) lines.push(entry.description.trim())
-    const toggles: string[] = []
-    if (hasChannel) toggles.push('👁️ channel access')
-    if (hasPing) toggles.push('🔔 LFG pings')
-    lines.push(
-      toggles.length
-        ? `_Toggle ${toggles.join(' and ')} below._`
-        : '_Not configured yet — ask an admin to set this game up._',
-    )
+    if (!hasChannel && !hasPing) {
+      lines.push('_Not configured yet — ask an admin to set this game up._')
+    }
     container.addTextDisplayComponents(new TextDisplayBuilder().setContent(lines.join('\n')))
 
     if (hasChannel) {

@@ -78,6 +78,13 @@ async function runCleanup(client: Client, voiceChannelId: string): Promise<void>
     return
   }
 
+  // Static channels: only delete the companion text channel; the VC stays.
+  if (record.sourceHubId === 'static') {
+    const { deleteStaticText } = await import('./autoChannel')
+    await deleteStaticText(client, record)
+    return
+  }
+
   const { deleteAutoChannel } = await import('./autoChannel')
   await deleteAutoChannel(client, record)
 }
