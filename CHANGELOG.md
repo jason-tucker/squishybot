@@ -5,6 +5,19 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [0.12.0] — 2026-06-20
+
+### Added
+- **Static voice channels** — admins designate existing VCs as "static" at `/sudo → Settings → Static Channels`. Joining a static VC attaches the same text channel + control panel as a normal auto channel; the voice channel is never renamed, replaced, or deleted. The companion text channel cleans up normally when the VC empties. Backed by the `voice.static_channel_ids` `bot_settings` key and a `sourceHubId='static'` sentinel on `auto_channels` (no new table). New service `src/services/voice/staticChannels.ts`. CustomIds: `sudo:set:nav:static`, `sudo:set:static:add`, `sudo:set:static:remove`.
+- **Batch Reprovision button** (`games:cat:reprovision`) in the Games catalog (`/sudo → Settings → Games`) — for every game it creates/links any missing role+channel, renames each channel to match the game name, moves it under the configured Games category, and applies @everyone visibility. Refuses if no Games category is set.
+- **Add to self-assign board button** (`games:cat:addboard:{gameId}`) on a game's detail panel — one click adds that game to the self-assign board without navigating to the Self-assign Roles settings panel.
+
+### Changed
+- **Game channels are now visible to @everyone by default** (`games.default_view_on` default changed from OFF to ON). Members opt **out** via `/games` or the self-assign board; a one-time startup backfill flips all existing game channels visible on upgrade. Admins can revert to the opt-in model at `/sudo → Settings → Game Defaults`.
+- **Add-Game flow now requires a Games category** — the `/sudo → Settings → Games → Add Game` flow refuses to create a game until a default Games category is configured, so new game channels never land at the top-level channel list.
+- **Default empty-channel cleanup delay raised from 30s to 90s** — `VOICE_CLEANUP_DELAY_MS` now defaults to `90000` (was `30000`). Override via env or `/sudo → Settings → Voice → Cleanup delay`.
+- **Self-assign board embeds no longer show the per-message toggle instruction line** — the per-entry buttons are self-explanatory; the redundant prompt line was removed to keep embeds compact.
+
 ## [0.11.0] — 2026-06-19
 
 ### Added

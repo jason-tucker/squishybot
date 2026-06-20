@@ -49,6 +49,8 @@ export async function runReconciler(client: Client): Promise<ReconcilerResult> {
   const trackedVoiceIds = new Set(records.map(r => r.voiceChannelId))
 
   const reconcileOne = async (record: typeof records[number]) => {
+    const isStatic = record.sourceHubId === 'static'
+
     // Cache.get is free; the bot manages these channels so they're cached
     // once READY fires. Falls back to fetch only if the cache is cold (e.g.
     // first reconcile pass before the guild fully populates).
@@ -56,7 +58,19 @@ export async function runReconciler(client: Client): Promise<ReconcilerResult> {
       ?? await guild.channels.fetch(record.voiceChannelId).catch(() => null)
 
     if (!vc) {
-      // Voice channel gone — clean up text channel and DB row
+      if (isStatic) {
+        // Static VC is gone externally — just clean up text channel and DB row;
+        // we never recreate the VC (we don't own it).
+        await guild.channels.delete(record.textChannelId).catch(() => {})
+        await db.delete(autoChannels).where(eq(autoChannels.voiceChannelId, record.voiceChannelId)).catch(() => {})
+        await clearMembers(record.voiceChannelId)
+        untrackAutoChannelText(record.textChannelId)
+        untrackAutoChannelVoice(record.voiceChannelId)
+        result.cleaned++
+        logger.info(`Reconciler: cleaned static orphan (VC gone) vc=${record.voiceChannelId}`)
+        return
+      }
+      // Regular auto channel: voice channel gone — clean up text channel and DB row
       await guild.channels.delete(record.textChannelId).catch(() => {})
       await db.delete(autoChannels).where(eq(autoChannels.voiceChannelId, record.voiceChannelId)).catch(() => {})
       await clearMembers(record.voiceChannelId)
@@ -69,7 +83,8 @@ export async function runReconciler(client: Client): Promise<ReconcilerResult> {
 
     result.recovered++
 
-    // Schedule cleanup if empty
+    // Schedule cleanup if empty. Static channels schedule text-only cleanup
+    // (cleanupScheduler.runCleanup branches on sourceHubId==='static').
     if (vc.isVoiceBased() && vc.members.size === 0) {
       void scheduleCleanup(client, record.voiceChannelId)
     }
@@ -85,12 +100,38 @@ export async function runReconciler(client: Client): Promise<ReconcilerResult> {
     const tc = guild.channels.cache.get(record.textChannelId)
       ?? await guild.channels.fetch(record.textChannelId).catch(() => null)
 
+    // For static channels: if the VC is occupied but the text channel is gone,
+    // delete the stale DB row then recreate the text channel and re-post the
+    // panel. We must delete first so createStaticChannelText's INSERT doesn't
+    // hit the unique constraint on voice_channel_id.
+    if (isStatic && !tc && vc.isVoiceBased() && vc.members.size > 0) {
+      // Clear the stale record so the recreate INSERT succeeds.
+      await db.delete(autoChannels).where(eq(autoChannels.voiceChannelId, record.voiceChannelId)).catch(() => {})
+      untrackAutoChannelText(record.textChannelId)
+      untrackAutoChannelVoice(record.voiceChannelId)
+      await clearMembers(record.voiceChannelId)
+
+      const firstMember = vc.members.first()
+      if (firstMember) {
+        const { createStaticChannelText } = await import('./autoChannel')
+        await createStaticChannelText(client, guild, firstMember, vc as any).catch(err =>
+          logger.warn(`Reconciler: failed to recreate static text for vc=${record.voiceChannelId}:`, err)
+        )
+      }
+      // createStaticChannelText posts its own panel + sticky.
+      result.panels++
+      return
+    }
+
     // Retroactively auto-rename — handles presence updates that fired while
     // the bot was down. Centralized logic in autoRename.ts handles template
     // filtering + throttle + deferred retry on its own. Pass the record we
     // already selected so it doesn't re-query auto_channels per room.
-    const { maybeRenameChannel } = await import('./autoRename')
-    await maybeRenameChannel(client, record).catch(() => {})
+    // Static channels skip auto-rename — the VC name is not bot-managed.
+    if (!isStatic) {
+      const { maybeRenameChannel } = await import('./autoRename')
+      await maybeRenameChannel(client, record).catch(() => {})
+    }
 
     // Sync text channel permissions for current members
     if (tc?.isTextBased() && vc.isVoiceBased()) {

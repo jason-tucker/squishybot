@@ -5,7 +5,7 @@ import { logger, attachClientToLogger } from '../../services/logger'
 import { initPresence, refreshPresence } from '../../services/presence'
 import { env } from '../../config/env'
 import { loadSettings } from '../../services/settings'
-import { loadGames } from '../../services/games'
+import { loadGames, ensureDefaultViewOnBackfillOnce } from '../../services/games'
 import { loadSelfAssign } from '../../services/selfAssign'
 import { loadSocialFeeds } from '../../services/socialFeeds'
 import { startSocialPoller } from '../../services/social/poller'
@@ -115,6 +115,13 @@ export function registerReadyEvent(client: Client) {
       result = await runReconciler(c)
     } catch (err) {
       await logger.errorAndDm('Reconciler failed on startup', err, c)
+    }
+
+    // One-time backfill: game channels now default to @everyone-visible
+    // (opt-out model). Flip every existing game channel visible once — guarded
+    // by a bot_settings flag so it never re-runs. Non-fatal (self-catches).
+    if (guild) {
+      await ensureDefaultViewOnBackfillOnce(guild)
     }
 
     // Wave 7 command bus — bot-side RPC subscriber. Lazy ioredis client

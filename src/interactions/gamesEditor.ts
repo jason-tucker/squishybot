@@ -51,9 +51,11 @@ import {
   applyDefaultViewBackfill, bulkClearPingsEveryone, bulkGrantViewEveryone, bulkRevokeViewEveryone,
   createGame, deleteGame, gameCount, gameDefaultViewOn, GAMES_DEFAULT_VIEW_ON_KEY,
   gameInterestCounts, getGame, listGames,
-  matchedPingRoleId, matchedViewChannel, provisionGameDiscord, resolvePrefs, setPref, updateGame,
+  matchedPingRoleId, matchedViewChannel, provisionGameDiscord, reprovisionAllGames, resolvePrefs,
+  setPref, updateGame,
   type Game, type GameProvisionResult, type ResolvedPref,
 } from '../services/games'
+import { addEntry, findEntryByRef, getChannelId, postOrUpdateEntry } from '../services/selfAssign'
 
 // ===========================================================================
 // CATALOG (sudo only)
@@ -115,6 +117,7 @@ export async function renderCatalogList(guildId: string) {
   components.push(
     new ActionRowBuilder<MessageActionRowComponentBuilder>().addComponents(
       new ButtonBuilder().setCustomId('games:cat:add').setLabel('Add Game').setEmoji('➕').setStyle(ButtonStyle.Success),
+      new ButtonBuilder().setCustomId('games:cat:reprovision').setLabel('Batch Reprovision').setEmoji('🔁').setStyle(ButtonStyle.Primary),
       new ButtonBuilder().setCustomId('sudo:set:home').setLabel('Back').setStyle(ButtonStyle.Secondary),
     )
   )
@@ -183,6 +186,14 @@ function renderGameDetail(g: Game) {
         .setLabel('Delete').setEmoji('🗑️').setStyle(ButtonStyle.Danger),
       new ButtonBuilder().setCustomId('games:cat:list')
         .setLabel('Back to list').setStyle(ButtonStyle.Secondary),
+    )
+  )
+
+  // Self-assign board shortcut row
+  components.push(
+    new ActionRowBuilder<MessageActionRowComponentBuilder>().addComponents(
+      new ButtonBuilder().setCustomId(`games:cat:addboard:${g.id}`)
+        .setLabel('Add to self-assign board').setEmoji('➕').setStyle(ButtonStyle.Secondary),
     )
   )
 
@@ -555,6 +566,53 @@ export async function handleCatalogButton(interaction: ButtonInteraction): Promi
     await interaction.update(renderGameDetail(g) as any)
     return
   }
+
+  // TASK B2 / TASK B1 handlers below — must check games category before add, and wire board button.
+
+  if (id === 'games:cat:reprovision') {
+    await interaction.deferUpdate()
+    const result = await reprovisionAllGames(interaction.guild!, interaction.user.id)
+    await interaction.editReply(await renderCatalogList(interaction.guildId!) as any)
+    if (result.skippedNoCategory) {
+      await interaction.followUp({
+        content: '❌ Set a **Games category** first (pick one in the catalog) — game channels must live under it.',
+        flags: MessageFlags.Ephemeral,
+      }).catch(() => {})
+    } else {
+      const parts: string[] = [`🔁 Batch Reprovision complete:`]
+      parts.push(`• Created: ${result.created}`)
+      parts.push(`• Linked: ${result.linked}`)
+      parts.push(`• Renamed: ${result.renamed}`)
+      parts.push(`• Moved: ${result.moved}`)
+      if (result.failed) parts.push(`• ⚠️ Failed: ${result.failed}`)
+      await interaction.followUp({
+        content: parts.join('\n'),
+        flags: MessageFlags.Ephemeral,
+      }).catch(() => {})
+    }
+    return
+  }
+
+  if (id.startsWith('games:cat:addboard:')) {
+    const [, , , gameId] = id.split(':')
+    const g = getGame(gameId)
+    if (!g) {
+      await interaction.reply({ content: '❌ Game not found.', ephemeral: true })
+      return
+    }
+    const existing = findEntryByRef('game', gameId)
+    if (existing) {
+      await interaction.reply({ content: 'Already on the self-assign board.', ephemeral: true })
+      return
+    }
+    const entry = await addEntry({ kind: 'game', refId: gameId, byUserId: interaction.user.id })
+    const channelId = getChannelId()
+    if (channelId && interaction.guild) {
+      await postOrUpdateEntry(interaction.client, interaction.guild, channelId, entry)
+    }
+    await interaction.reply({ content: '✅ Added to the self-assign board.', ephemeral: true })
+    return
+  }
 }
 
 export async function handleCatalogStringSelect(interaction: StringSelectMenuInteraction): Promise<void> {
@@ -611,6 +669,19 @@ export async function handleCatalogModal(interaction: ModalSubmitInteraction): P
     const sortOrder = sortRaw === '' ? 0 : Number(sortRaw)
     if (!Number.isInteger(sortOrder)) {
       await interaction.reply({ content: '❌ Sort order must be an integer.', ephemeral: true })
+      return
+    }
+
+    // TASK B2: refuse to provision if no games category is set.
+    const gamesCategoryId = getSetting('channel.games_category')
+    const categoryValid = Boolean(
+      gamesCategoryId && interaction.guild && interaction.guild.channels.cache.has(gamesCategoryId)
+    )
+    if (!categoryValid) {
+      await interaction.reply({
+        content: '❌ Set a **Games category** first (pick one in the catalog) — game channels must live under it.',
+        ephemeral: true,
+      })
       return
     }
 

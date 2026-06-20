@@ -74,6 +74,7 @@ import {
 } from '../services/selfAssign'
 import { getGame, listGames } from '../services/games'
 import { checkAssignableRole } from '../utils/roleGuard'
+import { addStaticChannel, getStaticChannelIds, removeStaticChannel } from '../services/voice/staticChannels'
 
 // ---------------------------------------------------------------------------
 // Setting key registry — adding a new setting is mostly just adding a row here
@@ -207,6 +208,7 @@ function renderHome() {
   const row5 = new ActionRowBuilder<MessageActionRowComponentBuilder>().addComponents(
     new ButtonBuilder().setCustomId('sudo:set:nav:game_defaults').setLabel('Game Defaults').setEmoji('🎮').setStyle(ButtonStyle.Secondary),
     new ButtonBuilder().setCustomId('sudo:set:nav:selfassign').setLabel('Self-assign Roles').setEmoji('🎟️').setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder().setCustomId('sudo:set:nav:static').setLabel('Static Channels').setEmoji('🎙️').setStyle(ButtonStyle.Secondary),
   )
   const navRow = new ActionRowBuilder<MessageActionRowComponentBuilder>().addComponents(
     new ButtonBuilder().setCustomId('sudo:home').setLabel('Back to /sudo').setEmoji('🏠').setStyle(ButtonStyle.Secondary),
@@ -1720,6 +1722,65 @@ async function renderProfiles(guildId: string) {
   return renderSudoUserPicker(guildId)
 }
 
+async function renderStaticChannels() {
+  const ids = getStaticChannelIds()
+
+  const lines: string[] = [
+    '### 🎙️ Static Voice Channels',
+    '_Voice channels listed here are **permanent** — when a member joins one, the bot_',
+    '_creates the usual companion text channel + control panel, but the voice channel_',
+    '_is never renamed, never replaced, and never deleted. Only the text channel is_',
+    '_cleaned up after everyone leaves (same delay as auto channels)._\n',
+  ]
+  if (ids.length === 0) {
+    lines.push('_No static channels registered. Pick a voice channel below to add one._')
+  } else {
+    for (const id of ids) {
+      lines.push(`• <#${id}>`)
+    }
+  }
+
+  const container = new ContainerBuilder()
+    .setAccentColor(0x5865f2)
+    .addTextDisplayComponents(new TextDisplayBuilder().setContent(lines.join('\n')))
+
+  const components: any[] = [container]
+
+  components.push(
+    new ActionRowBuilder<MessageActionRowComponentBuilder>().addComponents(
+      new ChannelSelectMenuBuilder()
+        .setCustomId('sudo:set:static:add')
+        .setPlaceholder('Add a voice channel as static…')
+        .setChannelTypes([ChannelType.GuildVoice])
+        .setMinValues(0).setMaxValues(1),
+    ),
+  )
+
+  if (ids.length > 0) {
+    components.push(
+      new ActionRowBuilder<MessageActionRowComponentBuilder>().addComponents(
+        new StringSelectMenuBuilder()
+          .setCustomId('sudo:set:static:remove')
+          .setPlaceholder('Remove a static channel…')
+          .addOptions(ids.slice(0, 25).map(id => ({
+            label: id,
+            value: id,
+            emoji: '❌',
+            description: `<#${id}>`.slice(0, 100),
+          }))),
+      ),
+    )
+  }
+
+  components.push(
+    new ActionRowBuilder<MessageActionRowComponentBuilder>().addComponents(
+      new ButtonBuilder().setCustomId('sudo:set:home').setLabel('Back').setStyle(ButtonStyle.Secondary),
+    ),
+  )
+
+  return { flags: MessageFlags.IsComponentsV2 as number, components }
+}
+
 // ---------------------------------------------------------------------------
 // Public entry — called from the existing /sudo select handler
 // ---------------------------------------------------------------------------
@@ -1978,6 +2039,8 @@ export async function handleSettingsButton(interaction: ButtonInteraction): Prom
       await interaction.editReply((await renderGameDefaultsPanel(interaction.guild!)) as any)
     } else if (category === 'selfassign') {
       await interaction.editReply((await renderSelfAssign(interaction.guild!)) as any)
+    } else if (category === 'static') {
+      await interaction.editReply((await renderStaticChannels()) as any)
     } else {
       await interaction.followUp({ content: `Unknown category: ${category}`, flags: MessageFlags.Ephemeral })
     }
@@ -2363,6 +2426,15 @@ export async function handleSettingsChannelSelect(interaction: ChannelSelectMenu
     return
   }
 
+  if (id === 'sudo:set:static:add') {
+    const channelId = interaction.values[0]
+    if (channelId) {
+      await addStaticChannel(channelId, interaction.user.id)
+    }
+    await interaction.update((await renderStaticChannels()) as any)
+    return
+  }
+
   if (id === 'sudo:set:hub:add') {
     const channelId = interaction.values[0]
     if (channelId && interaction.guild) {
@@ -2498,6 +2570,13 @@ export async function handleSettingsStringSelect(interaction: StringSelectMenuIn
     await interaction.update(renderAutoThreads() as any)
     return
   }
+  if (id === 'sudo:set:static:remove') {
+    const channelId = interaction.values[0]
+    if (channelId) await removeStaticChannel(channelId, interaction.user.id)
+    await interaction.update((await renderStaticChannels()) as any)
+    return
+  }
+
   if (id === 'sudo:set:hub:remove') {
     const channelId = interaction.values[0]
     if (channelId) await unregisterHubChannel(channelId)

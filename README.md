@@ -6,7 +6,9 @@ A multipurpose Discord bot for a single server, built around **dynamic auto voic
 
 SquishyBot serves one Discord guild. Its headline feature is auto voice channels: members join a **hub** voice channel and the bot converts it into their own room — renamed in place, with a private text channel and a persistent Components V2 control panel. A replacement hub is spawned immediately, and rooms clean themselves up when empty. A startup **reconciler** repairs orphaned channels, missing hubs, and stale panels after every restart.
 
-Around that core, the bot bundles game roles + LFG pings (`/play`), self-service profiles and birthdays, staff-role requests, auto-threads, social-feed reposting, reaction roles, channel archiving, and an owner-reviewed `/report → GitHub issue` flow. Almost everything is configurable at runtime through `/sudo → Settings` — no redeploy needed to onboard a new hub, game, or auto-thread channel.
+Around that core, the bot bundles game roles + LFG pings (`/play`), a **self-assign role board** (a dedicated channel where members click buttons to toggle roles and game access), **static voice channels** (existing VCs that get the same text-channel + control-panel treatment without ever being renamed or deleted), self-service profiles and birthdays, staff-role requests, auto-threads, social-feed reposting, reaction roles, channel archiving, and an owner-reviewed `/report → GitHub issue` flow. Almost everything is configurable at runtime through `/sudo → Settings` — no redeploy needed to onboard a new hub, game, auto-thread channel, or self-assign entry.
+
+Game channels are **visible to everyone by default** (opt-out model); members hide individual channels via `/games` or the self-assign board. The default can be flipped to opt-in at `/sudo → Settings → Game Defaults`.
 
 A companion web dashboard ([botpanel](https://github.com/jason-tucker/botpanel)) drives the same actions over a Redis command bus, so the bot exposes most flows as both Discord interactions and RPC verbs.
 
@@ -108,7 +110,7 @@ All variables are validated by Zod in `src/config/env.ts`; the bot exits on a mi
 | `ADMIN_CHANNEL_ID` | No | Sudo-only bot admin channel |
 | `STAFF_APPROVAL_THREAD_ID` | No | Thread where staff-role requests are posted |
 | `STAFF_APPROVAL_PING_USER_ID` | No | User pinged on each staff request |
-| `VOICE_CLEANUP_DELAY_MS` | No | ms before empty channels are cleaned up (code default `0`; `.env.example` seeds `30000`). Overridable via `/sudo → Settings → Voice`. |
+| `VOICE_CLEANUP_DELAY_MS` | No | ms before empty channels are cleaned up (default `90000`). Overridable via `/sudo → Settings → Voice`. |
 | `BIRTHDAY_CHANNEL_ID` | No | Birthday-ping channel (also editable at `/sudo → Settings → Channels`) |
 | `GITHUB_TOKEN` | No* | Fine-grained PAT with **Issues: Read & Write** on `GITHUB_REPO`. *Required for `/report`. |
 | `GITHUB_REPO` | No* | `owner/name`, e.g. `jason-tucker/squishybot`. *Required for `/report`. |

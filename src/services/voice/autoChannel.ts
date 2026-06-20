@@ -49,29 +49,8 @@ export async function createAutoChannel(
   )
 
   // 2. Create the attached text channel at position 0 (top of category, same name as voice)
-  const textChannelName = displayName.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'voice-chat'
-  let textChannel
-  try {
-    textChannel = await guild.channels.create({
-      name: textChannelName,
-      type: ChannelType.GuildText,
-      parent: getSetting('channel.auto_voice_category') ?? env.AUTO_VOICE_CATEGORY_ID,
-      position: 0,
-      permissionOverwrites: [
-        { id: guild.roles.everyone, deny: [PermissionFlagsBits.ViewChannel], type: OverwriteType.Role },
-        { id: botId, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ManageMessages, PermissionFlagsBits.ReadMessageHistory], type: OverwriteType.Member },
-        { id: owner.id, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ReadMessageHistory], type: OverwriteType.Member },
-        ...env.SUDO_ROLE_IDS.map(roleId => ({
-          id: roleId,
-          allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ManageMessages, PermissionFlagsBits.ReadMessageHistory],
-          type: OverwriteType.Role as const,
-        })),
-      ],
-    })
-  } catch (err) {
-    logger.error('Failed to create text channel for auto voice:', err)
-    return null
-  }
+  const textChannel = await createTextChannelForVoice(guild, botId, owner, displayName)
+  if (!textChannel) return null
 
   // 3. Insert DB record. Guarded with a try/catch because the unique
   //    constraint on voice_channel_id can fire when a parallel hub-join
@@ -128,6 +107,141 @@ export async function createAutoChannel(
   })
 
   return record
+}
+
+/**
+ * Shared helper — creates only the text channel (no VC rename, no hub
+ * replacement). Used by both createAutoChannel and createStaticChannelText.
+ */
+async function createTextChannelForVoice(
+  guild: Guild,
+  botId: string,
+  owner: GuildMember,
+  displayName: string,
+): Promise<import('discord.js').TextChannel | null> {
+  const textChannelName = displayName.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'voice-chat'
+  try {
+    const tc = await guild.channels.create({
+      name: textChannelName,
+      type: ChannelType.GuildText,
+      parent: getSetting('channel.auto_voice_category') ?? env.AUTO_VOICE_CATEGORY_ID,
+      position: 0,
+      permissionOverwrites: [
+        { id: guild.roles.everyone, deny: [PermissionFlagsBits.ViewChannel], type: OverwriteType.Role },
+        { id: botId, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ManageMessages, PermissionFlagsBits.ReadMessageHistory], type: OverwriteType.Member },
+        { id: owner.id, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ReadMessageHistory], type: OverwriteType.Member },
+        ...env.SUDO_ROLE_IDS.map(roleId => ({
+          id: roleId,
+          allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ManageMessages, PermissionFlagsBits.ReadMessageHistory],
+          type: OverwriteType.Role as const,
+        })),
+      ],
+    })
+    return tc as import('discord.js').TextChannel
+  } catch (err) {
+    logger.error('Failed to create text channel for auto voice:', err)
+    return null
+  }
+}
+
+/**
+ * Creates a companion text channel + DB record + control panel for a STATIC
+ * voice channel. The VC is not renamed, not replaced, and will never be
+ * deleted by the bot. Only the companion text channel follows the cleanup
+ * lifecycle (deleted when empty; VC stays).
+ *
+ * Uses the sentinel `sourceHubId: 'static'` in the auto_channels row —
+ * no migration, no new column.
+ *
+ * Returns null if creation fails or if the VC already has an active record.
+ */
+export async function createStaticChannelText(
+  client: Client,
+  guild: Guild,
+  owner: GuildMember,
+  staticVc: VoiceChannel,
+): Promise<AutoChannelRecord | null> {
+  const botId = client.user!.id
+  const displayName = staticVc.name
+
+  const textChannel = await createTextChannelForVoice(guild, botId, owner, displayName)
+  if (!textChannel) return null
+
+  let record: AutoChannelRecord
+  try {
+    const [row] = await db.insert(autoChannels).values({
+      guildId: guild.id,
+      voiceChannelId: staticVc.id,
+      textChannelId: textChannel.id,
+      ownerUserId: owner.id,
+      sourceHubId: 'static',
+      fallbackName: displayName,
+      nameTemplate: null,
+      manualName: null,
+      userLimit: staticVc.userLimit ?? 0,
+      autoNameEnabled: false,
+    }).returning()
+    record = row
+  } catch (err: any) {
+    if (err?.cause?.code === '23505' || err?.code === '23505') {
+      logger.warn(`createStaticChannelText: voice_channel_id=${staticVc.id} already has an active record — cleanup race. Removing half-created text channel.`)
+      await textChannel.delete().catch(() => {})
+      return null
+    }
+    throw err
+  }
+  trackAutoChannelText(record.textChannelId)
+  trackAutoChannelVoice(record.voiceChannelId, record.textChannelId)
+
+  await recordMemberJoin(record.voiceChannelId, owner.id, guild.id)
+  await postOrUpdateControlPanel(client, record, textChannel)
+  await postOrUpdateSticky(client, record)
+
+  logger.info(`Static channel text created: vc=${staticVc.id} tc=${textChannel.id} owner=${owner.id}`)
+
+  void publish<VoiceChannelCreatedEvent>(voiceCh('channel_created'), {
+    voiceChannelId: record.voiceChannelId,
+    textChannelId: record.textChannelId,
+    ownerUserId: record.ownerUserId,
+    name: displayName,
+    ts: new Date().toISOString(),
+  })
+
+  return record
+}
+
+/**
+ * Deletes ONLY the companion text channel (and the DB row) for a static VC.
+ * The voice channel itself is left untouched.
+ */
+export async function deleteStaticText(client: Client, record: AutoChannelRecord): Promise<void> {
+  const guild = client.guilds.cache.get(record.guildId)
+  if (!guild) return
+
+  cancelCleanup(record.voiceChannelId)
+  cancelAllHideGracesFor(record.voiceChannelId)
+  clearRenameThrottle(record.voiceChannelId)
+  cancelPanelRefresh(record.voiceChannelId)
+  clearStickyDebounce(record.textChannelId)
+  clearPanelHash(record.voiceChannelId)
+
+  // Delete only the text channel; leave the VC alone.
+  await guild.channels.delete(record.textChannelId).catch(() => {})
+
+  await db.delete(autoChannels).where(eq(autoChannels.voiceChannelId, record.voiceChannelId)).catch(() => {})
+  await clearMembers(record.voiceChannelId)
+  untrackAutoChannelText(record.textChannelId)
+  untrackAutoChannelVoice(record.voiceChannelId)
+
+  logger.info(`Static channel text deleted (VC kept): vc=${record.voiceChannelId} tc=${record.textChannelId}`)
+
+  void publish<VoiceChannelDeletedEvent>(voiceCh('channel_deleted'), {
+    voiceChannelId: record.voiceChannelId,
+    textChannelId: record.textChannelId,
+    ownerUserId: record.ownerUserId,
+    name: record.fallbackName ?? '',
+    ts: new Date().toISOString(),
+  })
 }
 
 export async function deleteAutoChannel(client: Client, record: AutoChannelRecord): Promise<void> {

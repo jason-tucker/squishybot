@@ -29,7 +29,7 @@ const envSchema = z.object({
   // Initial hub seed list. Once hubs are registered (DB-backed), this can be empty —
   // /sudo → Settings → Hub Channels manages the list at runtime.
   HUB_CHANNEL_IDS: commaSeparated,
-  VOICE_CLEANUP_DELAY_MS: z.coerce.number().int().min(0).default(0),
+  VOICE_CLEANUP_DELAY_MS: z.coerce.number().int().min(0).default(90000),
 
   // Optional channel IDs — empty string treated as unset
   LOG_CHANNEL_ID: z.string().min(1).optional().or(z.literal('').transform(() => undefined)),
