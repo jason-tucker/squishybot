@@ -6,6 +6,7 @@ import { eq } from 'drizzle-orm'
 import { env } from '../../config/env'
 import { generateChannelName } from '../../utils/channelName'
 import { createAutoChannel } from './autoChannel'
+import { scheduleCleanup } from './cleanupScheduler'
 import { logger } from '../logger'
 import {
   getSetting,
@@ -122,6 +123,21 @@ export async function handleHubJoin(client: Client, guild: Guild, member: GuildM
 
     // Create replacement hub in same category
     await createReplacementHub(guild, hubRecord)
+
+    // Insta-leave race: the joiner may have already left the renamed VC before
+    // this multi-await creation finished. If they left *before* the auto_channels
+    // row landed in the in-memory cache, the voiceStateUpdate LEAVE branch bailed
+    // on its `isAutoChannelVoice` hot-path gate and never scheduled cleanup —
+    // leaving an empty room that just sits there until the next reconcile. Now
+    // that the channel exists, re-derive occupancy from the live voice-state
+    // cache (discord.js updates it before emitting the gateway event, so it's
+    // authoritative) and schedule cleanup ourselves if nobody is left. Idempotent
+    // with the LEAVE branch — scheduleCleanup no-ops if a timer already exists.
+    const liveVc = guild.channels.cache.get(record.voiceChannelId)
+    if (liveVc?.isVoiceBased() && liveVc.members.size === 0) {
+      logger.info(`Auto channel vc=${record.voiceChannelId} is empty right after creation (joiner left immediately) — scheduling cleanup`)
+      await scheduleCleanup(client, record.voiceChannelId)
+    }
   } finally {
     handlingHubs.delete(hubChannelId)
   }

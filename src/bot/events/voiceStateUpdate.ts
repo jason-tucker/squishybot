@@ -117,9 +117,20 @@ async function handleVoiceStateUpdate(client: Client, oldState: VoiceState, newS
         const vc = guild.channels.cache.get(joinedChannelId)
           ?? await guild.channels.fetch(joinedChannelId).catch(() => null)
         if (vc?.isVoiceBased()) {
-          await createStaticChannelText(client, guild, member, vc as any).catch(err =>
+          const staticRecord = await createStaticChannelText(client, guild, member, vc as any).catch(err => {
             logger.warn('Failed to create static channel text:', err)
-          )
+            return null
+          })
+          // Same insta-leave race as the hub path: if the joiner left before the
+          // companion text channel's record hit the cache, the LEAVE branch
+          // above bailed on its `isAutoChannelVoice` gate and never scheduled
+          // cleanup of the orphaned text channel. Re-check occupancy now and
+          // schedule cleanup (deleteStaticText keeps the VC, drops the text
+          // channel). Idempotent with the LEAVE branch.
+          if (staticRecord && vc.members.size === 0) {
+            logger.info(`Static channel vc=${joinedChannelId} is empty right after companion-text creation (joiner left immediately) — scheduling cleanup`)
+            await scheduleCleanup(client, joinedChannelId)
+          }
         }
         return
       }

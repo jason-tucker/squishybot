@@ -5,6 +5,11 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [0.12.1] — 2026-06-27
+
+### Fixed
+- **Auto/static voice channels left orphaned when a user joins a hub and instantly leaves.** The join's `handleHubJoin → createAutoChannel` chain is multi-`await` (rename hub → create text channel → DB insert → register in the in-memory cache); if the user left before that cache registration landed, the `voiceStateUpdate` LEAVE branch bailed on its `isAutoChannelVoice` hot-path gate and never scheduled cleanup, so the freshly-created empty room "just sat there" until the next reconcile (bot restart). `handleHubJoin` (and the static-channel join path in `voiceStateUpdate.ts`) now re-check occupancy from the live voice-state cache after creation and schedule cleanup if the channel is already empty. Idempotent with the LEAVE branch.
+
 ## [0.12.0] — 2026-06-20
 
 ### Added
