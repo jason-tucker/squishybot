@@ -5,6 +5,15 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [0.12.2] — 2026-07-06
+
+### Docs
+- **README.md: voice control panel buttons table corrected** — replaced the stale pre-0.10.0 single-panel table (six buttons including the removed 📋 Templates picker) with the current two-button public panel (✏️ Rename, ⚙️ Options) plus the accurate list of buttons inside the ⚙️ Options sub-panel (Locked/Unlocked, Hidden/Visible, Hosts, 🏷️ Auto Name, Claim, Delete), matching `CLAUDE.md` and the 0.10.0 changelog entry.
+- **README.md: table count corrected 19 → 21** — `src/db/schema/index.ts` exports 21 `pgTable` definitions (verified by grep), not 19.
+- **README.md: added missing `PANEL_BASE_URL` row** to the Configuration table — present in `src/config/env.ts` and `CLAUDE.md` but absent from README.
+- **README.md: `scripts/squishybot` CLI list completed** — added the `down`, `build`, `shell`, and `where` subcommands, which exist in `scripts/squishybot` but were missing from the README table.
+- **docs/DEPLOYMENT.md: documented the `BOTPANEL_DISPATCH_PAT` secret** required by `.github/workflows/notify-panel-schema-change.yml` (the schema-change `repository_dispatch` to `jason-tucker/botpanel`), which was missing from the GitHub Secrets section.
+
 ## [0.12.1] — 2026-06-27
 
 ### Fixed
