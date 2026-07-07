@@ -75,6 +75,12 @@ Go to **GitHub repo → Settings → Secrets and variables → Actions → New r
 
 > **GHCR authentication**: the workflow uses the automatic `GITHUB_TOKEN` — no extra secret needed.
 
+> **Schema-sync workflow**: `.github/workflows/notify-panel-schema-change.yml` fires a `repository_dispatch` at `jason-tucker/botpanel` whenever a push to `main` touches `src/db/schema/**`, so botpanel can re-vendor the Drizzle schemas. It needs its own secret, **not** part of the table above:
+>
+> | Secret | Value |
+> |---|---|
+> | `BOTPANEL_DISPATCH_PAT` | Fine-grained PAT with `repository_dispatch` access to `jason-tucker/botpanel` |
+
 ### Generating a deploy SSH key
 
 ```bash

@@ -36,7 +36,7 @@ Key services live under `src/services/voice/`: `hubManager`, `autoChannel`, `aut
 
 ### Data + integration
 
-- **PostgreSQL + Drizzle ORM**, 19 tables. Schema lives in `src/db/schema/*.ts`; forward-only SQL migrations are committed to `src/db/migrations/` and applied by `node dist/db/migrate.js` at container start (`drizzle-kit push` is throwaway-local only). See the [Database Schema wiki](https://github.com/jason-tucker/squishybot/wiki/Database-Schema).
+- **PostgreSQL + Drizzle ORM**, 21 tables. Schema lives in `src/db/schema/*.ts`; forward-only SQL migrations are committed to `src/db/migrations/` and applied by `node dist/db/migrate.js` at container start (`drizzle-kit push` is throwaway-local only). See the [Database Schema wiki](https://github.com/jason-tucker/squishybot/wiki/Database-Schema).
 - **Runtime config** is stored in `bot_settings` (key/value, with env fallback) and edited live via `/sudo → Settings`. Feature flags, channel IDs, hub list, games, social feeds, and more are all DB-authoritative.
 - **Redis** carries a fan-out **event bus** (`bot.squishy.*` — ready/heartbeat/voice/member events) and a botpanel **command bus** (`cmd.squishy.<verb>`, HMAC-signed). RPC handlers under `src/services/rpc/handlers/` mirror the slash flows. Both are optional: with `BOTPANEL_RPC_SECRET` unset or Redis down, the bot runs normally.
 
@@ -115,6 +115,7 @@ All variables are validated by Zod in `src/config/env.ts`; the bot exits on a mi
 | `GITHUB_TOKEN` | No* | Fine-grained PAT with **Issues: Read & Write** on `GITHUB_REPO`. *Required for `/report`. |
 | `GITHUB_REPO` | No* | `owner/name`, e.g. `jason-tucker/squishybot`. *Required for `/report`. |
 | `BOTPANEL_RPC_SECRET` | No | Shared HMAC secret with botpanel for the Redis command/cache bus. Unset → RPC + cache-invalidate subscribers disabled (bot still runs). |
+| `PANEL_BASE_URL` | No | Base URL of the botpanel website for the "do this on the website" links appended to `/voice`, `/settings`, `/sudo`, and `/games` (self mode) replies. Defaults to `https://bots.tucker.host`. |
 | `REDIS_URL` | No | Event/command bus. Set by Docker Compose (`redis://redis:6379`). |
 | `BOT_IMAGE` | No | GHCR image for `docker compose pull` (default `ghcr.io/jason-tucker/squishybot:latest`). Set by CI. |
 | `POSTGRES_PASSWORD` | No | Postgres password for the Compose-managed DB. Use alphanumeric/hex (avoid `#`, `*`, `?`). |
@@ -145,15 +146,21 @@ Required Discord bot permissions: **Manage Channels**, **Move Members**, **Manag
 
 ### Voice control panel buttons
 
-The control panel in each auto-channel text channel is the primary interaction surface (slash commands are fallbacks). Toggle buttons use the **status-flip convention** — the label shows the *current* state, not the pending action.
+The control panel in each auto-channel text channel is the primary interaction surface (slash commands are fallbacks). The public panel (the channel's top message) is deliberately **two buttons only** — everything else lives behind ⚙️ Options to keep it clean. Toggle buttons use the **status-flip convention** — the label shows the *current* state, not the pending action. The bottom silent **📋 Open Panel** sticky remains the way to (re)open a private ephemeral copy when chat buries the panel.
 
 | Button | What it does |
 |---|---|
-| ✏️ **Rename** | Modal to set a custom name (also updates `fallback_name`) |
-| 🔒 **Locked** / 🔓 **Unlocked** | Toggle `@everyone` Connect |
-| 🙈 **Hidden** / 👁️ **Visible** | Toggle channel visibility |
+| ✏️ **Rename** | Modal to set a custom name. A typed name **freezes** auto-naming and never reverts; leaving the box blank flips auto-naming back on (Smart) and re-derives the name. |
+| ⚙️ **Options** | Opens an ephemeral sub-panel holding everything below. Its toggle buttons re-render the Options panel in place and refresh the public panel. |
+
+**Inside ⚙️ Options:**
+
+| Button | What it does |
+|---|---|
+| 🔒 **Locked** / 🔓 **Unlocked** | Toggle `@everyone` Connect (label shows current state) |
+| 🙈 **Hidden** / 👁️ **Visible** | Toggle channel visibility (label shows current state) |
 | 👑 **Hosts** | Panel listing each member with their rank (👑 host · 🛡️ sudo · 👤 member); click to toggle host status |
-| 📋 **Templates** | Auto / Counter `[x/y]` / Comp 5-stack / Tryhard / Chill — sets name + user limit in one click |
+| 🏷️ **Auto Name** | Opens the Auto Name sub-panel: **Smart** (rename the room to whatever game 2+ members share — bare game name, no `(N)` prefix) / **Off** (freeze the current name) / one-shot **🎲 Randomize** (drops a random tech name and freezes it). Never touches the user limit. |
 | 👤 **Claim** | Take ownership when the original owner has left |
 | 🗑️ **Delete** | Delete both voice + text channels immediately |
 
@@ -174,15 +181,19 @@ Then from anywhere (auto-detects the project dir):
 squishybot start        # docker compose up -d (bot + db)
 squishybot stop         # stop the stack (preserves volumes)
 squishybot restart      # restart just the bot container
+squishybot down         # stop and remove containers (preserves volumes)
 squishybot status       # docker compose ps
 squishybot logs         # tail live logs (Ctrl+C to exit)
 squishybot tail 50      # last 50 log lines
 squishybot pull         # pull the latest image
 squishybot update       # git pull + image pull + up -d
+squishybot build        # build the image locally
 squishybot rebuild      # build image locally + restart
 squishybot deploy       # register slash commands (uses .env)
+squishybot shell        # open a shell inside the bot container
 squishybot db:shell     # psql into the postgres container
 squishybot env          # edit .env and reload containers
+squishybot where        # print the auto-detected project directory
 ```
 
 First-time VPS setup, CI secrets, rollback, and Unraid notes live in **[docs/DEPLOYMENT.md](docs/DEPLOYMENT.md)**.
