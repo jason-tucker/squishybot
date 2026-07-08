@@ -20,6 +20,7 @@ import { autoChannels } from '../../db/schema'
 import { eq } from 'drizzle-orm'
 import { settingOrNumber } from '../settings'
 import { logger } from '../logger'
+import { logChannelEvent } from './channelLog'
 
 const pendingTimers = new Map<string, ReturnType<typeof setTimeout>>()
 
@@ -82,6 +83,10 @@ async function promoteActingOwner(client: Client, voiceChannelId: string): Promi
     .catch(() => {})
 
   logger.info(`Owner grace expired — promoted ${newOwner} (was ${record.ownerUserId}) in vc=${voiceChannelId}`)
+  // The default automatic transfer path (grace enabled + an eligible acting
+  // owner). The instant-transfer branches in voiceStateUpdate only fire when
+  // grace is off, so without this the common case would go unlogged.
+  logChannelEvent({ voiceChannelId, guildId: record.guildId, type: 'owner_transfer', actorUserId: newOwner })
 
   const updated = { ...record, ownerUserId: newOwner, hostUserIds: newHosts, actingOwnerUserId: null, ownerGraceExpiresAt: null }
   const { postOrUpdateControlPanel } = await import('./controlPanel')

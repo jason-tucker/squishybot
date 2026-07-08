@@ -16,6 +16,7 @@ import { db } from '../../../../db/client'
 import { autoChannels } from '../../../../db/schema'
 import { sanitizeChannelName } from '../../../../utils/channelName'
 import { plainChannelName } from '../../../voice/autoNaming'
+import { logChannelEvent } from '../../../voice/channelLog'
 import { postOrUpdateControlPanel } from '../../../voice/controlPanel'
 import { logger } from '../../../logger'
 
@@ -64,6 +65,7 @@ export const renameHandler: VerbHandler = async (params, ctx) => {
     await db.update(autoChannels)
       .set({ manualName: sanitized, autoNameEnabled: false, fallbackName: sanitized })
       .where(eq(autoChannels.voiceChannelId, voiceChannelId))
+    logChannelEvent({ voiceChannelId, guildId: record.guildId, type: 'rename', actorUserId: null, detail: sanitized })
 
     const updated = { ...record, manualName: sanitized, autoNameEnabled: false, fallbackName: sanitized }
     await postOrUpdateControlPanel(ctx.client, updated).catch(() => {})

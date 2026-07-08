@@ -17,6 +17,7 @@ import { eq } from 'drizzle-orm'
 import type { AutoChannelRecord } from '../../types/voice'
 import { logger } from '../logger'
 import { computeAutoName, decorateGameName, plainChannelName } from './autoNaming'
+import { logChannelEvent } from './channelLog'
 
 const RENAME_COOLDOWN_MS = 10 * 60 * 1000
 const lastRename = new Map<string, number>()
@@ -87,6 +88,11 @@ export async function maybeRenameChannel(
   await vc.setName(desired).catch(err =>
     logger.warn(`auto-rename: setName failed for ${voiceChannelId}: ${(err as Error).message}`),
   )
+  // Only log game-driven renames; a fallback revert is already implied by the
+  // corresponding game_stop entry, so logging it too would just be noise.
+  if (computed !== null) {
+    logChannelEvent({ voiceChannelId, guildId: record.guildId, type: 'auto_rename', actorUserId: null, detail: desired })
+  }
 
   // Keep the attached text channel in sync.
   const tc = guild.channels.cache.get(record.textChannelId)

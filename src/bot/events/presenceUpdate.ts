@@ -7,6 +7,7 @@ import { maybeRenameChannel, clearRenameState } from '../../services/voice/autoR
 import { debouncedPanelRefresh } from '../../services/voice/controlPanel'
 import { getBoolSetting, isAutoChannelVoice } from '../../services/settings'
 import { logger } from '../../services/logger'
+import { logChannelEvent } from '../../services/voice/channelLog'
 
 /** Drop the per-channel rename state when an auto-channel is deleted. */
 export function clearRenameThrottle(voiceChannelId: string): void {
@@ -45,6 +46,15 @@ export function registerPresenceUpdate(client: Client): void {
 
     const [record] = await db.select().from(autoChannels).where(eq(autoChannels.voiceChannelId, memberVcId))
     if (!record) return
+
+    // Activity log: games only. Compare Playing game NAMES (not the full
+    // fingerprint) so RP detail/party ticks on the same game don't spam the log.
+    const oldGame = oldPresence?.activities.find(a => a.type === ActivityType.Playing)?.name ?? null
+    const newGame = newPresence.activities.find(a => a.type === ActivityType.Playing)?.name ?? null
+    if (oldGame !== newGame) {
+      if (oldGame) logChannelEvent({ voiceChannelId: memberVcId, guildId: record.guildId, type: 'game_stop', actorUserId: newPresence.userId!, detail: oldGame })
+      if (newGame) logChannelEvent({ voiceChannelId: memberVcId, guildId: record.guildId, type: 'game_start', actorUserId: newPresence.userId!, detail: newGame })
+    }
 
     // Rename is gated by the feature flag so the kill switch works.
     // Pass the record we already have to avoid maybeRenameChannel's own

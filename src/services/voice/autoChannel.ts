@@ -1,5 +1,5 @@
 import type { Client, Guild, GuildMember, VoiceChannel } from 'discord.js'
-import { ChannelType, PermissionFlagsBits, OverwriteType } from 'discord.js'
+import { ChannelType, PermissionFlagsBits, OverwriteType, ActivityType } from 'discord.js'
 import { db } from '../../db/client'
 import { autoChannels } from '../../db/schema'
 import { eq } from 'drizzle-orm'
@@ -11,6 +11,7 @@ import { postOrUpdateSticky } from './sticky'
 import { scheduleCleanup, cancelCleanup } from './cleanupScheduler'
 import { cancelAllHideGracesFor } from './hideGrace'
 import { clearMembers, recordMemberJoin } from './voiceMembers'
+import { clearChannelLog, logChannelEvent } from './channelLog'
 import { plainChannelName } from './autoNaming'
 import { clearRenameThrottle } from '../../bot/events/presenceUpdate'
 import { clearStickyDebounce } from '../../bot/events/messageCreate'
@@ -91,6 +92,9 @@ export async function createAutoChannel(
   // immediately. voiceStateUpdate fires for them too but the order isn't
   // guaranteed relative to the panel's first render.
   await recordMemberJoin(record.voiceChannelId, owner.id, guild.id)
+  logChannelEvent({ voiceChannelId: record.voiceChannelId, guildId: guild.id, type: 'created', actorUserId: owner.id })
+  const ownerGame = owner.presence?.activities.find(a => a.type === ActivityType.Playing)?.name ?? null
+  if (ownerGame) logChannelEvent({ voiceChannelId: record.voiceChannelId, guildId: guild.id, type: 'game_start', actorUserId: owner.id, detail: ownerGame })
 
   // 4. Post control panel + sticky. Pass the freshly-created textChannel so
   // we don't depend on the bot's channel cache having caught up to the create.
@@ -195,6 +199,9 @@ export async function createStaticChannelText(
   trackAutoChannelVoice(record.voiceChannelId, record.textChannelId)
 
   await recordMemberJoin(record.voiceChannelId, owner.id, guild.id)
+  logChannelEvent({ voiceChannelId: record.voiceChannelId, guildId: guild.id, type: 'created', actorUserId: owner.id })
+  const ownerGame = owner.presence?.activities.find(a => a.type === ActivityType.Playing)?.name ?? null
+  if (ownerGame) logChannelEvent({ voiceChannelId: record.voiceChannelId, guildId: guild.id, type: 'game_start', actorUserId: owner.id, detail: ownerGame })
   await postOrUpdateControlPanel(client, record, textChannel)
   await postOrUpdateSticky(client, record)
 
@@ -231,6 +238,7 @@ export async function deleteStaticText(client: Client, record: AutoChannelRecord
 
   await db.delete(autoChannels).where(eq(autoChannels.voiceChannelId, record.voiceChannelId)).catch(() => {})
   await clearMembers(record.voiceChannelId)
+  await clearChannelLog(record.voiceChannelId)
   untrackAutoChannelText(record.textChannelId)
   untrackAutoChannelVoice(record.voiceChannelId)
 
@@ -263,6 +271,7 @@ export async function deleteAutoChannel(client: Client, record: AutoChannelRecor
 
   await db.delete(autoChannels).where(eq(autoChannels.voiceChannelId, record.voiceChannelId)).catch(() => {})
   await clearMembers(record.voiceChannelId)
+  await clearChannelLog(record.voiceChannelId)
   untrackAutoChannelText(record.textChannelId)
   untrackAutoChannelVoice(record.voiceChannelId)
 

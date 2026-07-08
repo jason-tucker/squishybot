@@ -8,6 +8,7 @@ import { postOrUpdateControlPanel } from '../../services/voice/controlPanel'
 import { maybeRenameChannel } from '../../services/voice/autoRename'
 import { sanitizeChannelName } from '../../utils/channelName'
 import { plainChannelName } from '../../services/voice/autoNaming'
+import { logChannelEvent } from '../../services/voice/channelLog'
 
 export async function handleVoiceRenameModal(interaction: ModalSubmitInteraction): Promise<void> {
   const decoded = decodeVcId(interaction.customId)
@@ -43,6 +44,7 @@ export async function handleVoiceRenameModal(interaction: ModalSubmitInteraction
     await db.update(autoChannels)
       .set({ autoNameEnabled: true, nameTemplate: 'auto', manualName: null })
       .where(eq(autoChannels.voiceChannelId, voiceChannelId))
+    logChannelEvent({ voiceChannelId, guildId: record.guildId, type: 'auto_on', actorUserId: interaction.user.id })
     const reverted = { ...record, autoNameEnabled: true, nameTemplate: 'auto', manualName: null }
     await maybeRenameChannel(interaction.client, reverted)
     await postOrUpdateControlPanel(interaction.client, reverted)
@@ -76,6 +78,7 @@ export async function handleVoiceRenameModal(interaction: ModalSubmitInteraction
   await db.update(autoChannels)
     .set({ manualName: newName, autoNameEnabled: false, fallbackName: newName })
     .where(eq(autoChannels.voiceChannelId, voiceChannelId))
+  logChannelEvent({ voiceChannelId, guildId: record.guildId, type: 'rename', actorUserId: interaction.user.id, detail: newName })
 
   const updated = { ...record, manualName: newName, autoNameEnabled: false, fallbackName: newName }
   await postOrUpdateControlPanel(interaction.client, updated)

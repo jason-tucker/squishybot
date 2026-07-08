@@ -18,6 +18,8 @@ import { postOrUpdateControlPanel, buildPanelPayloadForRecord } from '../../serv
 import { buildOptionsPanelPayload, buildAutoNamePanelPayload } from '../../embeds/voiceControlPanel'
 import { maybeRenameChannel } from '../../services/voice/autoRename'
 import { plainChannelName } from '../../services/voice/autoNaming'
+import { logChannelEvent, listChannelLog } from '../../services/voice/channelLog'
+import { buildChannelLogPayload } from '../../embeds/voiceLog'
 import { randomTechName } from '../../utils/randomName'
 import { deleteAutoChannel, deleteStaticText } from '../../services/voice/autoChannel'
 import { env } from '../../config/env'
@@ -87,6 +89,14 @@ export async function handleVoiceControlButton(interaction: ButtonInteraction): 
     return
   }
 
+  // 📜 Channel Log — viewable by anyone in the channel (no control guard),
+  // matching the sticky's Open Panel. Ephemeral so it never clutters chat.
+  if (action === 'log') {
+    const rows = await listChannelLog(voiceChannelId)
+    await interaction.reply({ ...buildChannelLogPayload(rows), ephemeral: true } as any)
+    return
+  }
+
   if (action === 'options') {
     if (!await requireControl(interaction, member, record)) return
     await interaction.reply({ ...buildOptionsPanelPayload(record), ephemeral: true } as any)
@@ -106,6 +116,7 @@ export async function handleVoiceControlButton(interaction: ButtonInteraction): 
     await db.update(autoChannels)
       .set({ autoNameEnabled: true, nameTemplate: 'auto', manualName: null })
       .where(eq(autoChannels.voiceChannelId, voiceChannelId))
+    logChannelEvent({ voiceChannelId, guildId: record.guildId, type: 'auto_on', actorUserId: member.id })
     const updated = { ...record, autoNameEnabled: true, nameTemplate: 'auto', manualName: null }
     await interaction.update({ ...buildAutoNamePanelPayload(updated), content: null } as any).catch(() => {})
     // Apply the smart name right away (no-op unless 2+ share a game; honours the
@@ -120,6 +131,7 @@ export async function handleVoiceControlButton(interaction: ButtonInteraction): 
     await db.update(autoChannels)
       .set({ autoNameEnabled: false })
       .where(eq(autoChannels.voiceChannelId, voiceChannelId))
+    logChannelEvent({ voiceChannelId, guildId: record.guildId, type: 'auto_off', actorUserId: member.id })
     const updated = { ...record, autoNameEnabled: false }
     await interaction.update({ ...buildAutoNamePanelPayload(updated), content: null } as any).catch(() => {})
     await postOrUpdateControlPanel(interaction.client, updated)
@@ -144,6 +156,7 @@ export async function handleVoiceControlButton(interaction: ButtonInteraction): 
     await db.update(autoChannels)
       .set({ manualName: baseName, autoNameEnabled: false, nameTemplate: null, fallbackName: baseName })
       .where(eq(autoChannels.voiceChannelId, voiceChannelId))
+    logChannelEvent({ voiceChannelId, guildId: record.guildId, type: 'randomize', actorUserId: member.id, detail: baseName })
     const updated = { ...record, manualName: baseName, autoNameEnabled: false, nameTemplate: null, fallbackName: baseName }
     await interaction.update({ ...buildAutoNamePanelPayload(updated), content: null } as any).catch(() => {})
     await postOrUpdateControlPanel(interaction.client, updated)
@@ -220,6 +233,7 @@ export async function handleVoiceControlButton(interaction: ButtonInteraction): 
 
     await db.update(autoChannels).set({ isLocked }).where(eq(autoChannels.voiceChannelId, voiceChannelId))
     const updated = { ...record, isLocked }
+    logChannelEvent({ voiceChannelId, guildId: record.guildId, type: isLocked ? 'lock' : 'unlock', actorUserId: member.id })
 
     void publish<VoiceLockToggledEvent>(voiceCh('lock_toggled'), {
       voiceChannelId, isLocked, ts: new Date().toISOString(),
@@ -265,6 +279,7 @@ export async function handleVoiceControlButton(interaction: ButtonInteraction): 
 
     await db.update(autoChannels).set({ isHidden }).where(eq(autoChannels.voiceChannelId, voiceChannelId))
     const updated = { ...record, isHidden }
+    logChannelEvent({ voiceChannelId, guildId: record.guildId, type: isHidden ? 'hide' : 'show', actorUserId: member.id })
 
     void publish<VoiceHiddenToggledEvent>(voiceCh('hidden_toggled'), {
       voiceChannelId, isHidden, ts: new Date().toISOString(),
@@ -378,6 +393,8 @@ export async function handleVoiceControlButton(interaction: ButtonInteraction): 
       return
     }
     const updated = claimed[0]
+
+    logChannelEvent({ voiceChannelId, guildId: record.guildId, type: 'claim', actorUserId: member.id })
 
     void publish<VoiceOwnerChangedEvent>(voiceCh('owner_changed'), {
       voiceChannelId,

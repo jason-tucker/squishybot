@@ -17,6 +17,7 @@ import { autoChannels } from '../../../../db/schema'
 import { postOrUpdateControlPanel } from '../../../voice/controlPanel'
 import { publish, voiceCh, type VoiceHiddenToggledEvent } from '../../../eventBus'
 import { env } from '../../../../config/env'
+import { logChannelEvent } from '../../../voice/channelLog'
 import { logger } from '../../../logger'
 
 const Schema = z.object({
@@ -65,6 +66,7 @@ export const hideHandler: VerbHandler = async (params, ctx) => {
 
     await db.update(autoChannels).set({ isHidden: hidden }).where(eq(autoChannels.voiceChannelId, voiceChannelId))
     const updated = { ...record, isHidden: hidden }
+    logChannelEvent({ voiceChannelId, guildId: record.guildId, type: hidden ? 'hide' : 'show', actorUserId: null })
 
     void publish<VoiceHiddenToggledEvent>(voiceCh('hidden_toggled'), {
       voiceChannelId, isHidden: hidden, ts: new Date().toISOString(),
