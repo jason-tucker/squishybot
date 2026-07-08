@@ -15,7 +15,7 @@ import { registerVerb, type VerbHandler } from '../../registry'
 import { db } from '../../../../db/client'
 import { autoChannels } from '../../../../db/schema'
 import { sanitizeChannelName } from '../../../../utils/channelName'
-import { decorateChannelName } from '../../../voice/autoNaming'
+import { plainChannelName } from '../../../voice/autoNaming'
 import { postOrUpdateControlPanel } from '../../../voice/controlPanel'
 import { logger } from '../../../logger'
 
@@ -51,9 +51,9 @@ export const renameHandler: VerbHandler = async (params, ctx) => {
       guild.channels.fetch(record.voiceChannelId).catch(() => null),
       guild.channels.fetch(record.textChannelId).catch(() => null),
     ])
-    // DB keeps the typed name undecorated; the visible name gets a trailing
-    // emoji + collision dodge — same rule as the in-bot rename flow.
-    const finalName = vc?.isVoiceBased() ? decorateChannelName(guild, sanitized, vc.id) : sanitized
+    // A typed name isn't a game → NO emoji, just a collision-dodging suffix.
+    // Same rule as the in-bot rename flow.
+    const finalName = vc?.isVoiceBased() ? plainChannelName(guild, sanitized, vc.id) : sanitized
     const textName = finalName.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'voice-chat'
 
     await Promise.all([

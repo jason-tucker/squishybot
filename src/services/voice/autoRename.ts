@@ -16,7 +16,7 @@ import { autoChannels } from '../../db/schema'
 import { eq } from 'drizzle-orm'
 import type { AutoChannelRecord } from '../../types/voice'
 import { logger } from '../logger'
-import { computeAutoName, decorateChannelName } from './autoNaming'
+import { computeAutoName, decorateGameName, plainChannelName } from './autoNaming'
 
 const RENAME_COOLDOWN_MS = 10 * 60 * 1000
 const lastRename = new Map<string, number>()
@@ -64,8 +64,11 @@ export async function maybeRenameChannel(
   const computed = computeAutoName(vc, record.ownerUserId)
   const base = computed ?? record.fallbackName
   if (!base) return
-  // Append a trailing emoji and dodge any collision with another channel name.
-  const desired = decorateChannelName(guild, base, voiceChannelId)
+  // A live shared game gets the trailing game emoji; a fallback name (no shared
+  // game) stays bare. Both dodge collisions with other channel names.
+  const desired = computed !== null
+    ? decorateGameName(guild, base, voiceChannelId)
+    : plainChannelName(guild, base, voiceChannelId)
   if (vc.name === desired) return
 
   const elapsed = Date.now() - (lastRename.get(voiceChannelId) ?? 0)

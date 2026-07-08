@@ -7,7 +7,7 @@ import { canControlChannel, isSudo } from '../../services/voice/permissions'
 import { postOrUpdateControlPanel } from '../../services/voice/controlPanel'
 import { maybeRenameChannel } from '../../services/voice/autoRename'
 import { sanitizeChannelName } from '../../utils/channelName'
-import { decorateChannelName } from '../../services/voice/autoNaming'
+import { plainChannelName } from '../../services/voice/autoNaming'
 
 export async function handleVoiceRenameModal(interaction: ModalSubmitInteraction): Promise<void> {
   const decoded = decodeVcId(interaction.customId)
@@ -62,10 +62,10 @@ export async function handleVoiceRenameModal(interaction: ModalSubmitInteraction
     interaction.guild!.channels.fetch(record.textChannelId).catch(() => null),
   ])
 
-  // The DB keeps the user's typed name undecorated (manual/fallback); the
-  // visible name gets a trailing emoji and dodges any collision with another
-  // channel — same rule as the auto-named channels.
-  const finalName = vc?.isVoiceBased() ? decorateChannelName(vc.guild, newName, vc.id) : newName
+  // A manually typed name is NOT a game, so it gets NO emoji — just a
+  // collision-dodging suffix if it clashes with another channel. The DB keeps
+  // the user's typed name as manual/fallback.
+  const finalName = vc?.isVoiceBased() ? plainChannelName(vc.guild, newName, vc.id) : newName
   const textName = finalName.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'voice-chat'
 
   await Promise.all([

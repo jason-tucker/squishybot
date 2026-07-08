@@ -5,6 +5,11 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [0.12.3] — 2026-07-08
+
+### Changed
+- **Auto voice channels no longer carry a game emoji unless the room is named after an active game.** Previously every auto/renamed channel got a trailing 🎮 (or a fallback emoji) regardless of its name. Now the emoji is appended **only** when Smart auto-naming renames the room to a game 2+ members are actively playing (`decorateGameName`); freshly-created rooms, manual renames, random tech names, and fallback (no shared game) names stay bare via the new `plainChannelName` helper, which still dodges exact-name collisions with a numeric suffix. `decorateChannelName` in `src/services/voice/autoNaming.ts` was split into `decorateGameName` (emoji + collision dodge) and `plainChannelName` (no emoji), and all five call sites updated (`autoChannel`, `autoRename`, `voiceRename`, RPC `voice.rename`, and the Randomize button).
+
 ## [0.12.2] — 2026-07-06
 
 ### Docs

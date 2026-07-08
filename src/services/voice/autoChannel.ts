@@ -11,7 +11,7 @@ import { postOrUpdateSticky } from './sticky'
 import { scheduleCleanup, cancelCleanup } from './cleanupScheduler'
 import { cancelAllHideGracesFor } from './hideGrace'
 import { clearMembers, recordMemberJoin } from './voiceMembers'
-import { decorateChannelName } from './autoNaming'
+import { plainChannelName } from './autoNaming'
 import { clearRenameThrottle } from '../../bot/events/presenceUpdate'
 import { clearStickyDebounce } from '../../bot/events/messageCreate'
 import { logger } from '../logger'
@@ -37,10 +37,11 @@ export async function createAutoChannel(
   const effectiveName = overrideManualName ?? channelName
   const effectiveUserLimit = hubDefaults?.defaultUserLimit ?? 0
 
-  // The visible channel name carries a trailing emoji and dodges any collision
-  // with an existing channel. `effectiveName` (undecorated) is what we persist
-  // as `fallback_name` so later auto-renames re-decorate from a clean base.
-  const displayName = decorateChannelName(guild, effectiveName, existingVoiceChannel.id)
+  // A freshly-created room is NOT named after a game, so it gets NO emoji — just
+  // a collision-dodging name. The game emoji is only added later if Smart
+  // auto-naming renames the room to a game 2+ members share. `effectiveName`
+  // (undecorated) is persisted as `fallback_name` so later renames start clean.
+  const displayName = plainChannelName(guild, effectiveName, existingVoiceChannel.id)
 
   // 1. Rename the existing hub voice channel and move it to position 0 (top of category).
   // userLimit is bundled into this edit so it takes effect immediately if a hub default applies.
