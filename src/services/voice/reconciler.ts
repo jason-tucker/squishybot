@@ -12,6 +12,7 @@ import { postOrUpdateSticky } from './sticky'
 import { syncTextChannelPermissions } from './permissions'
 import { seedHubsFromEnv } from './hubManager'
 import { backfillMembers, clearMembers } from './voiceMembers'
+import { clearChannelLog } from './channelLog'
 import { logger } from '../logger'
 import { getSetting, unregisterHubChannel, untrackAutoChannelText, untrackAutoChannelVoice, updateHubChannelId } from '../settings'
 
@@ -64,6 +65,7 @@ export async function runReconciler(client: Client): Promise<ReconcilerResult> {
         await guild.channels.delete(record.textChannelId).catch(() => {})
         await db.delete(autoChannels).where(eq(autoChannels.voiceChannelId, record.voiceChannelId)).catch(() => {})
         await clearMembers(record.voiceChannelId)
+        await clearChannelLog(record.voiceChannelId)
         untrackAutoChannelText(record.textChannelId)
         untrackAutoChannelVoice(record.voiceChannelId)
         result.cleaned++
@@ -74,6 +76,7 @@ export async function runReconciler(client: Client): Promise<ReconcilerResult> {
       await guild.channels.delete(record.textChannelId).catch(() => {})
       await db.delete(autoChannels).where(eq(autoChannels.voiceChannelId, record.voiceChannelId)).catch(() => {})
       await clearMembers(record.voiceChannelId)
+      await clearChannelLog(record.voiceChannelId)
       untrackAutoChannelText(record.textChannelId)
       untrackAutoChannelVoice(record.voiceChannelId)
       result.cleaned++
@@ -110,6 +113,7 @@ export async function runReconciler(client: Client): Promise<ReconcilerResult> {
       untrackAutoChannelText(record.textChannelId)
       untrackAutoChannelVoice(record.voiceChannelId)
       await clearMembers(record.voiceChannelId)
+      await clearChannelLog(record.voiceChannelId)
 
       const firstMember = vc.members.first()
       if (firstMember) {

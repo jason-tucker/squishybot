@@ -5,6 +5,14 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [0.12.3] — 2026-07-08
+
+### Added
+- **Per-voice-channel activity log with a 📜 Log button.** Every auto/static voice channel now keeps a running log of what happened in it, opened from a new **📜 Log** button on the channel's bottom sticky (ephemeral; anyone in the channel can view it). It records panel **actions** (lock/unlock, hide/show, rename, claim, host add/remove, auto-name on/off, randomize), member **joins & leaves**, automatic **ownership transfers**, **game start/stop**, and game-driven **Smart auto-renames**. Games only (Discord "Playing" activity) — no streaming/watching/Spotify. Backed by a new `auto_channel_logs` table (capped at 200 rows per channel, dropped when the channel is torn down — including via the reconciler), service `src/services/voice/channelLog.ts`, ephemeral renderer `src/embeds/voiceLog.ts`, and migration `0002_talented_hellcat`. Writes are fire-and-forget so logging never blocks or breaks a voice/interaction hot path.
+
+### Changed
+- **Auto voice channels no longer carry a game emoji unless the room is named after an active game.** Previously every auto/renamed channel got a trailing 🎮 (or a fallback emoji) regardless of its name. Now the emoji is appended **only** when Smart auto-naming renames the room to a game 2+ members are actively playing (`decorateGameName`); freshly-created rooms, manual renames, random tech names, and fallback (no shared game) names stay bare via the new `plainChannelName` helper, which still dodges exact-name collisions with a numeric suffix. `decorateChannelName` in `src/services/voice/autoNaming.ts` was split into `decorateGameName` (emoji + collision dodge) and `plainChannelName` (no emoji), and all five call sites updated (`autoChannel`, `autoRename`, `voiceRename`, RPC `voice.rename`, and the Randomize button).
+
 ## [0.12.2] — 2026-07-06
 
 ### Docs

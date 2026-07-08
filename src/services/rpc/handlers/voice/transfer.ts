@@ -19,6 +19,7 @@ import { cancelGraceTimer } from '../../../voice/ownerGrace'
 import { syncTextChannelPermissions } from '../../../voice/permissions'
 import { postOrUpdateControlPanel } from '../../../voice/controlPanel'
 import { publish, voiceCh, type VoiceOwnerChangedEvent } from '../../../eventBus'
+import { logChannelEvent } from '../../../voice/channelLog'
 import { logger } from '../../../logger'
 
 const Schema = z.object({
@@ -60,6 +61,7 @@ export const transferHandler: VerbHandler = async (params, ctx) => {
       })
       .where(eq(autoChannels.voiceChannelId, voiceChannelId))
       .returning()
+    logChannelEvent({ voiceChannelId, guildId: record.guildId, type: 'owner_transfer', actorUserId: newOwnerUserId })
 
     // Resync text-channel perms so the new owner has the right overwrite.
     // Best-effort — if the channels are missing we still report success on

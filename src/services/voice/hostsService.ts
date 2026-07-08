@@ -21,6 +21,7 @@ import { logger } from '../logger'
 import { syncTextChannelPermissions } from './permissions'
 import { postOrUpdateControlPanel } from './controlPanel'
 import { publish, voiceCh, type VoiceHostsChangedEvent } from '../eventBus'
+import { logChannelEvent } from './channelLog'
 
 export type ToggleHostInput = {
   client: Client
@@ -104,6 +105,10 @@ export async function toggleHost(input: ToggleHostInput): Promise<ToggleHostResu
     userId,
     ts: new Date().toISOString(),
   })
+
+  // Centralized here so both the in-bot Hosts select and the voice.toggle_host
+  // RPC verb log the change through this one shared path.
+  logChannelEvent({ voiceChannelId, guildId: record.guildId, type: op === 'add' ? 'host_add' : 'host_remove', actorUserId: userId })
 
   logger.info(
     `Hosts ${op}: ${userId} ${op === 'add' ? '→' : '←'} vc=${voiceChannelId} (now ${updated.hostUserIds.length} hosts)`,

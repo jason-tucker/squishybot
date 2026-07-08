@@ -1,4 +1,5 @@
 import type { Client, VoiceState } from 'discord.js'
+import { ActivityType } from 'discord.js'
 import { db } from '../../db/client'
 import { autoChannels } from '../../db/schema'
 import { eq } from 'drizzle-orm'
@@ -10,6 +11,7 @@ import { cancelHideGrace, grantHideGrace } from '../../services/voice/hideGrace'
 import { cancelGraceTimer, getOwnerGraceMs, pickActingOwner, scheduleGracePromotion } from '../../services/voice/ownerGrace'
 import { maybeRenameChannel } from '../../services/voice/autoRename'
 import { recordMemberJoin, recordMemberLeave } from '../../services/voice/voiceMembers'
+import { logChannelEvent } from '../../services/voice/channelLog'
 import { isAutoChannelVoice } from '../../services/settings'
 import { logger } from '../../services/logger'
 import { recordActivity } from '../../services/presence'
@@ -82,6 +84,12 @@ async function handleVoiceStateUpdate(client: Client, oldState: VoiceState, newS
           await addMemberToTextChannel(textChannel as any, member)
         }
         await recordMemberJoin(joinedChannelId, member.id, guild.id)
+        logChannelEvent({ voiceChannelId: joinedChannelId, guildId: guild.id, type: 'join', actorUserId: member.id })
+        // If they walked in already playing something, record it — presenceUpdate
+        // won't fire on a voice join, so otherwise a resulting Smart auto-rename
+        // would look unexplained in the log.
+        const joinGame = member.presence?.activities.find(a => a.type === ActivityType.Playing)?.name ?? null
+        if (joinGame) logChannelEvent({ voiceChannelId: joinedChannelId, guildId: guild.id, type: 'game_start', actorUserId: member.id, detail: joinGame })
 
         // Owner returned during their grace window — restore them, drop the
         // acting owner, refresh the panel.
@@ -151,6 +159,7 @@ async function handleVoiceStateUpdate(client: Client, oldState: VoiceState, newS
       if (!record) return
 
       await recordMemberLeave(leftChannelId, member.id, guild.id)
+      logChannelEvent({ voiceChannelId: leftChannelId, guildId: guild.id, type: 'leave', actorUserId: member.id })
 
       // Owner, hosts, and the current acting owner keep their text-channel
       // overwrite when they leave the VC. Acting owner needs to retain access
@@ -206,6 +215,7 @@ async function handleVoiceStateUpdate(client: Client, oldState: VoiceState, newS
             .catch(() => {})
           logger.info(`Ownership transferred to ${newOwner.displayName} in vc=${leftChannelId}`)
           updatedRecord = { ...record, ownerUserId: newOwner.id, hostUserIds: newOwnerHosts, actingOwnerUserId: null, ownerGraceExpiresAt: null }
+          logChannelEvent({ voiceChannelId: leftChannelId, guildId: guild.id, type: 'owner_transfer', actorUserId: newOwner.id })
           void publish<VoiceOwnerChangedEvent>(voiceCh('owner_changed'), {
             voiceChannelId: leftChannelId,
             oldOwnerUserId: record.ownerUserId,
@@ -229,6 +239,7 @@ async function handleVoiceStateUpdate(client: Client, oldState: VoiceState, newS
           .catch(() => {})
         logger.info(`Acting owner ${member.id} left — grace cancelled, ownership permanently transferred to ${newOwner.displayName} in vc=${leftChannelId}`)
         updatedRecord = { ...record, ownerUserId: newOwner.id, hostUserIds: newOwnerHosts, actingOwnerUserId: null, ownerGraceExpiresAt: null }
+        logChannelEvent({ voiceChannelId: leftChannelId, guildId: guild.id, type: 'owner_transfer', actorUserId: newOwner.id })
         void publish<VoiceOwnerChangedEvent>(voiceCh('owner_changed'), {
           voiceChannelId: leftChannelId,
           oldOwnerUserId: record.ownerUserId,

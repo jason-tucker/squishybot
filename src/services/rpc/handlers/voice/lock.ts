@@ -15,6 +15,7 @@ import { db } from '../../../../db/client'
 import { autoChannels } from '../../../../db/schema'
 import { postOrUpdateControlPanel } from '../../../voice/controlPanel'
 import { publish, voiceCh, type VoiceLockToggledEvent } from '../../../eventBus'
+import { logChannelEvent } from '../../../voice/channelLog'
 import { logger } from '../../../logger'
 
 const Schema = z.object({
@@ -47,6 +48,7 @@ export const lockHandler: VerbHandler = async (params, ctx) => {
 
     await db.update(autoChannels).set({ isLocked: locked }).where(eq(autoChannels.voiceChannelId, voiceChannelId))
     const updated = { ...record, isLocked: locked }
+    logChannelEvent({ voiceChannelId, guildId: record.guildId, type: locked ? 'lock' : 'unlock', actorUserId: null })
 
     void publish<VoiceLockToggledEvent>(voiceCh('lock_toggled'), {
       voiceChannelId, isLocked: locked, ts: new Date().toISOString(),

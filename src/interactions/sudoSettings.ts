@@ -2216,6 +2216,7 @@ export async function handleSettingsButton(interaction: ButtonInteraction): Prom
     }
     const { db } = await import('../db/client')
     const { autoChannels, hubChannels, autoThreadChannels, archivedChannels } = await import('../db/schema')
+    const { clearChannelLog } = await import('../services/voice/channelLog')
 
     // Delete entirely-orphan rows (where every Discord reference is gone). For
     // partial orphans (e.g. games with only a missing ping_role_id), don't
@@ -2230,7 +2231,9 @@ export async function handleSettingsButton(interaction: ButtonInteraction): Prom
     let deleted = 0
     for (const r of autoRows) {
       if (!guild.channels.cache.has(r.voiceChannelId) && !guild.channels.cache.has(r.textChannelId)) {
-        await db.delete(autoChannels).where(eq(autoChannels.id, r.id)).catch(() => {}); deleted++
+        await db.delete(autoChannels).where(eq(autoChannels.id, r.id)).catch(() => {})
+        await clearChannelLog(r.voiceChannelId)
+        deleted++
       }
     }
     for (const r of hubRows) {

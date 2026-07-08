@@ -7,7 +7,8 @@ import { canControlChannel, isSudo } from '../../services/voice/permissions'
 import { postOrUpdateControlPanel } from '../../services/voice/controlPanel'
 import { maybeRenameChannel } from '../../services/voice/autoRename'
 import { sanitizeChannelName } from '../../utils/channelName'
-import { decorateChannelName } from '../../services/voice/autoNaming'
+import { plainChannelName } from '../../services/voice/autoNaming'
+import { logChannelEvent } from '../../services/voice/channelLog'
 
 export async function handleVoiceRenameModal(interaction: ModalSubmitInteraction): Promise<void> {
   const decoded = decodeVcId(interaction.customId)
@@ -43,6 +44,7 @@ export async function handleVoiceRenameModal(interaction: ModalSubmitInteraction
     await db.update(autoChannels)
       .set({ autoNameEnabled: true, nameTemplate: 'auto', manualName: null })
       .where(eq(autoChannels.voiceChannelId, voiceChannelId))
+    logChannelEvent({ voiceChannelId, guildId: record.guildId, type: 'auto_on', actorUserId: interaction.user.id })
     const reverted = { ...record, autoNameEnabled: true, nameTemplate: 'auto', manualName: null }
     await maybeRenameChannel(interaction.client, reverted)
     await postOrUpdateControlPanel(interaction.client, reverted)
@@ -62,10 +64,10 @@ export async function handleVoiceRenameModal(interaction: ModalSubmitInteraction
     interaction.guild!.channels.fetch(record.textChannelId).catch(() => null),
   ])
 
-  // The DB keeps the user's typed name undecorated (manual/fallback); the
-  // visible name gets a trailing emoji and dodges any collision with another
-  // channel — same rule as the auto-named channels.
-  const finalName = vc?.isVoiceBased() ? decorateChannelName(vc.guild, newName, vc.id) : newName
+  // A manually typed name is NOT a game, so it gets NO emoji — just a
+  // collision-dodging suffix if it clashes with another channel. The DB keeps
+  // the user's typed name as manual/fallback.
+  const finalName = vc?.isVoiceBased() ? plainChannelName(vc.guild, newName, vc.id) : newName
   const textName = finalName.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'voice-chat'
 
   await Promise.all([
@@ -76,6 +78,7 @@ export async function handleVoiceRenameModal(interaction: ModalSubmitInteraction
   await db.update(autoChannels)
     .set({ manualName: newName, autoNameEnabled: false, fallbackName: newName })
     .where(eq(autoChannels.voiceChannelId, voiceChannelId))
+  logChannelEvent({ voiceChannelId, guildId: record.guildId, type: 'rename', actorUserId: interaction.user.id, detail: newName })
 
   const updated = { ...record, manualName: newName, autoNameEnabled: false, fallbackName: newName }
   await postOrUpdateControlPanel(interaction.client, updated)

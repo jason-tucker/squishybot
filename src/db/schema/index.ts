@@ -1,5 +1,6 @@
 export * from './autoChannels'
 export * from './autoChannelMembers'
+export * from './autoChannelLogs'
 export * from './hubChannels'
 export * from './userProfiles'
 export * from './staffApprovals'

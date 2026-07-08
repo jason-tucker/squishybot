@@ -93,7 +93,10 @@ Eight slash commands are registered plus one right-click context menu (verified 
 The persistent control panel (in each auto-channel text channel) is the primary
 interaction surface. A silent sticky message at the bottom of every auto-channel
 text channel keeps a quick `📋 Open Panel` button visible no matter how much
-chat scrolls; clicking it gives you an ephemeral copy of the panel.
+chat scrolls; clicking it gives you an ephemeral copy of the panel. The sticky
+also carries a `📜 Log` button that opens an ephemeral **channel activity log**
+(actions, joins/leaves, game start/stop, ownership transfers) which anyone in
+the channel can view.
 
 ### Voice control panel buttons
 
@@ -181,6 +184,7 @@ then use (run `squishybot` with no args for the full list):
 |---|---|
 | `auto_channels` | Tracks active auto voice channels and their state. Static-channel companions use `sourceHubId='static'` as a sentinel — the voice channel itself is never renamed, replaced, or deleted; only the companion text channel follows normal cleanup. No new table. |
 | `auto_channel_members` | Per-channel join times (`voice_channel_id, user_id, joined_at`) — drives the panel's "In channel" list with `<t:N:R>` timestamps |
+| `auto_channel_logs` | Append-only per-channel activity log (actions, joins/leaves, game start/stop, ownership transfers). Keyed by voice channel; capped at 200 rows/channel; cleared on channel teardown (delete + reconciler). Surfaced via the 📜 Log button on the sticky. |
 | `hub_channels` | Registry of managed hub voice channels |
 | `bot_settings` | Runtime key/value config overrides edited via `/sudo → Settings`. Notable keys: `voice.static_channel_ids` (JSON array of voice channel IDs designated as static channels), `games.default_view_on` (bool, **default true** — game channels visible to @everyone by default). |
 | `sudo_users` | Members granted sudo at runtime (beyond the immutable `SUDO_USER_IDS` env list) |
@@ -234,7 +238,7 @@ The "Request a Staff Role" button (on `/settings → Staff Role`) goes through a
 
 All voice control interactions use: `vc:{voiceChannelId}:{action}`
 
-Actions: `delete`, `delete_confirm`, `rename` (button + modal), `lock`, `unlock`, `hide`, `show`, `hosts` (button + select), `claim`, `open_panel` (sticky button), `options` (open ⚙️ Options sub-panel), `auto_name` (open 🏷️ Auto Name sub-panel), `auto_on` / `auto_off` (toggle Smart auto-naming), `randomize` (random frozen name)
+Actions: `delete`, `delete_confirm`, `rename` (button + modal), `lock`, `unlock`, `hide`, `show`, `hosts` (button + select), `claim`, `open_panel` (sticky button), `log` (sticky button — open the 📜 Channel Log; ephemeral, anyone in the channel), `options` (open ⚙️ Options sub-panel), `auto_name` (open 🏷️ Auto Name sub-panel), `auto_on` / `auto_off` (toggle Smart auto-naming), `randomize` (random frozen name)
 
 Legacy/removed: `templates` (now aliases to `auto_name`) and `template_apply` (the old naming-template select — removed; `voiceTemplate.ts` deleted).
 
@@ -277,6 +281,7 @@ Other customId families:
 | `src/services/voice/autoChannel.ts` | Create/delete auto channel pair, manage permission overwrites |
 | `src/services/voice/controlPanel.ts` | Post and update the Components V2 control panel message |
 | `src/services/voice/cleanupScheduler.ts` | DB-backed cleanup timers for empty channels |
+| `src/services/voice/channelLog.ts` | Per-channel activity log — append/list/clear with a 200-row/channel prune; fire-and-forget writes feed the 📜 Log button (rendered by `src/embeds/voiceLog.ts`) |
 | `src/services/voice/reconciler.ts` | Startup recovery: orphan cleanup, hub recreation, panel repair |
 | `src/services/voice/permissions.ts` | `isSudo`, `isOwner`, `isHost`, `updateTextPermissions` |
 | `src/services/voice/autoNaming.ts` | Rich-presence-driven auto-rename, channel name decoration (trailing emoji dedup) |

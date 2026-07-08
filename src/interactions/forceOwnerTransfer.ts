@@ -27,6 +27,7 @@ import { eq } from 'drizzle-orm'
 import { requireSudo } from '../services/voice/permissions'
 import { sep } from '../utils/cv2'
 import { logger } from '../services/logger'
+import { logChannelEvent } from '../services/voice/channelLog'
 
 export async function handleForceOwnerChannelPick(interaction: StringSelectMenuInteraction): Promise<void> {
   if (!await requireSudo(interaction)) return
@@ -95,6 +96,7 @@ export async function handleForceOwnerUserPick(interaction: UserSelectMenuIntera
     })
     .where(eq(autoChannels.voiceChannelId, channelId))
     .returning()
+  logChannelEvent({ voiceChannelId: channelId, guildId: record.guildId, type: 'owner_transfer', actorUserId: newOwnerId })
 
   // Re-sync text-channel permissions so the new owner has the right overwrite.
   // Best-effort — if the channels are missing we still report success on the DB row.

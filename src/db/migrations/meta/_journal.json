@@ -15,6 +15,13 @@
       "when": 1781910078790,
       "tag": "0001_dizzy_komodo",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1783477630368,
+      "tag": "0002_talented_hellcat",
+      "breakpoints": true
     }
   ]
 }

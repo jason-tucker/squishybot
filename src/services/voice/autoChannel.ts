@@ -1,5 +1,5 @@
 import type { Client, Guild, GuildMember, VoiceChannel } from 'discord.js'
-import { ChannelType, PermissionFlagsBits, OverwriteType } from 'discord.js'
+import { ChannelType, PermissionFlagsBits, OverwriteType, ActivityType } from 'discord.js'
 import { db } from '../../db/client'
 import { autoChannels } from '../../db/schema'
 import { eq } from 'drizzle-orm'
@@ -11,7 +11,8 @@ import { postOrUpdateSticky } from './sticky'
 import { scheduleCleanup, cancelCleanup } from './cleanupScheduler'
 import { cancelAllHideGracesFor } from './hideGrace'
 import { clearMembers, recordMemberJoin } from './voiceMembers'
-import { decorateChannelName } from './autoNaming'
+import { clearChannelLog, logChannelEvent } from './channelLog'
+import { plainChannelName } from './autoNaming'
 import { clearRenameThrottle } from '../../bot/events/presenceUpdate'
 import { clearStickyDebounce } from '../../bot/events/messageCreate'
 import { logger } from '../logger'
@@ -37,10 +38,11 @@ export async function createAutoChannel(
   const effectiveName = overrideManualName ?? channelName
   const effectiveUserLimit = hubDefaults?.defaultUserLimit ?? 0
 
-  // The visible channel name carries a trailing emoji and dodges any collision
-  // with an existing channel. `effectiveName` (undecorated) is what we persist
-  // as `fallback_name` so later auto-renames re-decorate from a clean base.
-  const displayName = decorateChannelName(guild, effectiveName, existingVoiceChannel.id)
+  // A freshly-created room is NOT named after a game, so it gets NO emoji — just
+  // a collision-dodging name. The game emoji is only added later if Smart
+  // auto-naming renames the room to a game 2+ members share. `effectiveName`
+  // (undecorated) is persisted as `fallback_name` so later renames start clean.
+  const displayName = plainChannelName(guild, effectiveName, existingVoiceChannel.id)
 
   // 1. Rename the existing hub voice channel and move it to position 0 (top of category).
   // userLimit is bundled into this edit so it takes effect immediately if a hub default applies.
@@ -90,6 +92,9 @@ export async function createAutoChannel(
   // immediately. voiceStateUpdate fires for them too but the order isn't
   // guaranteed relative to the panel's first render.
   await recordMemberJoin(record.voiceChannelId, owner.id, guild.id)
+  logChannelEvent({ voiceChannelId: record.voiceChannelId, guildId: guild.id, type: 'created', actorUserId: owner.id })
+  const ownerGame = owner.presence?.activities.find(a => a.type === ActivityType.Playing)?.name ?? null
+  if (ownerGame) logChannelEvent({ voiceChannelId: record.voiceChannelId, guildId: guild.id, type: 'game_start', actorUserId: owner.id, detail: ownerGame })
 
   // 4. Post control panel + sticky. Pass the freshly-created textChannel so
   // we don't depend on the bot's channel cache having caught up to the create.
@@ -194,6 +199,9 @@ export async function createStaticChannelText(
   trackAutoChannelVoice(record.voiceChannelId, record.textChannelId)
 
   await recordMemberJoin(record.voiceChannelId, owner.id, guild.id)
+  logChannelEvent({ voiceChannelId: record.voiceChannelId, guildId: guild.id, type: 'created', actorUserId: owner.id })
+  const ownerGame = owner.presence?.activities.find(a => a.type === ActivityType.Playing)?.name ?? null
+  if (ownerGame) logChannelEvent({ voiceChannelId: record.voiceChannelId, guildId: guild.id, type: 'game_start', actorUserId: owner.id, detail: ownerGame })
   await postOrUpdateControlPanel(client, record, textChannel)
   await postOrUpdateSticky(client, record)
 
@@ -230,6 +238,7 @@ export async function deleteStaticText(client: Client, record: AutoChannelRecord
 
   await db.delete(autoChannels).where(eq(autoChannels.voiceChannelId, record.voiceChannelId)).catch(() => {})
   await clearMembers(record.voiceChannelId)
+  await clearChannelLog(record.voiceChannelId)
   untrackAutoChannelText(record.textChannelId)
   untrackAutoChannelVoice(record.voiceChannelId)
 
@@ -262,6 +271,7 @@ export async function deleteAutoChannel(client: Client, record: AutoChannelRecor
 
   await db.delete(autoChannels).where(eq(autoChannels.voiceChannelId, record.voiceChannelId)).catch(() => {})
   await clearMembers(record.voiceChannelId)
+  await clearChannelLog(record.voiceChannelId)
   untrackAutoChannelText(record.textChannelId)
   untrackAutoChannelVoice(record.voiceChannelId)
 

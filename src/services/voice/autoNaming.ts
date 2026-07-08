@@ -54,8 +54,10 @@ function pickTopGame(
 }
 
 /**
- * Trailing emojis appended after every auto-channel name. The first is the
- * default; the rest are collision-dodging fallbacks (see decorateChannelName).
+ * Trailing emojis appended only to GAME-named auto channels — rooms renamed to
+ * a game that 2+ members actively share. Freshly-created rooms, manual names,
+ * random tech names, and fallback names stay bare. The first emoji is the
+ * default; the rest are collision-dodging fallbacks (see decorateGameName).
  */
 export const NAME_EMOJIS = ['🎮', '🕹️', '🎯', '🔥', '⭐', '🚀', '🌟', '⚡', '🎲', '💫'] as const
 
@@ -75,27 +77,37 @@ function escapeRegExp(s: string): string {
   return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 }
 
-/**
- * Append a trailing emoji to an auto-channel name, choosing one that keeps the
- * full name distinct from every other channel in the guild. Discord permits
- * duplicate channel names, but an auto channel whose name exactly matches an
- * existing channel — a static "overwatch" channel, or another VC already
- * playing the same game — is confusing. We dodge by trying the next trailing
- * emoji until the resulting name is unique.
- *
- * `selfChannelId` is excluded from the collision set so re-decorating a channel
- * with an unchanged base name is stable (same emoji back → the caller's
- * `vc.name === desired` check short-circuits → no rename churn).
- */
-export function decorateChannelName(guild: Guild, baseName: string, selfChannelId: string): string {
+/** Lowercased names of every other channel in the guild (self excluded) so we
+ *  can dodge an exact-name collision. */
+function takenNames(guild: Guild, selfChannelId: string): Set<string> {
   const taken = new Set<string>()
   for (const ch of guild.channels.cache.values()) {
     if (ch.id === selfChannelId) continue
     taken.add(ch.name.toLowerCase())
   }
+  return taken
+}
+
+/**
+ * Append a trailing GAME emoji to a room named after an active shared game,
+ * choosing one that keeps the full name distinct from every other channel in
+ * the guild. Discord permits duplicate channel names, but an auto channel whose
+ * name exactly matches an existing channel — a static "overwatch" channel, or
+ * another VC already playing the same game — is confusing. We dodge by trying
+ * the next trailing emoji until the resulting name is unique.
+ *
+ * Use this ONLY when the base name is a live shared game (computeAutoName
+ * returned it). Everything else uses plainChannelName (no emoji).
+ *
+ * `selfChannelId` is excluded from the collision set so re-decorating a channel
+ * with an unchanged base name is stable (same emoji back → the caller's
+ * `vc.name === desired` check short-circuits → no rename churn).
+ */
+export function decorateGameName(guild: Guild, gameName: string, selfChannelId: string): string {
+  const taken = takenNames(guild, selfChannelId)
   // Strip any existing decoration first so emojis don't pile up across renames,
   // then leave headroom under Discord's 100-char channel-name limit.
-  const base = stripDecoration(baseName).slice(0, 90).trim()
+  const base = stripDecoration(gameName).slice(0, 90).trim()
   for (const emoji of NAME_EMOJIS) {
     const candidate = `${base} ${emoji}`
     if (!taken.has(candidate.toLowerCase())) return candidate
@@ -103,6 +115,22 @@ export function decorateChannelName(guild: Guild, baseName: string, selfChannelI
   // Pool exhausted (10+ identically-named channels) — default emoji + counter.
   for (let n = 2; ; n++) {
     const candidate = `${base} ${NAME_EMOJIS[0]} ${n}`
+    if (!taken.has(candidate.toLowerCase())) return candidate
+  }
+}
+
+/**
+ * Build a NON-game channel name — NO trailing emoji. Used for freshly-created
+ * rooms, manual renames, random tech names, and fallback names (no active
+ * shared game). Strips any leftover emoji decoration, caps length, and dodges
+ * an exact-name collision with a plain numeric suffix (still no emoji).
+ */
+export function plainChannelName(guild: Guild, baseName: string, selfChannelId: string): string {
+  const taken = takenNames(guild, selfChannelId)
+  const base = stripDecoration(baseName).slice(0, 90).trim()
+  if (!taken.has(base.toLowerCase())) return base
+  for (let n = 2; ; n++) {
+    const candidate = `${base} ${n}`
     if (!taken.has(candidate.toLowerCase())) return candidate
   }
 }
