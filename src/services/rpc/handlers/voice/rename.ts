@@ -41,6 +41,10 @@ export const renameHandler: VerbHandler = async (params, ctx) => {
   if (!record) {
     return { ok: false, error: 'channel-not-found' }
   }
+  // Static VCs keep their name permanently — never renamed by the bot.
+  if (record.sourceHubId === 'static') {
+    return { ok: false, error: 'static-channel', details: 'static channels cannot be renamed' }
+  }
 
   const guild = ctx.client.guilds.cache.get(record.guildId)
   if (!guild) {

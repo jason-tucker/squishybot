@@ -102,20 +102,27 @@ export function buildControlPanelPayload(
   // Deliberately just two buttons. Everything else lives behind ⚙️ Options so
   // the channel's top message stays clean. The bottom 📋 Open Panel sticky is
   // the way to (re)open a private copy when chat buries this one.
-  //   ✏️ Rename  — set a custom name (blank reverts to Smart auto-naming)
+  //   ✏️ Rename  — set a custom name (blank reverts to Smart auto-naming);
+  //                omitted for static VCs, whose name is permanent
   //   ⚙️ Options — lock / hide / hosts / claim / auto-name / delete
-  const actionRow = new ActionRowBuilder<MessageActionRowComponentBuilder>().addComponents(
-    new ButtonBuilder()
-      .setCustomId(encodeVcId(vcId, 'rename'))
-      .setLabel('Rename')
-      .setEmoji('✏️')
-      .setStyle(ButtonStyle.Secondary),
+  const buttons: ButtonBuilder[] = []
+  if (record.sourceHubId !== 'static') {
+    buttons.push(
+      new ButtonBuilder()
+        .setCustomId(encodeVcId(vcId, 'rename'))
+        .setLabel('Rename')
+        .setEmoji('✏️')
+        .setStyle(ButtonStyle.Secondary),
+    )
+  }
+  buttons.push(
     new ButtonBuilder()
       .setCustomId(encodeVcId(vcId, 'options'))
       .setLabel('Options')
       .setEmoji('⚙️')
       .setStyle(ButtonStyle.Secondary),
   )
+  const actionRow = new ActionRowBuilder<MessageActionRowComponentBuilder>().addComponents(...buttons)
 
   return {
     flags: ((MessageFlags.IsComponentsV2 as number) | SUPPRESS_NOTIFICATIONS),
@@ -132,16 +139,20 @@ export function buildControlPanelPayload(
  */
 export function buildOptionsPanelPayload(record: AutoChannelRecord) {
   const vcId = record.voiceChannelId
+  const isStatic = record.sourceHubId === 'static'
   const container = new ContainerBuilder().addTextDisplayComponents(
     new TextDisplayBuilder().setContent(
       '### ⚙️ Channel Options\n' +
       `🔒 **${record.isLocked ? 'Locked' : 'Unlocked'}** · ` +
       `${record.isHidden ? '🙈 **Hidden**' : '👁️ **Visible**'} · ` +
-      `🏷️ Auto-naming **${record.autoNameEnabled ? 'On' : 'Off'}**`,
+      (isStatic
+        ? '🏷️ Name **fixed** (static channel)'
+        : `🏷️ Auto-naming **${record.autoNameEnabled ? 'On' : 'Off'}**`),
     ),
   )
 
   // Row 1 — toggles (label + color show the current state; clicking flips it).
+  // Static VCs keep their name permanently, so the Auto Name button is omitted.
   const toggleRow = new ActionRowBuilder<MessageActionRowComponentBuilder>().addComponents(
     new ButtonBuilder()
       .setCustomId(encodeVcId(vcId, record.isLocked ? 'unlock' : 'lock'))
@@ -153,12 +164,16 @@ export function buildOptionsPanelPayload(record: AutoChannelRecord) {
       .setLabel(record.isHidden ? 'Hidden' : 'Visible')
       .setEmoji(record.isHidden ? '🙈' : '👁️')
       .setStyle(record.isHidden ? ButtonStyle.Danger : ButtonStyle.Success),
-    new ButtonBuilder()
-      .setCustomId(encodeVcId(vcId, 'auto_name'))
-      .setLabel('Auto Name')
-      .setEmoji('🏷️')
-      .setStyle(ButtonStyle.Secondary),
   )
+  if (!isStatic) {
+    toggleRow.addComponents(
+      new ButtonBuilder()
+        .setCustomId(encodeVcId(vcId, 'auto_name'))
+        .setLabel('Auto Name')
+        .setEmoji('🏷️')
+        .setStyle(ButtonStyle.Secondary),
+    )
+  }
 
   // Row 2 — ownership + destructive.
   const ownerRow = new ActionRowBuilder<MessageActionRowComponentBuilder>().addComponents(

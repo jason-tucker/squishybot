@@ -254,6 +254,12 @@ export async function deleteStaticText(client: Client, record: AutoChannelRecord
 }
 
 export async function deleteAutoChannel(client: Client, record: AutoChannelRecord): Promise<void> {
+  // Invariant: static VCs are never deleted — only the companion text channel is.
+  if (record.sourceHubId === 'static') {
+    await deleteStaticText(client, record)
+    return
+  }
+
   const guild = client.guilds.cache.get(record.guildId)
   if (!guild) return
 

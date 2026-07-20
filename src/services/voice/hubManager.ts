@@ -6,6 +6,7 @@ import { eq } from 'drizzle-orm'
 import { env } from '../../config/env'
 import { generateChannelName } from '../../utils/channelName'
 import { createAutoChannel } from './autoChannel'
+import { isStaticChannel } from './staticChannels'
 import { scheduleCleanup } from './cleanupScheduler'
 import { logger } from '../logger'
 import {
@@ -65,6 +66,13 @@ export async function seedHubsFromEnv(guild: Guild): Promise<void> {
 const handlingHubs = new Set<string>()
 
 export async function handleHubJoin(client: Client, guild: Guild, member: GuildMember, hubChannelId: string): Promise<void> {
+  // Defense in depth — voiceStateUpdate routes static-channel joins away from
+  // here, but a static VC must never be treated as a hub (renamed/replaced).
+  if (isStaticChannel(hubChannelId)) {
+    logger.warn(`handleHubJoin: ${hubChannelId} is a static channel — refusing to treat it as a hub`)
+    return
+  }
+
   // Feature flag (#33): bot owner can disable auto-voice creation. Existing
   // channels keep working; new hub joins just no-op.
   const { getBoolSetting } = await import('../settings')
