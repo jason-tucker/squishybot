@@ -52,6 +52,9 @@ export async function maybeRenameChannel(
   }
   if (!record) return
   const voiceChannelId = record.voiceChannelId
+  // Defense in depth — static VCs must never be auto-renamed, even if
+  // autoNameEnabled is ever flipped true on their row.
+  if (record.sourceHubId === 'static') return
   // Smart auto-naming runs only while it's enabled. A manual rename or the
   // Randomize button sets auto_name_enabled=false, which freezes the name.
   if (!record.autoNameEnabled) return

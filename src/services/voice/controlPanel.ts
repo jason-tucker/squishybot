@@ -117,6 +117,10 @@ function explainName(
   members: MemberPresenceInfo[],
   liveChannelName: string,
 ): { currentName: string; reason: string } {
+  // Static VCs keep their name permanently — no rename, no auto-naming.
+  if (record.sourceHubId === 'static') {
+    return { currentName: liveChannelName, reason: 'This is a **static channel** — its name is fixed and never changes.' }
+  }
   if (!record.autoNameEnabled) {
     return { currentName: liveChannelName, reason: 'Auto-naming is **off** — this name is frozen (set via Rename or 🎲 Randomize). Rename to blank to hand control back to Smart.' }
   }

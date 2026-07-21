@@ -107,12 +107,21 @@ export async function handleVoiceControlButton(interaction: ButtonInteraction): 
   // older in-flight panels — both open the Auto Name sub-panel.
   if (action === 'auto_name' || action === 'templates') {
     if (!await requireControl(interaction, member, record)) return
+    if (record.sourceHubId === 'static') {
+      await interaction.reply({ content: 'ℹ️ This is a **static voice channel** — its name is permanent, so auto-naming doesn\'t apply here.', ephemeral: true })
+      return
+    }
     await interaction.reply({ ...buildAutoNamePanelPayload(record), ephemeral: true } as any)
     return
   }
 
   if (action === 'auto_on') {
     if (!await requireControl(interaction, member, record)) return
+    // Static VCs are never renamed — never let auto-naming flip on for one.
+    if (record.sourceHubId === 'static') {
+      await interaction.reply({ content: '❌ This is a **static voice channel** — its name is permanent, so auto-naming can\'t be turned on.', ephemeral: true })
+      return
+    }
     await db.update(autoChannels)
       .set({ autoNameEnabled: true, nameTemplate: 'auto', manualName: null })
       .where(eq(autoChannels.voiceChannelId, voiceChannelId))
@@ -140,6 +149,11 @@ export async function handleVoiceControlButton(interaction: ButtonInteraction): 
 
   if (action === 'randomize') {
     if (!await requireControl(interaction, member, record)) return
+    // Static VCs are never renamed — no randomize either.
+    if (record.sourceHubId === 'static') {
+      await interaction.reply({ content: '❌ This is a **static voice channel** — its name is permanent and can\'t be randomized.', ephemeral: true })
+      return
+    }
     const guild = interaction.guild!
     const vc = await guild.channels.fetch(record.voiceChannelId).catch(() => null)
     const baseName = randomTechName()
@@ -200,6 +214,11 @@ export async function handleVoiceControlButton(interaction: ButtonInteraction): 
 
   if (action === 'rename') {
     if (!await requireControl(interaction, member, record, '❌ You do not have permission to rename this channel.')) return
+    // Static VCs keep their name permanently — no rename modal.
+    if (record.sourceHubId === 'static') {
+      await interaction.reply({ content: '❌ This is a **static voice channel** — it keeps its name permanently.', ephemeral: true })
+      return
+    }
     const modal = new ModalBuilder()
       .setCustomId(`vc:${voiceChannelId}:rename`)
       .setTitle('Rename Channel')

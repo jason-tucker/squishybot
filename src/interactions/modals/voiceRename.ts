@@ -28,6 +28,13 @@ export async function handleVoiceRenameModal(interaction: ModalSubmitInteraction
     return
   }
 
+  // Static VCs keep their name permanently — no manual rename, no re-enabling
+  // auto-naming via a blank submit. Guard before any DB write or setName.
+  if (record.sourceHubId === 'static') {
+    await interaction.reply({ content: '❌ This is a **static voice channel** — it keeps its name permanently.', ephemeral: true })
+    return
+  }
+
   const rawName = interaction.fields.getTextInputValue('new_name')
 
   // interaction.isFromMessage() → deferUpdate, else deferReply

@@ -33,6 +33,11 @@ export const deleteHandler: VerbHandler = async (params, ctx) => {
   if (!record) {
     return { ok: false, error: 'channel-not-found' }
   }
+  // Static VCs are never deleted by the bot — only their companion text channel
+  // follows the cleanup lifecycle.
+  if (record.sourceHubId === 'static') {
+    return { ok: false, error: 'static-channel', details: 'static channels cannot be deleted' }
+  }
 
   try {
     await deleteAutoChannel(ctx.client, record)
