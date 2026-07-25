@@ -2539,6 +2539,9 @@ export async function handleSettingsRoleSelect(interaction: import('discord.js')
     await interaction.update((await renderSelfAssign(guild)) as any)
     return
   }
+  // Ack anything unrecognized so a future unrouted select fails loudly
+  // instead of timing out (mirrors the channel-select fallback).
+  await interaction.reply({ content: `Unknown role setting: ${id}`, ephemeral: true })
 }
 
 export async function handleSettingsUserSelect(interaction: UserSelectMenuInteraction): Promise<void> {
