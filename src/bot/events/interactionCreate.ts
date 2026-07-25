@@ -196,7 +196,10 @@ export function registerInteractionCreate(client: Client) {
         if (id.startsWith('games:cat:role:')) {
           const { handleCatalogRoleSelect } = await import('../../interactions/gamesEditor')
           await handleCatalogRoleSelect(interaction)
-        } else if (id === 'sudo:set:auto_role:add' || id === 'sudo:set:color_role:add') {
+        } else if (id.startsWith('sudo:set:')) {
+          // All Settings role-selects funnel through one handler (same
+          // catch-all pattern as the other sudo:set: branches). The old
+          // exact-equals allowlist orphaned sudo:set:selfassign:add_role.
           const { handleSettingsRoleSelect } = await import('../../interactions/sudoSettings')
           await handleSettingsRoleSelect(interaction)
         }
