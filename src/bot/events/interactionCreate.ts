@@ -159,7 +159,12 @@ export function registerInteractionCreate(client: Client) {
 
       } else if (interaction.isChannelSelectMenu()) {
         const id = interaction.customId
-        if (id.startsWith('sudo:set:channel:') || id === 'sudo:set:autothread:add' || id === 'sudo:set:hub:add') {
+        if (id.startsWith('sudo:set:')) {
+          // All Settings channel-selects funnel through one handler (mirrors
+          // the string-select catch-all below). A narrow allowlist here
+          // silently orphaned sudo:set:static:add / selfassign:channel /
+          // archive:add_eligible — the interaction was never acked and
+          // Discord showed "didn't respond in time".
           const { handleSettingsChannelSelect } = await import('../../interactions/sudoSettings')
           await handleSettingsChannelSelect(interaction)
         } else if (id.startsWith('games:cat:channel:') || id === 'games:cat:set_category') {
