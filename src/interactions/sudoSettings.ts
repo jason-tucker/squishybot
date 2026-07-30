@@ -137,6 +137,25 @@ const VOICE_BOOL_SETTINGS: BoolSettingDef[] = [
   },
 ]
 
+interface StringSettingDef {
+  key: string
+  label: string
+  description: string
+  defaultValue: string
+  maxLength?: number
+}
+
+// Free-form string settings that live in the Voice sub-panel.
+const VOICE_STRING_SETTINGS: StringSettingDef[] = [
+  {
+    key: 'voice.text_emoji',
+    label: 'Text channel emoji',
+    description: 'Prefix on every auto-voice companion text channel name, no separator (e.g. 💬squishy-lounge). Blank submit resets to 💬.',
+    defaultValue: '💬',
+    maxLength: 8,
+  },
+]
+
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
@@ -160,6 +179,12 @@ function effectiveNumericValue(def: NumericSettingDef): { value: number; source:
     if (Number.isFinite(n)) return { value: n, source: 'override' }
   }
   return { value: def.envFallback, source: 'env' }
+}
+
+function effectiveStringValue(def: StringSettingDef): { value: string; source: 'override' | 'default' } {
+  const override = getSetting(def.key)?.trim()
+  if (override) return { value: override, source: 'override' }
+  return { value: def.defaultValue, source: 'default' }
 }
 
 // ---------------------------------------------------------------------------
@@ -349,6 +374,11 @@ function renderVoice() {
     const on = getBoolSetting(def.key, def.defaultValue)
     lines.push(`**${def.label}** · ${on ? '🟢 On' : '⚪ Off'}\n_${def.description}_\n`)
   }
+  for (const def of VOICE_STRING_SETTINGS) {
+    const { value, source } = effectiveStringValue(def)
+    const sourceLabel = source === 'override' ? '⚙️ DB override' : '— default'
+    lines.push(`**${def.label}** · \`${value}\` · _${sourceLabel}_\n_${def.description}_\n`)
+  }
   const cat = effectiveChannelValue(VOICE_CATEGORY_SETTING)
   const catSourceLabel = cat.source === 'override' ? '⚙️ DB override' : cat.source === 'env' ? '📄 env' : '— unset'
   lines.push(`**${VOICE_CATEGORY_SETTING.label}** · ${channelMentionOrNone(cat.value)} · _${catSourceLabel}_\n_${VOICE_CATEGORY_SETTING.description}_`)
@@ -385,6 +415,14 @@ function renderVoice() {
           .setLabel(`${on ? 'Disable' : 'Enable'} ${def.label}`)
           .setEmoji(on ? '🔕' : '🔔')
           .setStyle(on ? ButtonStyle.Secondary : ButtonStyle.Success),
+      )
+    )
+  }
+  for (const def of VOICE_STRING_SETTINGS) {
+    components.push(
+      new ActionRowBuilder<MessageActionRowComponentBuilder>().addComponents(
+        new ButtonBuilder().setCustomId(`sudo:set:edit_modal:${def.key}`).setLabel(`Edit ${def.label}`).setEmoji('✏️').setStyle(ButtonStyle.Primary),
+        new ButtonBuilder().setCustomId(`sudo:set:reset:${def.key}`).setLabel('Reset').setEmoji('♻️').setStyle(ButtonStyle.Secondary),
       )
     )
   }
@@ -1936,23 +1974,44 @@ export async function handleSettingsButton(interaction: ButtonInteraction): Prom
     if (!await requireSudo(interaction)) return
     const key = id.slice('sudo:set:edit_modal:'.length)
     const numDef = NUMERIC_SETTINGS.find(d => d.key === key)
-    if (!numDef) {
+    if (numDef) {
+      const { value } = effectiveNumericValue(numDef)
+      const modal = new ModalBuilder()
+        .setCustomId(`sudo:set:save:${key}`)
+        .setTitle(`Edit ${numDef.label}`)
+        .addComponents(
+          new ActionRowBuilder<TextInputBuilder>().addComponents(
+            new TextInputBuilder()
+              .setCustomId('value')
+              .setLabel(numDef.label)
+              .setStyle(TextInputStyle.Short)
+              .setRequired(true)
+              .setValue(String(value))
+              .setPlaceholder(numDef.description)
+          )
+        )
+      await interaction.showModal(modal)
+      return
+    }
+    const strDef = VOICE_STRING_SETTINGS.find(d => d.key === key)
+    if (!strDef) {
       await interaction.reply({ content: `Unknown setting: ${key}`, ephemeral: true })
       return
     }
-    const { value } = effectiveNumericValue(numDef)
+    const { value, source } = effectiveStringValue(strDef)
     const modal = new ModalBuilder()
       .setCustomId(`sudo:set:save:${key}`)
-      .setTitle(`Edit ${numDef.label}`)
+      .setTitle(`Edit ${strDef.label}`)
       .addComponents(
         new ActionRowBuilder<TextInputBuilder>().addComponents(
           new TextInputBuilder()
             .setCustomId('value')
-            .setLabel(numDef.label)
+            .setLabel(strDef.label)
             .setStyle(TextInputStyle.Short)
-            .setRequired(true)
-            .setValue(String(value))
-            .setPlaceholder(numDef.description)
+            .setRequired(false)
+            .setValue(source === 'override' ? value : '')
+            .setMaxLength(strDef.maxLength ?? 100)
+            .setPlaceholder(strDef.defaultValue)
         )
       )
     await interaction.showModal(modal)
@@ -2359,8 +2418,8 @@ export async function handleSettingsButton(interaction: ButtonInteraction): Prom
   if (id.startsWith('sudo:set:reset:')) {
     const key = id.slice('sudo:set:reset:'.length)
     await clearSetting(key)
-    // Heuristic: numeric + voice-category settings live in the Voice panel.
-    if (NUMERIC_SETTINGS.some(d => d.key === key) || key === VOICE_CATEGORY_SETTING.key) {
+    // Heuristic: numeric + string + voice-category settings live in the Voice panel.
+    if (NUMERIC_SETTINGS.some(d => d.key === key) || VOICE_STRING_SETTINGS.some(d => d.key === key) || key === VOICE_CATEGORY_SETTING.key) {
       await interaction.editReply(renderVoice() as any)
     } else {
       await interaction.editReply(renderHome() as any)
@@ -3155,6 +3214,20 @@ export async function handleSettingsModalSubmit(interaction: ModalSubmitInteract
     // panel plus a plain confirmation.
     await interaction.editReply(renderVoice() as any)
     await interaction.followUp({ content: `✅ Saved \`${key}\` = \`${n}\``, ephemeral: true })
+    return
+  }
+  const strDef = VOICE_STRING_SETTINGS.find(d => d.key === key)
+  if (strDef) {
+    // Blank submit resets to the default instead of storing an empty override.
+    if (!raw) {
+      await clearSetting(key)
+      await interaction.editReply(renderVoice() as any)
+      await interaction.followUp({ content: `✅ Reset \`${key}\` to default (\`${strDef.defaultValue}\`)`, ephemeral: true })
+      return
+    }
+    await setSetting(key, raw, interaction.user.id)
+    await interaction.editReply(renderVoice() as any)
+    await interaction.followUp({ content: `✅ Saved \`${key}\` = \`${raw}\``, ephemeral: true })
     return
   }
   // Generic string fallback

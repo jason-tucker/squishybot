@@ -17,7 +17,7 @@ import { canControlChannel, isOwner, isSudo } from '../../services/voice/permiss
 import { postOrUpdateControlPanel, buildPanelPayloadForRecord } from '../../services/voice/controlPanel'
 import { buildOptionsPanelPayload, buildAutoNamePanelPayload } from '../../embeds/voiceControlPanel'
 import { maybeRenameChannel } from '../../services/voice/autoRename'
-import { plainChannelName } from '../../services/voice/autoNaming'
+import { plainChannelName, textChannelNameFor } from '../../services/voice/autoNaming'
 import { logChannelEvent, listChannelLog } from '../../services/voice/channelLog'
 import { buildChannelLogPayload } from '../../embeds/voiceLog'
 import { randomTechName } from '../../utils/randomName'
@@ -178,7 +178,7 @@ export async function handleVoiceControlButton(interaction: ButtonInteraction): 
       await vc.setName(finalName).catch(() => {})
       const tc = await guild.channels.fetch(record.textChannelId).catch(() => null)
       if (tc?.isTextBased()) {
-        const textName = finalName.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'voice-chat'
+        const textName = textChannelNameFor(finalName)
         await (tc as any).setName(textName).catch(() => {})
       }
     }

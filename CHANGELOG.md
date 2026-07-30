@@ -9,6 +9,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ### Added
 - **Interaction errors now posted to LOG_CHANNEL.** The global `interactionCreate` error catch now calls a new `logger.errorReport(context, err)` (in addition to the existing `console.error`), posting a redacted `🔴 Interaction error` summary (message + first ~8 stack lines) to `LOG_CHANNEL_ID` via the cached client. Deduped per context+message key — at most one post per 5 minutes, with `(+N repeats suppressed)` once the window reopens; never throws, no-ops if no client or `LOG_CHANNEL_ID`.
+- **Auto-voice companion text channels now start with an emoji prefix.** Every auto/static text channel name (e.g. `💬squishy-lounge`) is now built by a new shared `textChannelNameFor()` helper in `src/services/voice/autoNaming.ts`, which slugifies the voice channel's display name exactly as before and then prefixes it with the `bot_settings` key `voice.text_emoji` (default `💬` when unset/empty, no separator). Replaces five duplicated inline slugify call sites (`autoChannel.ts`, `autoRename.ts`, `voiceControl.ts` randomize, `voiceRename.ts` modal, RPC `voice.rename`). Editable via `/sudo → Settings → Voice → Edit Text channel emoji` (blank submit resets to default).
 
 ### Fixed
 - **`/sudo` no longer risks a 10062 interaction failure on a cold member cache.** `sudo.ts`'s `execute()` now defers before `guild.members.fetch()` + the sudo check, replying via `editReply` either way.
