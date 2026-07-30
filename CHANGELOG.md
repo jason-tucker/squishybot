@@ -5,6 +5,11 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [0.12.4] — 2026-07-30
+
+### Added
+- **Interaction errors now posted to LOG_CHANNEL.** The global `interactionCreate` error catch now calls a new `logger.errorReport(context, err)` (in addition to the existing `console.error`), posting a redacted `🔴 Interaction error` summary (message + first ~8 stack lines) to `LOG_CHANNEL_ID` via the cached client. Deduped per context+message key — at most one post per 5 minutes, with `(+N repeats suppressed)` once the window reopens; never throws, no-ops if no client or `LOG_CHANNEL_ID`.
+
 ## [0.12.3] — 2026-07-08
 
 ### Added
