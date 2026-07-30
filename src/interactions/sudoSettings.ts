@@ -2370,6 +2370,10 @@ export async function handleSettingsButton(interaction: ButtonInteraction): Prom
 }
 
 export async function handleSettingsChannelSelect(interaction: ChannelSelectMenuInteraction): Promise<void> {
+  // Defer FIRST — before requireSudo (see handleSettingsButton's ~1962
+  // comment for why: the sudo check's guild.members.fetch() can be slow on
+  // a cold cache and blow the 3s ack window).
+  await interaction.deferUpdate()
   if (!await requireSudo(interaction)) return
   const id = interaction.customId
 
@@ -2395,7 +2399,7 @@ export async function handleSettingsChannelSelect(interaction: ChannelSelectMenu
       }
       await addAutoThreadChannel(channelId, interaction.guildId, interaction.user.id)
     }
-    await interaction.update(renderAutoThreads() as any)
+    await interaction.editReply(renderAutoThreads() as any)
     if (warning) {
       await interaction.followUp({ content: warning, flags: MessageFlags.Ephemeral })
     }
@@ -2408,7 +2412,7 @@ export async function handleSettingsChannelSelect(interaction: ChannelSelectMenu
       const { addEligibleCategory } = await import('../services/archive')
       await addEligibleCategory(interaction.guildId!, categoryId, interaction.user.id)
     }
-    await interaction.update((await renderArchive(interaction.client, interaction.guildId!)) as any)
+    await interaction.editReply((await renderArchive(interaction.client, interaction.guildId!)) as any)
     return
   }
 
@@ -2417,7 +2421,7 @@ export async function handleSettingsChannelSelect(interaction: ChannelSelectMenu
     const channelId = interaction.values[0]
     if (channelId) await setSetting(key, channelId, interaction.user.id)
     else           await clearSetting(key, interaction.user.id)
-    await interaction.update((await renderWelcome()) as any)
+    await interaction.editReply((await renderWelcome()) as any)
     return
   }
 
@@ -2425,7 +2429,7 @@ export async function handleSettingsChannelSelect(interaction: ChannelSelectMenu
     const channelId = interaction.values[0]
     if (channelId) await setSetting('channel.archive_destination', channelId, interaction.user.id)
     else           await clearSetting('channel.archive_destination')
-    await interaction.update((await renderArchive(interaction.client, interaction.guildId!)) as any)
+    await interaction.editReply((await renderArchive(interaction.client, interaction.guildId!)) as any)
     return
   }
 
@@ -2434,7 +2438,7 @@ export async function handleSettingsChannelSelect(interaction: ChannelSelectMenu
     if (channelId) {
       await addStaticChannel(channelId, interaction.user.id)
     }
-    await interaction.update((await renderStaticChannels()) as any)
+    await interaction.editReply((await renderStaticChannels()) as any)
     return
   }
 
@@ -2453,15 +2457,13 @@ export async function handleSettingsChannelSelect(interaction: ChannelSelectMenu
         })
       }
     }
-    await interaction.update(renderHubs() as any)
+    await interaction.editReply(renderHubs() as any)
     return
   }
 
   if (id === 'sudo:set:selfassign:channel') {
-    // Defer first: publishBoard posts/deletes several messages and can run past
-    // the 3s interaction window. Always re-publish — clearing the channel
-    // (min 0) tears the board down via publishBoard's no-channel path.
-    await interaction.deferUpdate()
+    // publishBoard posts/deletes several messages and can run past the 3s
+    // interaction window — already covered by the top-of-function defer above.
     const channelId = interaction.values[0] ?? null
     await selfAssignSetChannelId(channelId, interaction.user.id)
     await selfAssignPublishBoard(interaction.client, interaction.guild!.id)
@@ -2472,7 +2474,7 @@ export async function handleSettingsChannelSelect(interaction: ChannelSelectMenu
   const key = id.slice('sudo:set:channel:'.length)
   const def = CHANNEL_SETTINGS.find(d => d.key === key) ?? (key === VOICE_CATEGORY_SETTING.key ? VOICE_CATEGORY_SETTING : null)
   if (!def) {
-    await interaction.reply({ content: `Unknown channel setting: ${key}`, ephemeral: true })
+    await interaction.followUp({ content: `Unknown channel setting: ${key}`, flags: MessageFlags.Ephemeral })
     return
   }
   const channelId = interaction.values[0]
@@ -2481,23 +2483,27 @@ export async function handleSettingsChannelSelect(interaction: ChannelSelectMenu
   }
   // Re-render the panel the select lives in.
   if (def.key === VOICE_CATEGORY_SETTING.key) {
-    await interaction.update(renderVoice() as any)
+    await interaction.editReply(renderVoice() as any)
   } else {
-    await interaction.update(renderChannels() as any)
+    await interaction.editReply(renderChannels() as any)
   }
 }
 
 export async function handleSettingsRoleSelect(interaction: import('discord.js').RoleSelectMenuInteraction): Promise<void> {
+  // Defer FIRST — before requireSudo (see handleSettingsButton's ~1962
+  // comment for why: the sudo check's guild.members.fetch() can be slow on
+  // a cold cache and blow the 3s ack window).
+  await interaction.deferUpdate()
   if (!await requireSudo(interaction)) return
   const id = interaction.customId
   const roleId = interaction.values[0]
   if (!roleId) {
     if (id === 'sudo:set:auto_role:add') {
-      await interaction.update((await renderAutoRoles(interaction.guildId!)) as any)
+      await interaction.editReply((await renderAutoRoles(interaction.guildId!)) as any)
     } else if (id === 'sudo:set:selfassign:add_role') {
-      await interaction.update((await renderSelfAssign(interaction.guild!)) as any)
+      await interaction.editReply((await renderSelfAssign(interaction.guild!)) as any)
     } else {
-      await interaction.update((await renderColorRoles(interaction.guildId!)) as any)
+      await interaction.editReply((await renderColorRoles(interaction.guildId!)) as any)
     }
     return
   }
@@ -2505,7 +2511,7 @@ export async function handleSettingsRoleSelect(interaction: import('discord.js')
   if (id === 'sudo:set:auto_role:add') {
     const { autoJoinRoles } = await import('../db/schema')
     await db.insert(autoJoinRoles).values({ roleId, guildId: interaction.guildId!, addedByUserId: interaction.user.id }).onConflictDoNothing()
-    await interaction.update((await renderAutoRoles(interaction.guildId!)) as any)
+    await interaction.editReply((await renderAutoRoles(interaction.guildId!)) as any)
     return
   }
   if (id === 'sudo:set:color_role:add') {
@@ -2513,7 +2519,7 @@ export async function handleSettingsRoleSelect(interaction: import('discord.js')
     const label = role?.name ?? roleId
     const { colorRoles } = await import('../db/schema')
     await db.insert(colorRoles).values({ roleId, guildId: interaction.guildId!, label }).onConflictDoNothing()
-    await interaction.update((await renderColorRoles(interaction.guildId!)) as any)
+    await interaction.editReply((await renderColorRoles(interaction.guildId!)) as any)
     return
   }
   if (id === 'sudo:set:selfassign:add_role') {
@@ -2527,7 +2533,7 @@ export async function handleSettingsRoleSelect(interaction: import('discord.js')
         privileged: 'that role carries privileged permissions',
         'above-bot': 'that role is at or above the bot\'s highest role',
       }
-      await interaction.update((await renderSelfAssign(guild)) as any)
+      await interaction.editReply((await renderSelfAssign(guild)) as any)
       await interaction.followUp({ content: `❌ Cannot add role: ${reasons[verdict.reason] ?? verdict.reason}`, flags: MessageFlags.Ephemeral })
       return
     }
@@ -2536,60 +2542,40 @@ export async function handleSettingsRoleSelect(interaction: import('discord.js')
       const ch = selfAssignGetChannelId()
       if (ch) await selfAssignPostOrUpdate(interaction.client, guild, ch, entry)
     }
-    await interaction.update((await renderSelfAssign(guild)) as any)
+    await interaction.editReply((await renderSelfAssign(guild)) as any)
     return
   }
   // Ack anything unrecognized so a future unrouted select fails loudly
   // instead of timing out (mirrors the channel-select fallback).
-  await interaction.reply({ content: `Unknown role setting: ${id}`, ephemeral: true })
+  await interaction.followUp({ content: `Unknown role setting: ${id}`, flags: MessageFlags.Ephemeral })
 }
 
 export async function handleSettingsUserSelect(interaction: UserSelectMenuInteraction): Promise<void> {
+  // Defer FIRST — before requireSudo (see handleSettingsButton's ~1962
+  // comment for why: the sudo check's guild.members.fetch() can be slow on
+  // a cold cache and blow the 3s ack window).
+  await interaction.deferUpdate()
   if (!await requireSudo(interaction)) return
   const userId = interaction.values[0]
   if (!userId) {
-    await interaction.update((await renderSudoUsers()) as any)
+    await interaction.editReply((await renderSudoUsers()) as any)
     return
   }
   await addSudoUser(userId, interaction.user.id, 'Added via /sudo Settings panel')
-  await interaction.update((await renderSudoUsers()) as any)
+  await interaction.editReply((await renderSudoUsers()) as any)
 }
 
 export async function handleSettingsStringSelect(interaction: StringSelectMenuInteraction): Promise<void> {
-  if (!await requireSudo(interaction)) return
   const id = interaction.customId
-  if (id === 'sudo:set:removeuser') {
-    const userId = interaction.values[0]
-    if (userId) await removeSudoUser(userId, interaction.user.id)
-    await interaction.update((await renderSudoUsers()) as any)
-    return
-  }
-  if (id === 'sudo:set:reset_channel') {
-    const key = interaction.values[0]
-    if (key) await clearSetting(key)
-    await interaction.update(renderChannelsReset() as any)
-    return
-  }
-  if (id === 'sudo:set:autothread:remove') {
-    const channelId = interaction.values[0]
-    if (channelId) await removeAutoThreadChannel(channelId)
-    await interaction.update(renderAutoThreads() as any)
-    return
-  }
-  if (id === 'sudo:set:static:remove') {
-    const channelId = interaction.values[0]
-    if (channelId) await removeStaticChannel(channelId, interaction.user.id)
-    await interaction.update((await renderStaticChannels()) as any)
-    return
-  }
 
-  if (id === 'sudo:set:hub:remove') {
-    const channelId = interaction.values[0]
-    if (channelId) await unregisterHubChannel(channelId)
-    await interaction.update(renderHubs() as any)
-    return
-  }
+  // ── Selects that route to showModal() FIRST and FAST. `showModal()` IS
+  // the interaction response — can't be combined with a defer. Each does
+  // its own requireSudo() here since the generic defer+check below hasn't
+  // run yet — same gamble as handleSettingsButton's modal branches (see its
+  // ~1805 comment): a cold-cache member.fetch may lose the race, in which
+  // case the modal fails to open and the user clicks again.
   if (id === 'sudo:set:hub:edit_defaults') {
+    if (!await requireSudo(interaction)) return
     const channelId = interaction.values[0]
     if (!channelId) return
     const hub = listHubs().find(h => h.channelId === channelId)
@@ -2635,12 +2621,8 @@ export async function handleSettingsStringSelect(interaction: StringSelectMenuIn
     await interaction.showModal(modal)
     return
   }
-  if (id === 'sudo:set:social:pick') {
-    const feedId = interaction.values[0]
-    if (feedId) await interaction.update((await renderSocialDetail(feedId)) as any)
-    return
-  }
   if (id === 'sudo:set:hub_lockdown:lock_one_pick') {
+    if (!await requireSudo(interaction)) return
     const channelId = interaction.values[0]
     if (!channelId) return
     const modal = new ModalBuilder()
@@ -2662,6 +2644,7 @@ export async function handleSettingsStringSelect(interaction: StringSelectMenuIn
     return
   }
   if (id === 'sudo:set:autothread:edit_template') {
+    if (!await requireSudo(interaction)) return
     const channelId = interaction.values[0]
     if (!channelId) return
     const cfg = listAutoThreadChannels().find(c => c.channelId === channelId)
@@ -2681,6 +2664,49 @@ export async function handleSettingsStringSelect(interaction: StringSelectMenuIn
         ),
       )
     await interaction.showModal(modal)
+    return
+  }
+
+  // Defer FIRST — before requireSudo (see handleSettingsButton's ~1962
+  // comment for why: the sudo check's guild.members.fetch() can be slow on
+  // a cold cache and blow the 3s ack window).
+  await interaction.deferUpdate()
+  if (!await requireSudo(interaction)) return
+
+  if (id === 'sudo:set:removeuser') {
+    const userId = interaction.values[0]
+    if (userId) await removeSudoUser(userId, interaction.user.id)
+    await interaction.editReply((await renderSudoUsers()) as any)
+    return
+  }
+  if (id === 'sudo:set:reset_channel') {
+    const key = interaction.values[0]
+    if (key) await clearSetting(key)
+    await interaction.editReply(renderChannelsReset() as any)
+    return
+  }
+  if (id === 'sudo:set:autothread:remove') {
+    const channelId = interaction.values[0]
+    if (channelId) await removeAutoThreadChannel(channelId)
+    await interaction.editReply(renderAutoThreads() as any)
+    return
+  }
+  if (id === 'sudo:set:static:remove') {
+    const channelId = interaction.values[0]
+    if (channelId) await removeStaticChannel(channelId, interaction.user.id)
+    await interaction.editReply((await renderStaticChannels()) as any)
+    return
+  }
+
+  if (id === 'sudo:set:hub:remove') {
+    const channelId = interaction.values[0]
+    if (channelId) await unregisterHubChannel(channelId)
+    await interaction.editReply(renderHubs() as any)
+    return
+  }
+  if (id === 'sudo:set:social:pick') {
+    const feedId = interaction.values[0]
+    if (feedId) await interaction.editReply((await renderSocialDetail(feedId)) as any)
     return
   }
   if (id === 'sudo:set:autothread:pick_for_archive') {
@@ -2718,7 +2744,7 @@ export async function handleSettingsStringSelect(interaction: StringSelectMenuIn
     const back = new ActionRowBuilder<MessageActionRowComponentBuilder>().addComponents(
       new ButtonBuilder().setCustomId('sudo:set:nav:auto_threads').setLabel('Back to Auto Threads').setStyle(ButtonStyle.Secondary),
     )
-    await interaction.update({ flags: MessageFlags.IsComponentsV2, components: [container, row, back] } as any)
+    await interaction.editReply({ flags: MessageFlags.IsComponentsV2, components: [container, row, back] } as any)
     return
   }
   if (id === 'sudo:set:hub_lockdown:unlock_one') {
@@ -2726,7 +2752,7 @@ export async function handleSettingsStringSelect(interaction: StringSelectMenuIn
     if (!channelId) return
     const { unlockHub } = await import('../services/voice/hubLockdown')
     await unlockHub(interaction.client, interaction.guildId!, channelId)
-    await interaction.update((await renderHubLockdown()) as any)
+    await interaction.editReply((await renderHubLockdown()) as any)
     return
   }
   if (id === 'sudo:set:reaction_roles:delete') {
@@ -2735,7 +2761,7 @@ export async function handleSettingsStringSelect(interaction: StringSelectMenuIn
       const { deleteReactionRoleMessage } = await import('../services/reactionRoles')
       await deleteReactionRoleMessage(interaction.client, messageId)
     }
-    await interaction.update((await renderReactionRoles()) as any)
+    await interaction.editReply((await renderReactionRoles()) as any)
     return
   }
   if (id === 'sudo:set:auto_role:remove') {
@@ -2745,7 +2771,7 @@ export async function handleSettingsStringSelect(interaction: StringSelectMenuIn
       const { autoJoinRoles } = await import('../db/schema')
       await db.delete(autoJoinRoles).where(eq(autoJoinRoles.roleId, roleId))
     }
-    await interaction.update((await renderAutoRoles(interaction.guildId!)) as any)
+    await interaction.editReply((await renderAutoRoles(interaction.guildId!)) as any)
     return
   }
   if (id === 'sudo:set:color_role:remove') {
@@ -2755,7 +2781,7 @@ export async function handleSettingsStringSelect(interaction: StringSelectMenuIn
       const { colorRoles } = await import('../db/schema')
       await db.delete(colorRoles).where(eq(colorRoles.roleId, roleId))
     }
-    await interaction.update((await renderColorRoles(interaction.guildId!)) as any)
+    await interaction.editReply((await renderColorRoles(interaction.guildId!)) as any)
     return
   }
   if (id === 'sudo:set:archive:remove_eligible') {
@@ -2764,7 +2790,7 @@ export async function handleSettingsStringSelect(interaction: StringSelectMenuIn
       const { removeEligibleCategory } = await import('../services/archive')
       await removeEligibleCategory(categoryId)
     }
-    await interaction.update((await renderArchive(interaction.client, interaction.guildId!)) as any)
+    await interaction.editReply((await renderArchive(interaction.client, interaction.guildId!)) as any)
     return
   }
   if (id === 'sudo:set:archive:unarchive') {
@@ -2772,14 +2798,14 @@ export async function handleSettingsStringSelect(interaction: StringSelectMenuIn
     if (!channelId) return
     const { unarchiveChannel } = await import('../services/archive')
     const result = await unarchiveChannel(interaction.client, channelId)
-    await interaction.update((await renderArchive(interaction.client, interaction.guildId!)) as any)
+    await interaction.editReply((await renderArchive(interaction.client, interaction.guildId!)) as any)
     if (!result.ok) {
       await interaction.followUp({ content: `⚠️ Unarchive failed: ${result.reason}`, flags: MessageFlags.Ephemeral })
     }
     return
   }
   if (id === 'sudo:set:archive:scan_pick') {
-    await interaction.deferUpdate()
+    // Already deferred by the top-of-function defer above.
     const { archiveChannel } = await import('../services/archive')
     const results: { id: string; ok: boolean; reason?: string }[] = []
     for (const channelId of interaction.values) {
@@ -2802,7 +2828,7 @@ export async function handleSettingsStringSelect(interaction: StringSelectMenuIn
         if (ch) await selfAssignPostOrUpdate(interaction.client, interaction.guild!, ch, entry)
       }
     }
-    await interaction.update((await renderSelfAssign(interaction.guild!)) as any)
+    await interaction.editReply((await renderSelfAssign(interaction.guild!)) as any)
     return
   }
   if (id === 'sudo:set:selfassign:remove') {
@@ -2812,12 +2838,19 @@ export async function handleSettingsStringSelect(interaction: StringSelectMenuIn
       if (existing) await selfAssignDeleteMessage(interaction.client, existing)
       await selfAssignRemoveEntry(entryId)
     }
-    await interaction.update((await renderSelfAssign(interaction.guild!)) as any)
+    await interaction.editReply((await renderSelfAssign(interaction.guild!)) as any)
     return
   }
 }
 
 export async function handleSettingsModalSubmit(interaction: ModalSubmitInteraction): Promise<void> {
+  // Defer FIRST — before requireSudo (see handleSettingsButton's ~1962
+  // comment for why: the sudo check's guild.members.fetch() can be slow on
+  // a cold cache and blow the 3s ack window). deferReply (not deferUpdate)
+  // so every branch below responds via a fresh ephemeral message instead of
+  // editing the CV2 panel that triggered the modal — editing that message's
+  // content directly would conflict with its IsComponentsV2 flag.
+  await interaction.deferReply({ ephemeral: true })
   if (!await requireSudo(interaction)) return
 
   // #37 — Create reaction-role message
@@ -2828,12 +2861,12 @@ export async function handleSettingsModalSubmit(interaction: ModalSubmitInteract
     const expiresRaw = interaction.fields.getTextInputValue('expires_minutes').trim()
 
     if (!/^\d{15,25}$/.test(channelId)) {
-      await interaction.reply({ content: '❌ Channel ID must be a Discord snowflake.', ephemeral: true })
+      await interaction.editReply({ content: '❌ Channel ID must be a Discord snowflake.' })
       return
     }
     const channel = await interaction.guild?.channels.fetch(channelId).catch(() => null)
     if (!channel?.isTextBased()) {
-      await interaction.reply({ content: '❌ That channel is not text-based or not accessible.', ephemeral: true })
+      await interaction.editReply({ content: '❌ That channel is not text-based or not accessible.' })
       return
     }
 
@@ -2841,13 +2874,13 @@ export async function handleSettingsModalSubmit(interaction: ModalSubmitInteract
     for (const line of mappingsRaw.split(/\r?\n/).map(l => l.trim()).filter(Boolean)) {
       const eqIdx = line.indexOf('=')
       if (eqIdx < 1) {
-        await interaction.reply({ content: `❌ Bad mapping line: \`${line}\` (use \`emoji=roleId\`).`, ephemeral: true })
+        await interaction.editReply({ content: `❌ Bad mapping line: \`${line}\` (use \`emoji=roleId\`).` })
         return
       }
       const emojiRaw = line.slice(0, eqIdx).trim()
       const roleId = line.slice(eqIdx + 1).trim()
       if (!/^\d{15,25}$/.test(roleId)) {
-        await interaction.reply({ content: `❌ Bad roleId: \`${roleId}\`.`, ephemeral: true })
+        await interaction.editReply({ content: `❌ Bad roleId: \`${roleId}\`.` })
         return
       }
       // For custom emojis in <a?:name:id> form, extract just the id.
@@ -2855,7 +2888,7 @@ export async function handleSettingsModalSubmit(interaction: ModalSubmitInteract
       mappings.push({ emoji: customMatch ? customMatch[1] : emojiRaw, roleId })
     }
     if (mappings.length === 0) {
-      await interaction.reply({ content: '❌ At least one mapping is required.', ephemeral: true })
+      await interaction.editReply({ content: '❌ At least one mapping is required.' })
       return
     }
 
@@ -2863,13 +2896,13 @@ export async function handleSettingsModalSubmit(interaction: ModalSubmitInteract
     if (expiresRaw) {
       const n = Number(expiresRaw)
       if (!Number.isFinite(n) || n < 1 || n > 60 * 24 * 30) {
-        await interaction.reply({ content: '❌ Expires must be 1–43200 minutes (30 days).', ephemeral: true })
+        await interaction.editReply({ content: '❌ Expires must be 1–43200 minutes (30 days).' })
         return
       }
       expiresAt = new Date(Date.now() + n * 60_000)
     }
 
-    await interaction.deferReply({ ephemeral: true })
+    // Already deferred by the top-of-function defer above.
     const { createReactionRoleMessage } = await import('../services/reactionRoles')
     try {
       const cfg = await createReactionRoleMessage(channel as any, body, mappings, {
@@ -2892,7 +2925,7 @@ export async function handleSettingsModalSubmit(interaction: ModalSubmitInteract
     } else {
       await setSetting(`${which}.template`, raw, interaction.user.id)
     }
-    await interaction.reply({ content: raw === '' ? `✅ ${which} template reset to default.` : `✅ ${which} template saved.`, ephemeral: true })
+    await interaction.editReply({ content: raw === '' ? `✅ ${which} template reset to default.` : `✅ ${which} template saved.` })
     return
   }
 
@@ -2902,18 +2935,18 @@ export async function handleSettingsModalSubmit(interaction: ModalSubmitInteract
     const raw = interaction.fields.getTextInputValue('n').trim()
     const n = Number(raw)
     if (!Number.isInteger(n) || n < 0 || n > 50) {
-      await interaction.reply({ content: '❌ Must be an integer 0–50.', ephemeral: true })
+      await interaction.editReply({ content: '❌ Must be an integer 0–50.' })
       return
     }
     // Sudo cap is 3 per spec; bot owner can go higher.
     const { isBotOwner } = await import('../services/botOwner')
     if (n > 3 && !await isBotOwner(interaction.client, interaction.user.id)) {
-      await interaction.reply({ content: '❌ Sudo cap on max items is 3. Only a bot owner can set higher.', ephemeral: true })
+      await interaction.editReply({ content: '❌ Sudo cap on max items is 3. Only a bot owner can set higher.' })
       return
     }
     const { setSocialFeedMaxItems } = await import('../services/socialFeeds')
     await setSocialFeedMaxItems(feedId, n)
-    await interaction.reply({ content: `✅ Max items per poll set to **${n}**.`, ephemeral: true })
+    await interaction.editReply({ content: `✅ Max items per poll set to **${n}**.` })
     return
   }
 
@@ -2960,7 +2993,7 @@ export async function handleSettingsModalSubmit(interaction: ModalSubmitInteract
       lines2.push(...errors.slice(0, 15))
       if (errors.length > 15) lines2.push(`_…and ${errors.length - 15} more._`)
     }
-    await interaction.reply({ content: lines2.join('\n'), ephemeral: true })
+    await interaction.editReply({ content: lines2.join('\n') })
     return
   }
 
@@ -2971,7 +3004,7 @@ export async function handleSettingsModalSubmit(interaction: ModalSubmitInteract
     const nameTemplate = raw.length > 0 ? raw : null
     const { updateAutoThreadChannel } = await import('../services/settings')
     await updateAutoThreadChannel(channelId, { nameTemplate })
-    await interaction.reply({ content: nameTemplate ? `✅ Template set to \`${nameTemplate}\`.` : '✅ Template reset to default.', ephemeral: true })
+    await interaction.editReply({ content: nameTemplate ? `✅ Template set to \`${nameTemplate}\`.` : '✅ Template reset to default.' })
     return
   }
 
@@ -2980,11 +3013,11 @@ export async function handleSettingsModalSubmit(interaction: ModalSubmitInteract
     const raw = interaction.fields.getTextInputValue('days').trim()
     const n = Number(raw)
     if (!Number.isInteger(n) || n < 1 || n > 3650) {
-      await interaction.reply({ content: '❌ Days must be an integer 1–3650 (10 years max).', ephemeral: true })
+      await interaction.editReply({ content: '❌ Days must be an integer 1–3650 (10 years max).' })
       return
     }
     await setSetting('archive.stale_days', String(n), interaction.user.id)
-    await interaction.reply({ content: `✅ Stale threshold set to **${n}** days.`, ephemeral: true })
+    await interaction.editReply({ content: `✅ Stale threshold set to **${n}** days.` })
     return
   }
 
@@ -2994,13 +3027,13 @@ export async function handleSettingsModalSubmit(interaction: ModalSubmitInteract
     const raw = interaction.fields.getTextInputValue('minutes').trim()
     const minutes = Number(raw)
     if (!Number.isInteger(minutes) || minutes < 1 || minutes > 1440) {
-      await interaction.reply({ content: '❌ Duration must be an integer 1–1440 (minutes).', ephemeral: true })
+      await interaction.editReply({ content: '❌ Duration must be an integer 1–1440 (minutes).' })
       return
     }
     const { lockHub } = await import('../services/voice/hubLockdown')
     const until = new Date(Date.now() + minutes * 60_000)
     await lockHub(interaction.client, interaction.guildId!, channelId, until)
-    await interaction.reply({ content: `✅ Hub locked until <t:${Math.floor(until.getTime() / 1000)}:R>.`, ephemeral: true })
+    await interaction.editReply({ content: `✅ Hub locked until <t:${Math.floor(until.getTime() / 1000)}:R>.` })
     return
   }
 
@@ -3015,14 +3048,14 @@ export async function handleSettingsModalSubmit(interaction: ModalSubmitInteract
     // it off (the room keeps its created/manual name).
     const ALLOWED_TEMPLATES = new Set(['auto'])
     if (rawTemplate && !ALLOWED_TEMPLATES.has(rawTemplate)) {
-      await interaction.reply({ content: `❌ Auto-naming must be \`auto\` (Smart) or blank (off). Got: \`${rawTemplate}\``, ephemeral: true })
+      await interaction.editReply({ content: `❌ Auto-naming must be \`auto\` (Smart) or blank (off). Got: \`${rawTemplate}\`` })
       return
     }
     let parsedLimit: number | null = null
     if (rawLimit) {
       const n = Number(rawLimit)
       if (!Number.isInteger(n) || n < 0 || n > 99) {
-        await interaction.reply({ content: '❌ User limit must be an integer 0–99.', ephemeral: true })
+        await interaction.editReply({ content: '❌ User limit must be an integer 0–99.' })
         return
       }
       parsedLimit = n
@@ -3034,11 +3067,14 @@ export async function handleSettingsModalSubmit(interaction: ModalSubmitInteract
       manualName: rawName || null,
       userLimit: parsedLimit,
     })
-    await interaction.reply({ content: '✅ Hub defaults saved. They\'ll apply on the next hub join.', ephemeral: true })
+    await interaction.editReply({ content: '✅ Hub defaults saved. They\'ll apply on the next hub join.' })
     return
   }
 
-  // Social feed Add Feed modal — separate code path (not a generic key/value setting).
+  // Social feed Add Feed modal — separate code path (not a generic key/value
+  // setting). This is also the fix for the 15s fetchAndParse() call below —
+  // it now runs safely after the top-of-function defer instead of before
+  // any ack.
   if (interaction.customId === 'sudo:set:social:add_submit') {
     const label = interaction.fields.getTextInputValue('label').trim()
     const url   = interaction.fields.getTextInputValue('url').trim()
@@ -3046,11 +3082,11 @@ export async function handleSettingsModalSubmit(interaction: ModalSubmitInteract
     const channelId = channelInput || SOCIAL_DEFAULT_CHANNEL_ID
 
     if (!/^https?:\/\//i.test(url)) {
-      await interaction.reply({ content: '❌ URL must start with http:// or https://', ephemeral: true })
+      await interaction.editReply({ content: '❌ URL must start with http:// or https://' })
       return
     }
     if (!/^\d{15,25}$/.test(channelId)) {
-      await interaction.reply({ content: `❌ Channel ID must be a Discord snowflake (numeric). Got: \`${channelId}\``, ephemeral: true })
+      await interaction.editReply({ content: `❌ Channel ID must be a Discord snowflake (numeric). Got: \`${channelId}\`` })
       return
     }
 
@@ -3079,11 +3115,20 @@ export async function handleSettingsModalSubmit(interaction: ModalSubmitInteract
     })
     if (seedGuid) await markSocialFeedSeen(feed.id, seedGuid).catch(() => {})
 
-    if (interaction.isFromMessage()) {
-      await interaction.update((await renderSocials()) as any)
-    } else {
-      await interaction.reply({ content: `✅ Added **${label}** → <#${channelId}>. ${seedNote}`, ephemeral: true })
-    }
+    // Always show the refreshed Socials panel — after the defer-first change
+    // this response is a fresh ephemeral message rather than an edit of the
+    // triggering panel, so there's no isFromMessage() distinction to make.
+    await interaction.editReply((await renderSocials()) as any)
+    await interaction.followUp({ content: `✅ Added **${label}** → <#${channelId}>. ${seedNote}`, ephemeral: true })
+    return
+  }
+
+  // Anything reaching here should be a `sudo:set:save:{key}` numeric/string
+  // setting submit. Guard the prefix explicitly instead of slicing blind —
+  // an unrecognized modal id (e.g. a future modal added without a branch
+  // above) would otherwise silently fall through to garbage key/value writes.
+  if (!interaction.customId.startsWith('sudo:set:save:')) {
+    await interaction.editReply({ content: `❌ Unrecognized modal: \`${interaction.customId}\`` })
     return
   }
 
@@ -3093,28 +3138,26 @@ export async function handleSettingsModalSubmit(interaction: ModalSubmitInteract
   if (numDef) {
     const n = Number(raw)
     if (!Number.isFinite(n)) {
-      await interaction.reply({ content: `❌ Not a number: \`${raw}\``, ephemeral: true })
+      await interaction.editReply({ content: `❌ Not a number: \`${raw}\`` })
       return
     }
     if (numDef.min !== undefined && n < numDef.min) {
-      await interaction.reply({ content: `❌ Must be ≥ ${numDef.min}`, ephemeral: true })
+      await interaction.editReply({ content: `❌ Must be ≥ ${numDef.min}` })
       return
     }
     if (numDef.max !== undefined && n > numDef.max) {
-      await interaction.reply({ content: `❌ Must be ≤ ${numDef.max}`, ephemeral: true })
+      await interaction.editReply({ content: `❌ Must be ≤ ${numDef.max}` })
       return
     }
     await setSetting(key, String(n), interaction.user.id)
-    // Modal was triggered from a panel button → refresh the source message in place.
-    // Otherwise fall back to an ephemeral confirmation.
-    if (interaction.isFromMessage()) {
-      await interaction.update(renderVoice() as any)
-    } else {
-      await interaction.reply({ content: `✅ Saved \`${key}\` = \`${n}\``, ephemeral: true })
-    }
+    // After the defer-first change this is always a fresh ephemeral message
+    // rather than an edit of the triggering panel — show the refreshed Voice
+    // panel plus a plain confirmation.
+    await interaction.editReply(renderVoice() as any)
+    await interaction.followUp({ content: `✅ Saved \`${key}\` = \`${n}\``, ephemeral: true })
     return
   }
   // Generic string fallback
   await setSetting(key, raw, interaction.user.id)
-  await interaction.reply({ content: `✅ Saved \`${key}\` = \`${raw.slice(0, 80)}\``, ephemeral: true })
+  await interaction.editReply({ content: `✅ Saved \`${key}\` = \`${raw.slice(0, 80)}\`` })
 }

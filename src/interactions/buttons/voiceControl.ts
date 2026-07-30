@@ -34,9 +34,11 @@ import {
 type AutoChannelRecord = typeof autoChannels.$inferSelect
 
 /**
- * Verifies that `member` may control `record`. If not, replies with an
- * ephemeral error and returns false. The caller should `return` immediately
- * when this returns false.
+ * Verifies that `member` may control `record`. If not, sends an ephemeral
+ * error and returns false. The caller should `return` immediately when this
+ * returns false. Defer-aware — via reply() if the interaction hasn't been
+ * deferred/replied yet, followUp() otherwise — so call sites may defer
+ * before calling this.
  */
 async function requireControl(
   interaction: ButtonInteraction,
@@ -45,7 +47,12 @@ async function requireControl(
   message = '❌ You do not have permission.',
 ): Promise<boolean> {
   if (canControlChannel(member, record) || isSudo(member)) return true
-  await interaction.reply({ content: message, ephemeral: true })
+  const payload = { content: message, ephemeral: true } as const
+  if (interaction.deferred || interaction.replied) {
+    await interaction.followUp(payload).catch(() => {})
+  } else {
+    await interaction.reply(payload).catch(() => {})
+  }
   return false
 }
 
@@ -54,6 +61,7 @@ async function requireControl(
  * during a grace window is explicitly excluded. Only the real owner or sudo
  * can take these actions; this prevents an acting owner from deleting the
  * room or unseating the original owner before they get a chance to return.
+ * Defer-aware — same reply()/followUp() split as requireControl above.
  */
 async function requireOwnerOrSudo(
   interaction: ButtonInteraction,
@@ -62,7 +70,12 @@ async function requireOwnerOrSudo(
   message = '❌ The original host hasn\'t lost the room yet — only they (or a sudo) can do that.',
 ): Promise<boolean> {
   if (isOwner(member, record) || isSudo(member)) return true
-  await interaction.reply({ content: message, ephemeral: true })
+  const payload = { content: message, ephemeral: true } as const
+  if (interaction.deferred || interaction.replied) {
+    await interaction.followUp(payload).catch(() => {})
+  } else {
+    await interaction.reply(payload).catch(() => {})
+  }
   return false
 }
 
@@ -148,10 +161,13 @@ export async function handleVoiceControlButton(interaction: ButtonInteraction): 
   }
 
   if (action === 'randomize') {
+    // Defer FIRST — before the permission check and the channel fetch +
+    // setName() REST calls below, which can be slow on a cold cache.
+    await interaction.deferUpdate()
     if (!await requireControl(interaction, member, record)) return
     // Static VCs are never renamed — no randomize either.
     if (record.sourceHubId === 'static') {
-      await interaction.reply({ content: '❌ This is a **static voice channel** — its name is permanent and can\'t be randomized.', ephemeral: true })
+      await interaction.followUp({ content: '❌ This is a **static voice channel** — its name is permanent and can\'t be randomized.', ephemeral: true })
       return
     }
     const guild = interaction.guild!
@@ -172,7 +188,7 @@ export async function handleVoiceControlButton(interaction: ButtonInteraction): 
       .where(eq(autoChannels.voiceChannelId, voiceChannelId))
     logChannelEvent({ voiceChannelId, guildId: record.guildId, type: 'randomize', actorUserId: member.id, detail: baseName })
     const updated = { ...record, manualName: baseName, autoNameEnabled: false, nameTemplate: null, fallbackName: baseName }
-    await interaction.update({ ...buildAutoNamePanelPayload(updated), content: null } as any).catch(() => {})
+    await interaction.editReply({ ...buildAutoNamePanelPayload(updated), content: null } as any).catch(() => {})
     await postOrUpdateControlPanel(interaction.client, updated)
     return
   }
@@ -266,6 +282,10 @@ export async function handleVoiceControlButton(interaction: ButtonInteraction): 
   }
 
   if (action === 'hide' || action === 'show') {
+    // Defer FIRST — before the permission check and the sequential
+    // permissionOverwrites.edit() calls below, which can be slow on a cold
+    // cache (especially the per-host/per-sudo-role loop when hidden).
+    await interaction.deferUpdate()
     if (!await requireControl(interaction, member, record)) return
 
     const isHidden = action === 'hide'
@@ -304,12 +324,16 @@ export async function handleVoiceControlButton(interaction: ButtonInteraction): 
       voiceChannelId, isHidden, ts: new Date().toISOString(),
     })
 
-    await interaction.update({ ...buildOptionsPanelPayload(updated), content: null } as any).catch(() => {})
+    await interaction.editReply({ ...buildOptionsPanelPayload(updated), content: null } as any).catch(() => {})
     await postOrUpdateControlPanel(interaction.client, updated)
     return
   }
 
   if (action === 'hosts') {
+    // Defer FIRST — before the permission check and the (previously up to
+    // 24 sequential) member fetches below, which can be slow on a cold
+    // cache right after a deploy.
+    await interaction.deferReply({ ephemeral: true })
     if (!await requireOwnerOrSudo(interaction, member, record, '❌ Only the original host (or a sudo) can manage hosts.')) return
     const guild = interaction.guild!
     const vc = await guild.channels.fetch(record.voiceChannelId).catch(() => null)
@@ -321,11 +345,13 @@ export async function handleVoiceControlButton(interaction: ButtonInteraction): 
     //   👤 = regular member  (click to make a host)
     const options: { label: string; value: string; description?: string; emoji?: string }[] = []
 
-    // Current hosts first — clicking removes them
-    for (const hostId of record.hostUserIds.slice(0, 24)) {
-      const hostMember = await guild.members.fetch(hostId).catch(() => null)
+    // Current hosts first — clicking removes them. Fetched in parallel
+    // (was up to 24 sequential round-trips).
+    const hostIds = record.hostUserIds.slice(0, 24)
+    const hostMembers = await Promise.all(hostIds.map(hostId => guild.members.fetch(hostId).catch(() => null)))
+    for (const [i, hostId] of hostIds.entries()) {
       options.push({
-        label: hostMember?.displayName ?? hostId,
+        label: hostMembers[i]?.displayName ?? hostId,
         value: `remove:${hostId}`,
         description: 'Currently a host — click to remove',
         emoji: '👑',
@@ -347,9 +373,8 @@ export async function handleVoiceControlButton(interaction: ButtonInteraction): 
     }
 
     if (options.length === 0) {
-      await interaction.reply({
+      await interaction.editReply({
         content: 'ℹ️ No hosts to remove and no eligible members to add. (Only members currently in the voice channel can be added as hosts.)',
-        ephemeral: true,
       })
       return
     }
@@ -360,10 +385,9 @@ export async function handleVoiceControlButton(interaction: ButtonInteraction): 
         .setPlaceholder('Add or remove a host…')
         .addOptions(options)
     )
-    await interaction.reply({
+    await interaction.editReply({
       content: '**Hosts** — 👑 host · 🛡️ sudo · 👤 member. Pick someone to toggle their host status.',
       components: [row],
-      ephemeral: true,
     })
     return
   }
