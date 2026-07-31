@@ -75,6 +75,9 @@ import {
 import { getGame, listGames } from '../services/games'
 import { checkAssignableRole } from '../utils/roleGuard'
 import { addStaticChannel, getStaticChannelIds, removeStaticChannel } from '../services/voice/staticChannels'
+import { setActivityStatsEnabled, flushActivityBuffers } from '../services/activity/tracker'
+import { getBackfillSummary, resetBackfillProgress, seedBackfillProgress } from '../services/activity/backfill'
+import { panelUrl } from '../utils/panelLink'
 
 // ---------------------------------------------------------------------------
 // Setting key registry — adding a new setting is mostly just adding a row here
@@ -234,6 +237,7 @@ function renderHome() {
     new ButtonBuilder().setCustomId('sudo:set:nav:game_defaults').setLabel('Game Defaults').setEmoji('🎮').setStyle(ButtonStyle.Secondary),
     new ButtonBuilder().setCustomId('sudo:set:nav:selfassign').setLabel('Self-assign Roles').setEmoji('🎟️').setStyle(ButtonStyle.Secondary),
     new ButtonBuilder().setCustomId('sudo:set:nav:static').setLabel('Static Channels').setEmoji('🎙️').setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder().setCustomId('sudo:set:nav:stats').setLabel('Activity Stats').setEmoji('📊').setStyle(ButtonStyle.Secondary),
   )
   const navRow = new ActionRowBuilder<MessageActionRowComponentBuilder>().addComponents(
     new ButtonBuilder().setCustomId('sudo:home').setLabel('Back to /sudo').setEmoji('🏠').setStyle(ButtonStyle.Secondary),
@@ -631,6 +635,7 @@ const FEATURE_FLAGS: FeatureFlagDef[] = [
   { key: 'feature.birthday_pings',     label: 'Birthday Pings',       description: 'Daily scheduler fires birthday messages.',                                  defaultOn: true },
   { key: 'feature.auto_role_on_join',  label: 'Auto-role on join',    description: 'Apply configured roles to every new member. Default OFF (#36).',          defaultOn: false },
   { key: 'feature.color_roles',        label: 'Color Roles (/color)', description: 'User-selectable color role manager. Default OFF (#38).',                    defaultOn: false },
+  { key: 'feature.activity_stats',     label: 'Activity Stats (logging)', description: 'Log per-user message/emoji/voice/game activity (counts only) for the stats panel.', defaultOn: false },
 ]
 
 async function renderDebug(client: any, userId: string) {
@@ -1819,6 +1824,65 @@ async function renderStaticChannels() {
   return { flags: MessageFlags.IsComponentsV2 as number, components }
 }
 
+async function renderActivityStats() {
+  const enabled = getBoolSetting('feature.activity_stats', false)
+  const enabledAtRaw = getSetting('stats.enabled_at')
+  const backfillEnabled = getBoolSetting('stats.backfill.enabled', false)
+  const summary = await getBackfillSummary()
+
+  const lines: string[] = [
+    '### 📊 Activity Stats',
+    '_Per-user/per-channel message, emoji, voice, and game activity — hour-bucketed_',
+    '_counts and voice session lengths only. Message content is never stored._\n',
+  ]
+
+  if (enabled) {
+    const since = enabledAtRaw ? `<t:${Math.floor(new Date(enabledAtRaw).getTime() / 1000)}:R>` : 'unknown'
+    lines.push(`**Tracking:** 🟢 On · since ${since}`)
+  } else {
+    lines.push('**Tracking:** ⚪ Off')
+  }
+
+  lines.push(`**History backfill:** ${backfillEnabled ? '🟢 Running' : '⏸️ Paused'}`)
+  lines.push(
+    `Channels: **${summary.channels.done}**/${summary.channels.total} done · ` +
+    `${summary.channels.running} running · ${summary.channels.pending} pending · ` +
+    `${summary.channels.error} errors · ${summary.channels.skipped} skipped`
+  )
+  lines.push(`Messages scanned: **${summary.messagesScanned}**`)
+  if (summary.currentChannelId) lines.push(`Current channel: <#${summary.currentChannelId}>`)
+  lines.push('')
+  lines.push(`🌐 [Open the full dashboard](${panelUrl('/squishy/stats')})`)
+
+  const container = new ContainerBuilder()
+    .setAccentColor(0x5865f2)
+    .addTextDisplayComponents(new TextDisplayBuilder().setContent(lines.join('\n')))
+
+  const components: any[] = [container]
+  components.push(
+    new ActionRowBuilder<MessageActionRowComponentBuilder>().addComponents(
+      new ButtonBuilder()
+        .setCustomId('sudo:set:stats:toggle')
+        .setLabel(enabled ? 'Disable tracking' : 'Enable tracking')
+        .setEmoji(enabled ? '🔕' : '🔔')
+        .setStyle(enabled ? ButtonStyle.Secondary : ButtonStyle.Success),
+      new ButtonBuilder()
+        .setCustomId('sudo:set:stats:backfill')
+        .setLabel(backfillEnabled ? 'Pause history backfill' : 'Start history backfill')
+        .setEmoji(backfillEnabled ? '⏸️' : '▶️')
+        .setStyle(backfillEnabled ? ButtonStyle.Secondary : ButtonStyle.Success),
+      new ButtonBuilder()
+        .setCustomId('sudo:set:stats:reset_backfill')
+        .setLabel('Reset backfill (clears backfilled history)')
+        .setEmoji('🗑️')
+        .setStyle(ButtonStyle.Danger),
+      new ButtonBuilder().setCustomId('sudo:set:home').setLabel('Back').setStyle(ButtonStyle.Secondary),
+    ),
+  )
+
+  return { flags: MessageFlags.IsComponentsV2 as number, components }
+}
+
 // ---------------------------------------------------------------------------
 // Public entry — called from the existing /sudo select handler
 // ---------------------------------------------------------------------------
@@ -2100,6 +2164,8 @@ export async function handleSettingsButton(interaction: ButtonInteraction): Prom
       await interaction.editReply((await renderSelfAssign(interaction.guild!)) as any)
     } else if (category === 'static') {
       await interaction.editReply((await renderStaticChannels()) as any)
+    } else if (category === 'stats') {
+      await interaction.editReply((await renderActivityStats()) as any)
     } else {
       await interaction.followUp({ content: `Unknown category: ${category}`, flags: MessageFlags.Ephemeral })
     }
@@ -2334,7 +2400,15 @@ export async function handleSettingsButton(interaction: ButtonInteraction): Prom
       return
     }
     const next = !getBoolSetting(def.key, def.defaultOn)
-    await setSetting(def.key, next ? 'true' : 'false', interaction.user.id)
+    if (def.key === 'feature.activity_stats') {
+      // Must go through setActivityStatsEnabled, not a raw setSetting — it
+      // stamps stats.enabled_at on first enable (the live/backfill boundary;
+      // without it backfill starts at "now" and double-counts everything
+      // live tracking already recorded) and reconciles voice sessions.
+      await setActivityStatsEnabled(next, interaction.user.id)
+    } else {
+      await setSetting(def.key, next ? 'true' : 'false', interaction.user.id)
+    }
     await interaction.editReply((await renderFeatureFlags()) as any)
     return
   }
@@ -2411,6 +2485,39 @@ export async function handleSettingsButton(interaction: ButtonInteraction): Prom
   if (id === 'sudo:set:selfassign:publish') {
     await selfAssignPublishBoard(interaction.client, interaction.guildId!)
     await interaction.editReply((await renderSelfAssign(interaction.guild!)) as any)
+    return
+  }
+
+  // sudo:set:stats:toggle — enable/disable activity-stats tracking
+  if (id === 'sudo:set:stats:toggle') {
+    const cur = getBoolSetting('feature.activity_stats', false)
+    await setActivityStatsEnabled(!cur, interaction.user.id)
+    await interaction.editReply((await renderActivityStats()) as any)
+    return
+  }
+
+  // sudo:set:stats:backfill — start/pause history backfill (independent of the
+  // tracking toggle above; the backfill loop itself re-checks both flags).
+  if (id === 'sudo:set:stats:backfill') {
+    const cur = getBoolSetting('stats.backfill.enabled', false)
+    await setSetting('stats.backfill.enabled', cur ? 'false' : 'true', interaction.user.id)
+    if (!cur) {
+      // Seed progress rows now so the re-render below shows real channel
+      // counts instead of "0/0" until the loop's next 15s recheck.
+      await seedBackfillProgress(interaction.client).catch(() => {})
+    }
+    await interaction.editReply((await renderActivityStats()) as any)
+    return
+  }
+
+  // sudo:set:stats:reset_backfill — wipe backfill progress + the backfilled
+  // (pre-enable) history it produced. Flush live buffers first so nothing
+  // in-flight from the tracker is left orphaned by the reset.
+  if (id === 'sudo:set:stats:reset_backfill') {
+    await flushActivityBuffers()
+    await resetBackfillProgress()
+    await interaction.editReply((await renderActivityStats()) as any)
+    await interaction.followUp({ content: '✅ Backfill progress and backfilled history cleared. Start backfill again to re-scan from scratch.', flags: MessageFlags.Ephemeral })
     return
   }
 

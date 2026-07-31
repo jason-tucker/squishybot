@@ -5,7 +5,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
-## [0.12.4] — 2026-07-30
+## [0.13.1] — 2026-07-31
 
 ### Added
 - **Interaction errors now posted to LOG_CHANNEL.** The global `interactionCreate` error catch now calls a new `logger.errorReport(context, err)` (in addition to the existing `console.error`), posting a redacted `🔴 Interaction error` summary (message + first ~8 stack lines) to `LOG_CHANNEL_ID` via the cached client. Deduped per context+message key — at most one post per 5 minutes, with `(+N repeats suppressed)` once the window reopens; never throws, no-ops if no client or `LOG_CHANNEL_ID`.
@@ -20,6 +20,19 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - **`/help` section select now acks every value.** `helpPanel.ts`'s `handleHelpPanelSelect` had no trailing `else` in its section if/else-if chain, so an unmatched value (e.g. `admin` picked by a non-sudo member) left the interaction unacknowledged; it now falls back to re-rendering the main help panel via `sendHelpPanel`.
 - **Settings-modal fallback no longer blindly slices unrecognized customIds.** `handleSettingsModalSubmit`'s generic `sudo:set:save:{key}` fallback now guards with `customId.startsWith('sudo:set:save:')` first and replies with an "unrecognized modal" error otherwise, instead of slicing any unmatched `sudo:set:*` modal id and writing garbage into `bot_settings`.
 - **Self-service staff-role grant/remove now defer before the Discord role edit + forced member re-fetch.** `staffRoleSelf.ts`'s `handleStaffRoleSelfAdd` and `handleStaffRoleSelfRemove` defer before `member.roles.add`/`remove` and the subsequent forced `members.fetch({force: true})`, replying via `editReply` (success) / `followUp` (failure) instead of the no-longer-valid `update`/`reply`.
+
+---
+
+## [0.13.0] — 2026-07-31
+
+### Added
+- **Activity Stats — opt-in per-user/per-channel activity logging.** Feature-flagged off by default (`feature.activity_stats`); the owner gets a one-time CV2 DM the first time the bot boots with it still off (`src/services/activity/ownerPrompt.ts`), and a new **`/sudo → Settings → 📊 Activity Stats`** panel manages enable/disable + backfill. Seven new hour-bucketed tables (`activity_message_stats`, `activity_emoji_stats`, `activity_voice_sessions`, `activity_voice_stats`, `activity_presence_stats`, `activity_member_events`, `activity_backfill_progress`) store **counts and voice-session lengths only — message content is never stored.**
+  - A buffered collector (`src/services/activity/tracker.ts`) hooks `messageCreate`, reactions, `voiceStateUpdate`, `presenceUpdate`, and member join/leave — flushing every 30s and rolling up open voice/game sessions into hourly buckets. Voice sessions survive a bot restart via a `rolled_up_to` watermark; in-memory game (presence) sessions do not (≤30s loss on restart, acceptable by design).
+  - A rate-limited history backfill (`src/services/activity/backfill.ts`, gated by `stats.backfill.enabled`) walks text/announcement channels backwards in 100-message pages from `stats.enabled_at`, sharing counting logic with the live tracker via `src/services/activity/aggregate.ts` so the two paths never drift. Reaction *givers* aren't backfilled (per-reactor fetches are rate-limit hostile) — reaction *received* counts and emoji totals are exact. Threads/forums aren't backfilled in v1 (live tracking still counts thread messages); voice/presence history can't be backfilled at all (Discord doesn't expose it).
+  - **Reset backfill** (Danger button on the sudo panel) clears both the backfill progress table and the backfilled (pre-`stats.enabled_at`) aggregate rows so a re-run never double-counts.
+  - Counterpart botpanel dashboard at `/squishy/stats` (heatmaps, leaderboards, per-user/per-channel drill-downs) reads the same tables over the vendored schema.
+
+---
 
 ## [0.12.3] — 2026-07-08
 

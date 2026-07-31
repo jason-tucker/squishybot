@@ -5,6 +5,7 @@ import { eq } from 'drizzle-orm'
 import { postOrUpdateSticky } from '../../services/voice/sticky'
 import { getAutoChannelTextFor, getAutoThreadConfig, getBoolSetting, isAutoChannelText, isAutoChannelVoice, isAutoThreadChannel } from '../../services/settings'
 import { logger } from '../../services/logger'
+import { recordMessageActivity } from '../../services/activity/tracker'
 
 const lastReposted = new Map<string, number>()
 // 10 s caps a busy chat at ~6 sticky bumps/min instead of ~40 at the old
@@ -22,6 +23,8 @@ export function registerMessageCreate(client: Client): void {
   client.on('messageCreate', async (msg: Message) => {
     if (!msg.guildId) return
     if (msg.author.id === client.user!.id) return
+
+    recordMessageActivity(msg)
 
     await maybeAutoThread(msg).catch(err => logger.error('Auto-thread failed', err))
     await maybeNudgeOutOfVoiceChat(msg).catch(err => logger.error('Voice-chat nudge failed', err))
