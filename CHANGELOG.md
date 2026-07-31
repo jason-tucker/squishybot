@@ -5,6 +5,17 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [0.13.0] — 2026-07-31
+
+### Added
+- **Activity Stats — opt-in per-user/per-channel activity logging.** Feature-flagged off by default (`feature.activity_stats`); the owner gets a one-time CV2 DM the first time the bot boots with it still off (`src/services/activity/ownerPrompt.ts`), and a new **`/sudo → Settings → 📊 Activity Stats`** panel manages enable/disable + backfill. Seven new hour-bucketed tables (`activity_message_stats`, `activity_emoji_stats`, `activity_voice_sessions`, `activity_voice_stats`, `activity_presence_stats`, `activity_member_events`, `activity_backfill_progress`) store **counts and voice-session lengths only — message content is never stored.**
+  - A buffered collector (`src/services/activity/tracker.ts`) hooks `messageCreate`, reactions, `voiceStateUpdate`, `presenceUpdate`, and member join/leave — flushing every 30s and rolling up open voice/game sessions into hourly buckets. Voice sessions survive a bot restart via a `rolled_up_to` watermark; in-memory game (presence) sessions do not (≤30s loss on restart, acceptable by design).
+  - A rate-limited history backfill (`src/services/activity/backfill.ts`, gated by `stats.backfill.enabled`) walks text/announcement channels backwards in 100-message pages from `stats.enabled_at`, sharing counting logic with the live tracker via `src/services/activity/aggregate.ts` so the two paths never drift. Reaction *givers* aren't backfilled (per-reactor fetches are rate-limit hostile) — reaction *received* counts and emoji totals are exact. Threads/forums aren't backfilled in v1 (live tracking still counts thread messages); voice/presence history can't be backfilled at all (Discord doesn't expose it).
+  - **Reset backfill** (Danger button on the sudo panel) clears both the backfill progress table and the backfilled (pre-`stats.enabled_at`) aggregate rows so a re-run never double-counts.
+  - Counterpart botpanel dashboard at `/squishy/stats` (heatmaps, leaderboards, per-user/per-channel drill-downs) reads the same tables over the vendored schema.
+
+---
+
 ## [0.12.3] — 2026-07-08
 
 ### Added

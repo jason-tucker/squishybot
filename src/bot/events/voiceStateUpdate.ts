@@ -19,6 +19,7 @@ import { env } from '../../config/env'
 import { publish, voiceCh, type VoiceOwnerChangedEvent } from '../../services/eventBus'
 import { isStaticChannel } from '../../services/voice/staticChannels'
 import { createStaticChannelText } from '../../services/voice/autoChannel'
+import { recordVoiceActivity } from '../../services/activity/tracker'
 
 export function registerVoiceStateUpdate(client: Client): void {
   client.on('voiceStateUpdate', async (oldState: VoiceState, newState: VoiceState) => {
@@ -31,6 +32,7 @@ export function registerVoiceStateUpdate(client: Client): void {
     // Promise.then with no error boundary; without this wrap a rejected
     // promise crashes the worker.
     try {
+      recordVoiceActivity(oldState, newState)
       await handleVoiceStateUpdate(client, oldState, newState)
     } catch (err) {
       logger.error('voiceStateUpdate handler threw — swallowed', err)

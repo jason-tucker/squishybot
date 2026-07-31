@@ -59,6 +59,11 @@ import '../../services/rpc/handlers/scheduledPosts/send'
 import '../../services/rpc/handlers/scheduledPosts/cancel'
 // Self-assign board verbs (add / update / remove / reorder / set_channel / publish).
 import '../../services/rpc/handlers/selfAssign'
+// Activity Stats (opt-in) — buffered live tracker, rate-limited history
+// backfill, and the one-time owner DM pitching the feature.
+import { startActivityTracker } from '../../services/activity/tracker'
+import { startActivityBackfill } from '../../services/activity/backfill'
+import { maybePromptOwnerForStats } from '../../services/activity/ownerPrompt'
 
 const SUPPRESS_NOTIFICATIONS = 1 << 12  // MessageFlags.SuppressNotifications
 
@@ -139,6 +144,14 @@ export function registerReadyEvent(client: Client) {
     // BOTPANEL_RPC_SECRET is unset. Tracks #33 / botpanel V3-1.
     startCacheInvalidator()
 
+    // Activity Stats (opt-in, feature.activity_stats — default OFF): buffered
+    // collector + voice/game session rollups, rate-limited history backfill,
+    // and a one-time owner DM pitching the feature. All three no-op
+    // internally when the flag is off.
+    startActivityTracker(c)
+    startActivityBackfill(c)
+    void maybePromptOwnerForStats(c)
+
     // Build a richer startup DM. Only the BOT_OWNER_ID env target gets this
     // (logger.dmOwner reads env directly — not the dynamic isBotOwner set).
     let version = '?'
@@ -158,6 +171,7 @@ export function registerReadyEvent(client: Client) {
       ['feature.birthday_pings',     'Birthday Pings',    true],
       ['feature.auto_role_on_join',  'Auto-role on join', false],
       ['feature.color_roles',        'Color Roles',       false],
+      ['feature.activity_stats',     'Activity Stats',    false],
     ]
     const offFlags = flagKeys.filter(([k, , def]) => !getBoolSetting(k, def)).map(([, label]) => label)
 
