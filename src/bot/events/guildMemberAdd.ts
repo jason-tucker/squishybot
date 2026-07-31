@@ -7,6 +7,7 @@ import { autoJoinRoles } from '../../db/schema'
 import { eq } from 'drizzle-orm'
 import { getBoolSetting, getSetting } from '../../services/settings'
 import { publish, memberCh, type MemberJoinedGuildEvent } from '../../services/eventBus'
+import { recordMemberEvent } from '../../services/activity/tracker'
 
 /**
  * On guildMemberAdd we re-apply every persisted game pref for the member.
@@ -21,6 +22,8 @@ export function registerGuildMemberAdd(client: Client): void {
   client.on('guildMemberAdd', async (member: GuildMember) => {
     if (member.guild.id !== env.GUILD_ID) return
     if (member.user.bot) return
+
+    recordMemberEvent(member, 'join')
 
     void publish<MemberJoinedGuildEvent>(memberCh('joined_guild'), {
       userId: member.id, ts: new Date().toISOString(),

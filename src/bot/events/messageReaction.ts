@@ -9,6 +9,7 @@ import type { Client, MessageReaction, PartialMessageReaction, User, PartialUser
 import { getReactionRoleConfig } from '../../services/reactionRoles'
 import { checkAssignableRole } from '../../utils/roleGuard'
 import { logger } from '../../services/logger'
+import { recordReactionActivity } from '../../services/activity/tracker'
 
 function emojiKey(r: MessageReaction | PartialMessageReaction): string {
   // Custom emojis have a numeric `id`; unicode emojis don't (we use the name).
@@ -66,6 +67,12 @@ async function apply(client: Client, reaction: MessageReaction | PartialMessageR
 }
 
 export function registerMessageReaction(client: Client): void {
-  client.on('messageReactionAdd', (reaction, user) => { void apply(client, reaction, user, true) })
-  client.on('messageReactionRemove', (reaction, user) => { void apply(client, reaction, user, false) })
+  client.on('messageReactionAdd', (reaction, user) => {
+    void apply(client, reaction, user, true)
+    recordReactionActivity(reaction, user, true)
+  })
+  client.on('messageReactionRemove', (reaction, user) => {
+    void apply(client, reaction, user, false)
+    recordReactionActivity(reaction, user, false)
+  })
 }

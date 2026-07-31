@@ -3,6 +3,7 @@ import { env } from '../../config/env'
 import { getBoolSetting, getSetting } from '../../services/settings'
 import { logger } from '../../services/logger'
 import { publish, memberCh, type MemberLeftGuildEvent } from '../../services/eventBus'
+import { recordMemberEvent } from '../../services/activity/tracker'
 
 /**
  * #20 — Goodbye message on guildMemberRemove. Default OFF.
@@ -17,6 +18,8 @@ export function registerGuildMemberRemove(client: Client): void {
     void publish<MemberLeftGuildEvent>(memberCh('left_guild'), {
       userId: member.id, ts: new Date().toISOString(),
     })
+
+    recordMemberEvent(member, 'leave')
 
     if (!getBoolSetting('goodbye.enabled', false)) return
 

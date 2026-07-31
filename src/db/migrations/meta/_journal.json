@@ -22,6 +22,13 @@
       "when": 1783477630368,
       "tag": "0002_talented_hellcat",
       "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1785467033539,
+      "tag": "0003_harsh_oracle",
+      "breakpoints": true
     }
   ]
 }

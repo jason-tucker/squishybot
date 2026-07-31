@@ -186,7 +186,7 @@ then use (run `squishybot` with no args for the full list):
 | `auto_channel_members` | Per-channel join times (`voice_channel_id, user_id, joined_at`) — drives the panel's "In channel" list with `<t:N:R>` timestamps |
 | `auto_channel_logs` | Append-only per-channel activity log (actions, joins/leaves, game start/stop, ownership transfers). Keyed by voice channel; capped at 200 rows/channel; cleared on channel teardown (delete + reconciler). Surfaced via the 📜 Log button on the sticky. |
 | `hub_channels` | Registry of managed hub voice channels |
-| `bot_settings` | Runtime key/value config overrides edited via `/sudo → Settings`. Notable keys: `voice.static_channel_ids` (JSON array of voice channel IDs designated as static channels), `games.default_view_on` (bool, **default true** — game channels visible to @everyone by default). |
+| `bot_settings` | Runtime key/value config overrides edited via `/sudo → Settings`. Notable keys: `voice.static_channel_ids` (JSON array of voice channel IDs designated as static channels), `games.default_view_on` (bool, **default true** — game channels visible to @everyone by default), `feature.activity_stats` (bool, **default false** — master switch for activity logging, toggled via `/sudo → Settings → Activity Stats`), `stats.enabled_at` (ISO timestamp stamped on first enable), `stats.backfill.enabled` (bool, default false), `stats.backfill.batch_delay_ms` (default 3000), `stats.owner_prompted` (set after the one-time owner DM). |
 | `sudo_users` | Members granted sudo at runtime (beyond the immutable `SUDO_USER_IDS` env list) |
 | `auto_thread_channels` | Channels where every non-bot message gets an auto-thread (managed via `/sudo → Settings → Auto Threads`) |
 | `social_feeds` | RSS-driven social feeds the poller reposts into a Discord channel. Managed via `/sudo → Settings → Socials`. Polled every 30 min (override via `bot_settings.social.poll_interval_ms`). Dedup keyed by RSS `<guid>` stored in `last_seen_id`; first poll seeds without posting so backlog isn't replayed. |
@@ -231,6 +231,13 @@ The "Request a Staff Role" button (on `/settings → Staff Role`) goes through a
 | `self_assign_entries` | Self-assign role board — one embed-per-entry (a Discord role, or a game with channel-access + ping toggles) posted into `selfassign.channel_id` with toggle buttons. Managed via `/sudo → Settings → Self-assign Roles` and botpanel `/squishy/self-assign-roles`. |
 | `archive_eligible_categories` | Discord categories opted into the channel-archive workflow via `/sudo → Archive` |
 | `archived_channels` | Channels currently in the archived state (original name + category + timestamp for unarchive) |
+| `activity_message_stats` | Hour-bucketed per-user/per-channel message counts (messages, words, chars, attachments, mentions, replies). No message content stored. Feature-flagged (`feature.activity_stats`, default OFF). |
+| `activity_emoji_stats` | Hour-bucketed emoji usage by kind (`message`, `reaction_given`, `reaction_received`). Reaction counts are monotonic — removals are not decremented. |
+| `activity_voice_sessions` | One row per voice stay (join → leave); `rolled_up_to` watermarks how much of an open session has already been folded into `activity_voice_stats`, so a bot restart can't double-count. |
+| `activity_voice_stats` | Hour-bucketed voice seconds — the source for voice heatmaps/leaderboards. |
+| `activity_presence_stats` | Hour-bucketed seconds per Discord "Playing" activity (game), from `presenceUpdate`. In-memory sessions only — don't survive a bot restart. |
+| `activity_member_events` | Append-only join/leave log with a guild-size snapshot (`member_count`) at event time — the panel's member trend plots these snapshots, never a cumulative delta. |
+| `activity_backfill_progress` | Per-channel history-backfill cursor (walks backwards from `stats.enabled_at`). Panel reads this table directly for progress display. Start/pause and reset live at `/sudo → Settings → Activity Stats`. |
 
 ---
 
@@ -293,6 +300,10 @@ Other customId families:
 | `src/services/scheduledPosts/` | `scheduler.ts` (15s tick, status-claim), `gameNight.ts` (RSVP/ownership context builder), `service.ts` (post/cancel helpers) |
 | `src/services/msgspec/` | Portable MessageSpec JSON renderer — `render.ts` converts spec JSON to discord.js CV2 builders with `{{variable}}` substitution and `<t:UNIX:style>` timestamp support |
 | `src/services/selfAssign.ts` | Self-assign role board — in-memory cache, DB CRUD, and posting/editing/deleting the per-entry toggle-button embeds in the configured channel (`sar:*` button family) |
+| `src/services/activity/tracker.ts` | Buffered activity collector — `recordMessageActivity`/`recordReactionActivity`/`recordVoiceActivity`/`recordPresenceActivity`/`recordMemberEvent` feed an in-memory buffer; a 30s tick flushes it, rolls up open voice/game sessions into hourly stats, and reconciles voice sessions across restarts and feature-flag transitions. Feature-flagged (`feature.activity_stats`, default OFF). |
+| `src/services/activity/aggregate.ts` | Shared content-parsing + upsert helpers used by both `tracker.ts` (live) and `backfill.ts` (history) so counting never drifts between the two. |
+| `src/services/activity/backfill.ts` | Rate-limited per-channel history backfill — walks channels backwards in 100-message pages from `stats.enabled_at`, gated by `stats.backfill.enabled`. `getBackfillSummary()`/`resetBackfillProgress()` back the sudo + botpanel progress UI. |
+| `src/services/activity/ownerPrompt.ts` | One-time CV2 DM (`maybePromptOwnerForStats`) pitching the opt-in Activity Stats feature to `BOT_OWNER_ID` the first time the bot boots with it still off; gated by `stats.owner_prompted`. |
 
 ---
 

@@ -8,6 +8,7 @@ import { debouncedPanelRefresh } from '../../services/voice/controlPanel'
 import { getBoolSetting, isAutoChannelVoice } from '../../services/settings'
 import { logger } from '../../services/logger'
 import { logChannelEvent } from '../../services/voice/channelLog'
+import { recordPresenceActivity } from '../../services/activity/tracker'
 
 /** Drop the per-channel rename state when an auto-channel is deleted. */
 export function clearRenameThrottle(voiceChannelId: string): void {
@@ -26,6 +27,8 @@ export function registerPresenceUpdate(client: Client): void {
   client.on('presenceUpdate', async (oldPresence: Presence | null, newPresence: Presence) => {
     if (newPresence.guild?.id !== env.GUILD_ID) return
     if (!newPresence.userId) return
+
+    recordPresenceActivity(oldPresence, newPresence)
 
     const memberVcId = newPresence.member?.voice.channelId
     if (!memberVcId) return
