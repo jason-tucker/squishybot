@@ -31,19 +31,32 @@ export function hourBucket(t: number | Date): Date {
  * the tracker's voice/game session rollup so a session spanning a UTC hour
  * boundary attributes seconds to every bucket it overlaps instead of dumping
  * the whole interval into whichever bucket `from` happens to land in.
+ *
+ * Sub-second remainders are carried between segments and the un-credited
+ * tail is exposed as `creditedTo` — callers advance their watermark to
+ * `creditedTo` (not `to`) so repeated small rollups never systematically
+ * truncate seconds away (~1.7%/session otherwise at a 30s tick cadence).
  */
-export function splitIntoHourBuckets(from: Date, to: Date): { bucket: Date; seconds: number }[] {
-  const out: { bucket: Date; seconds: number }[] = []
+export function splitIntoHourBuckets(from: Date, to: Date): {
+  segments: { bucket: Date; seconds: number }[]
+  creditedTo: Date
+} {
+  const segments: { bucket: Date; seconds: number }[] = []
   let cursor = from.getTime()
   const end = to.getTime()
+  let creditedMs = 0
+  let carry = 0
   while (cursor < end) {
     const bucketStart = Math.floor(cursor / HOUR_MS) * HOUR_MS
     const segmentEnd = Math.min(bucketStart + HOUR_MS, end)
-    const seconds = Math.floor((segmentEnd - cursor) / 1000)
-    if (seconds > 0) out.push({ bucket: new Date(bucketStart), seconds })
+    const exact = (segmentEnd - cursor) / 1000 + carry
+    const seconds = Math.floor(exact)
+    carry = exact - seconds
+    if (seconds > 0) segments.push({ bucket: new Date(bucketStart), seconds })
+    creditedMs += seconds * 1000
     cursor = segmentEnd
   }
-  return out
+  return { segments, creditedTo: new Date(from.getTime() + creditedMs) }
 }
 
 // ---------------------------------------------------------------------------
@@ -67,6 +80,12 @@ const CUSTOM_EMOJI_RE = /<a?:(\w+):(\d+)>/g
 // used instead of the literal invisible characters so the source stays
 // diff-/review-safe.
 const UNICODE_EMOJI_RE = /\p{Extended_Pictographic}\uFE0F?(?:\u200D\p{Extended_Pictographic}\uFE0F?|\p{Emoji_Modifier})*/gu
+// Extended_Pictographic alone also matches text-presentation characters that
+// ordinary prose contains constantly (\u2122 \u00A9 \u00AE \u203C \u2194 \u2714 \u2026). Those only count as
+// emoji when the sequence is actually emoji-presented: base char defaults to
+// emoji presentation, or the sequence carries VS16 / ZWJ / a skin tone.
+const EMOJI_PRESENTATION_RE = /^\p{Emoji_Presentation}/u
+const EMOJI_MODIFIER_RE = /\p{Emoji_Modifier}/u
 
 /** Parse every emoji occurrence out of message content. Never returns or
  * stores the surrounding text — only the emoji key/name/custom triples. */
@@ -80,7 +99,14 @@ export function parseEmojis(content: string | null | undefined): ParsedEmoji[] {
   // <a:name:id> syntax can ever be picked up as a unicode sequence too.
   const stripped = content.replace(CUSTOM_EMOJI_RE, ' ')
   for (const m of stripped.matchAll(UNICODE_EMOJI_RE)) {
-    out.push({ emojiKey: m[0], emojiName: null, custom: false })
+    const seq = m[0]
+    if (
+      !EMOJI_PRESENTATION_RE.test(seq) &&
+      !seq.includes('️') &&
+      !seq.includes('‍') &&
+      !EMOJI_MODIFIER_RE.test(seq)
+    ) continue
+    out.push({ emojiKey: seq, emojiName: null, custom: false })
   }
   return out
 }
@@ -142,27 +168,38 @@ export function mergeMessageDelta(buffer: Map<string, MessageStatsDelta>, delta:
   if (delta.channelName) existing.channelName = delta.channelName
 }
 
-export async function upsertMessageStats(row: MessageStatsDelta): Promise<void> {
-  await db.insert(activityMessageStats).values(row).onConflictDoUpdate({
-    target: [activityMessageStats.userId, activityMessageStats.channelId, activityMessageStats.bucket],
-    set: {
-      messageCount: sql`${activityMessageStats.messageCount} + ${row.messageCount}`,
-      wordCount: sql`${activityMessageStats.wordCount} + ${row.wordCount}`,
-      charCount: sql`${activityMessageStats.charCount} + ${row.charCount}`,
-      attachmentCount: sql`${activityMessageStats.attachmentCount} + ${row.attachmentCount}`,
-      mentionCount: sql`${activityMessageStats.mentionCount} + ${row.mentionCount}`,
-      replyCount: sql`${activityMessageStats.replyCount} + ${row.replyCount}`,
-      channelName: row.channelName ?? undefined,
-    },
-  }).catch(err => logger.warn(`activity: message stats upsert failed: ${(err as Error).message}`))
+export async function upsertMessageStats(row: MessageStatsDelta): Promise<boolean> {
+  try {
+    await db.insert(activityMessageStats).values(row).onConflictDoUpdate({
+      target: [activityMessageStats.userId, activityMessageStats.channelId, activityMessageStats.bucket],
+      set: {
+        messageCount: sql`${activityMessageStats.messageCount} + ${row.messageCount}`,
+        wordCount: sql`${activityMessageStats.wordCount} + ${row.wordCount}`,
+        charCount: sql`${activityMessageStats.charCount} + ${row.charCount}`,
+        attachmentCount: sql`${activityMessageStats.attachmentCount} + ${row.attachmentCount}`,
+        mentionCount: sql`${activityMessageStats.mentionCount} + ${row.mentionCount}`,
+        replyCount: sql`${activityMessageStats.replyCount} + ${row.replyCount}`,
+        channelName: row.channelName ?? undefined,
+      },
+    })
+    return true
+  } catch (err) {
+    logger.warn(`activity: message stats upsert failed: ${(err as Error).message}`)
+    return false
+  }
 }
 
-/** Drain a message-delta buffer into the DB and clear it. */
+/** Drain a message-delta buffer into the DB and clear it. Rows whose upsert
+ * fails are merged back into the buffer (a DB blip must not erase counts) —
+ * merge, not set, because new activity may have landed mid-flush. */
 export async function flushMessageBuffer(buffer: Map<string, MessageStatsDelta>): Promise<void> {
   if (buffer.size === 0) return
   const rows = Array.from(buffer.values())
   buffer.clear()
-  for (const row of rows) await upsertMessageStats(row)
+  for (const row of rows) {
+    const ok = await upsertMessageStats(row)
+    if (!ok) mergeMessageDelta(buffer, row)
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -192,20 +229,30 @@ export function mergeEmojiDelta(buffer: Map<string, EmojiStatsDelta>, delta: Emo
   if (delta.emojiName) existing.emojiName = delta.emojiName
 }
 
-export async function upsertEmojiStats(row: EmojiStatsDelta): Promise<void> {
-  await db.insert(activityEmojiStats).values(row).onConflictDoUpdate({
-    target: [activityEmojiStats.userId, activityEmojiStats.emojiKey, activityEmojiStats.kind, activityEmojiStats.bucket],
-    set: {
-      count: sql`${activityEmojiStats.count} + ${row.count}`,
-      emojiName: row.emojiName ?? undefined,
-    },
-  }).catch(err => logger.warn(`activity: emoji stats upsert failed: ${(err as Error).message}`))
+export async function upsertEmojiStats(row: EmojiStatsDelta): Promise<boolean> {
+  try {
+    await db.insert(activityEmojiStats).values(row).onConflictDoUpdate({
+      target: [activityEmojiStats.userId, activityEmojiStats.emojiKey, activityEmojiStats.kind, activityEmojiStats.bucket],
+      set: {
+        count: sql`${activityEmojiStats.count} + ${row.count}`,
+        emojiName: row.emojiName ?? undefined,
+      },
+    })
+    return true
+  } catch (err) {
+    logger.warn(`activity: emoji stats upsert failed: ${(err as Error).message}`)
+    return false
+  }
 }
 
-/** Drain an emoji-delta buffer into the DB and clear it. */
+/** Drain an emoji-delta buffer into the DB and clear it. Failed rows are
+ * merged back — same reasoning as flushMessageBuffer. */
 export async function flushEmojiBuffer(buffer: Map<string, EmojiStatsDelta>): Promise<void> {
   if (buffer.size === 0) return
   const rows = Array.from(buffer.values())
   buffer.clear()
-  for (const row of rows) await upsertEmojiStats(row)
+  for (const row of rows) {
+    const ok = await upsertEmojiStats(row)
+    if (!ok) mergeEmojiDelta(buffer, row)
+  }
 }

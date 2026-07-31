@@ -11,6 +11,7 @@ import { registerGuildMemberRemove } from './bot/events/guildMemberRemove'
 import { registerMessageReaction } from './bot/events/messageReaction'
 import { logger } from './services/logger'
 import { setDnd, shutdownPresence } from './services/presence'
+import { shutdownActivityTracker } from './services/activity/tracker'
 
 registerReadyEvent(client)
 registerInteractionCreate(client)
@@ -45,6 +46,10 @@ async function gracefulShutdown(signal: NodeJS.Signals): Promise<void> {
   shuttingDown = true
   logger.info(`Received ${signal} — shutting down gracefully`)
   shutdownPresence()
+  // Drain the activity buffers + persist voice watermarks BEFORE the gateway
+  // drops — watchtower deploys hit this path routinely, and without it the
+  // last ≤30s of activity counts would be discarded on every deploy.
+  try { await shutdownActivityTracker() } catch (err) { logger.warn('activity shutdown flush failed', err) }
   try { await client.destroy() } catch (err) { logger.warn('client.destroy failed', err) }
   // Give postgres pool sockets a moment to flush; node will exit naturally
   // once the event loop drains. 2 s is plenty in practice.

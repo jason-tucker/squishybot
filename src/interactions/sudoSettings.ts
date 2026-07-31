@@ -76,7 +76,7 @@ import { getGame, listGames } from '../services/games'
 import { checkAssignableRole } from '../utils/roleGuard'
 import { addStaticChannel, getStaticChannelIds, removeStaticChannel } from '../services/voice/staticChannels'
 import { setActivityStatsEnabled, flushActivityBuffers } from '../services/activity/tracker'
-import { getBackfillSummary, resetBackfillProgress } from '../services/activity/backfill'
+import { getBackfillSummary, resetBackfillProgress, seedBackfillProgress } from '../services/activity/backfill'
 import { panelUrl } from '../utils/panelLink'
 
 // ---------------------------------------------------------------------------
@@ -2341,7 +2341,15 @@ export async function handleSettingsButton(interaction: ButtonInteraction): Prom
       return
     }
     const next = !getBoolSetting(def.key, def.defaultOn)
-    await setSetting(def.key, next ? 'true' : 'false', interaction.user.id)
+    if (def.key === 'feature.activity_stats') {
+      // Must go through setActivityStatsEnabled, not a raw setSetting — it
+      // stamps stats.enabled_at on first enable (the live/backfill boundary;
+      // without it backfill starts at "now" and double-counts everything
+      // live tracking already recorded) and reconciles voice sessions.
+      await setActivityStatsEnabled(next, interaction.user.id)
+    } else {
+      await setSetting(def.key, next ? 'true' : 'false', interaction.user.id)
+    }
     await interaction.editReply((await renderFeatureFlags()) as any)
     return
   }
@@ -2434,6 +2442,11 @@ export async function handleSettingsButton(interaction: ButtonInteraction): Prom
   if (id === 'sudo:set:stats:backfill') {
     const cur = getBoolSetting('stats.backfill.enabled', false)
     await setSetting('stats.backfill.enabled', cur ? 'false' : 'true', interaction.user.id)
+    if (!cur) {
+      // Seed progress rows now so the re-render below shows real channel
+      // counts instead of "0/0" until the loop's next 15s recheck.
+      await seedBackfillProgress(interaction.client).catch(() => {})
+    }
     await interaction.editReply((await renderActivityStats()) as any)
     return
   }

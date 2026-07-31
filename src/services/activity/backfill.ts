@@ -33,6 +33,9 @@ import {
 const RECHECK_DELAY_MS = 15_000
 const DEFAULT_BATCH_DELAY_MS = 3000
 const BATCH_SIZE = 100
+// 'error' rows are requeued to 'pending' after this cooldown so one
+// transient fetch failure doesn't permanently drop a channel's history.
+const ERROR_RETRY_MS = 10 * 60_000
 // Inverse of the snowflake math in archive.ts:114
 // (Number((BigInt(id) >> 22n) + 1420070400000n)).
 const DISCORD_EPOCH_MS = 1420070400000
@@ -100,15 +103,38 @@ async function ensureProgressRows(guild: Guild): Promise<void> {
   // One bulk SELECT instead of a per-channel existence check — this runs
   // every tick (channels can appear at any time), so N round trips per tick
   // forever would add up on a server with many channels.
-  const existingRows = await db.select({ channelId: activityBackfillProgress.channelId }).from(activityBackfillProgress)
-  const existingIds = new Set(existingRows.map(r => r.channelId))
+  const existingRows = await db.select({
+    channelId: activityBackfillProgress.channelId,
+    status: activityBackfillProgress.status,
+    updatedAt: activityBackfillProgress.updatedAt,
+  }).from(activityBackfillProgress)
+  const existing = new Map(existingRows.map(r => [r.channelId, r]))
 
   for (const channel of guild.channels.cache.values()) {
     if (channel.type !== ChannelType.GuildText && channel.type !== ChannelType.GuildAnnouncement) continue
-    if (existingIds.has(channel.id)) continue
 
     const perms = me ? channel.permissionsFor(me) : null
     const hasAccess = !!perms?.has(PermissionFlagsBits.ViewChannel) && !!perms.has(PermissionFlagsBits.ReadMessageHistory)
+
+    const row = existing.get(channel.id)
+    if (row) {
+      // Recovery paths — neither state may be terminal forever:
+      //  - 'skipped' rows re-enter the queue as soon as the bot can actually
+      //    read the channel (perms granted later, or members.me was null on
+      //    the seeding tick and everything got mass-skipped).
+      //  - 'error' rows requeue after a cooldown; one transient fetch
+      //    failure must not permanently drop the channel's history.
+      const requeue =
+        (row.status === 'skipped' && hasAccess) ||
+        (row.status === 'error' && Date.now() - row.updatedAt.getTime() > ERROR_RETRY_MS)
+      if (requeue) {
+        await db.update(activityBackfillProgress)
+          .set({ status: 'pending', error: null, updatedAt: new Date() })
+          .where(eq(activityBackfillProgress.channelId, channel.id))
+          .catch(err => logger.warn(`activity backfill: requeue failed #${channel.name}: ${(err as Error).message}`))
+      }
+      continue
+    }
 
     await db.insert(activityBackfillProgress).values({
       channelId: channel.id,
@@ -119,6 +145,16 @@ async function ensureProgressRows(guild: Guild): Promise<void> {
       logger.warn(`activity backfill: failed to seed progress row #${channel.name}: ${(err as Error).message}`),
     )
   }
+}
+
+/**
+ * Seed/refresh progress rows immediately. The sudo panel calls this when
+ * backfill is switched on so its first render isn't an empty "0/0 channels"
+ * — the loop itself would only get there on its next 15s recheck.
+ */
+export async function seedBackfillProgress(client: Client): Promise<void> {
+  const guild = client.guilds.cache.get(env.GUILD_ID)
+  if (guild) await ensureProgressRows(guild)
 }
 
 /** 'running' rows win (resume in-flight work first); otherwise the next 'pending' row. */
@@ -176,6 +212,13 @@ async function processBatch(guild: Guild, channelId: string): Promise<void> {
   let oldest: { id: string; createdAt: Date } | null = null
 
   for (const msg of batch.values()) {
+    // Cursor must advance over EVERY message in the page, bots included — a
+    // page of pure bot/webhook messages (log channels, music bots) would
+    // otherwise leave the cursor stuck, and the loop would re-fetch the same
+    // 100 messages forever while 'running' beats every other channel.
+    if (!oldest || msg.createdTimestamp < oldest.createdAt.getTime()) {
+      oldest = { id: msg.id, createdAt: msg.createdAt }
+    }
     if (msg.author.bot) continue
 
     const delta = computeMessageDelta(msg)
@@ -207,9 +250,6 @@ async function processBatch(guild: Guild, channelId: string): Promise<void> {
       })
     }
 
-    if (!oldest || msg.createdTimestamp < oldest.createdAt.getTime()) {
-      oldest = { id: msg.id, createdAt: msg.createdAt }
-    }
   }
 
   await flushMessageBuffer(localMessageBuffer)

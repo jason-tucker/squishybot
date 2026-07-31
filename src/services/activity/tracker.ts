@@ -90,6 +90,9 @@ interface OpenGameSession {
 const openGameSessions = new Map<string, OpenGameSession>()
 
 let flushInterval: ReturnType<typeof setInterval> | null = null
+// Re-entrancy guard: under DB latency a tick can outlast the 30s interval;
+// overlapping ticks would double-roll the same open sessions.
+let ticking = false
 // Cached the same way src/services/logger.ts caches its client — several
 // exports here (setActivityStatsEnabled) need a Client but the contract's
 // exported signature doesn't carry one, so we stash the one passed to
@@ -119,6 +122,16 @@ export function startActivityTracker(client: Client): void {
 }
 
 async function tick(client: Client): Promise<void> {
+  if (ticking) return
+  ticking = true
+  try {
+    await tickInner(client)
+  } finally {
+    ticking = false
+  }
+}
+
+async function tickInner(client: Client): Promise<void> {
   const enabled = getBoolSetting(FEATURE_KEY, false)
   if (enabled !== lastFeatureEnabled) {
     if (enabled) {
@@ -186,7 +199,13 @@ async function openVoiceSession(
  * to `activity_voice_sessions.rolled_up_to` (skip when the caller is about
  * to overwrite that column anyway, e.g. on close). */
 async function rollUpVoiceSession(session: OpenVoiceSession, to: Date, persist: boolean): Promise<void> {
-  const segments = splitIntoHourBuckets(session.rolledUpTo, to)
+  const { segments, creditedTo } = splitIntoHourBuckets(session.rolledUpTo, to)
+  // Advance the watermark BEFORE awaiting any upsert — a close (fired
+  // without await from recordVoiceActivity) or an overlapping caller landing
+  // mid-await must never see the pre-advance watermark and re-credit the
+  // same interval. A failed upsert below then loses ≤ one tick of seconds
+  // instead of double-counting — the safer side of that tradeoff.
+  session.rolledUpTo = creditedTo
   for (const seg of segments) {
     await upsertVoiceStats({
       guildId: session.guildId,
@@ -197,10 +216,9 @@ async function rollUpVoiceSession(session: OpenVoiceSession, to: Date, persist: 
       seconds: seg.seconds,
     })
   }
-  session.rolledUpTo = to
   if (persist) {
     await db.update(activityVoiceSessions)
-      .set({ rolledUpTo: to })
+      .set({ rolledUpTo: creditedTo })
       .where(eq(activityVoiceSessions.id, session.id))
       .catch(err => logger.warn(`activity: failed to persist voice watermark session=${session.id}: ${(err as Error).message}`))
   }
@@ -219,7 +237,23 @@ async function closeVoiceSession(session: OpenVoiceSession, now: Date): Promise<
 
 async function rollUpOpenVoiceSessions(): Promise<void> {
   const now = new Date()
-  for (const session of openVoiceSessions.values()) {
+  const guild = cachedClient?.guilds.cache.get(env.GUILD_ID) ?? null
+  for (const [key, session] of Array.from(openVoiceSessions.entries())) {
+    // Phantom guard: a join's session insert can land after the user already
+    // left (openVoiceSession is fired without await), leaving an open session
+    // for a channel the user isn't in. Verify presence against the live voice
+    // cache each tick and close (clamped to one interval) instead of
+    // accruing forever.
+    if (guild) {
+      const channel = guild.channels.cache.get(session.channelId)
+      const present = !!channel?.isVoiceBased() && channel.members.has(session.userId)
+      if (!present) {
+        openVoiceSessions.delete(key)
+        const cappedEnd = new Date(Math.min(now.getTime(), session.rolledUpTo.getTime() + FLUSH_INTERVAL_MS))
+        await closeVoiceSession(session, cappedEnd)
+        continue
+      }
+    }
     if (!session.warnedLongSession && now.getTime() - session.joinedAt.getTime() > VOICE_LONG_SESSION_WARN_MS) {
       logger.warn(`activity: voice session user=${session.userId} vc=${session.channelId} has been open > 24h — still rolling up`)
       session.warnedLongSession = true
@@ -254,7 +288,28 @@ async function reconcileVoiceSessions(client: Client): Promise<void> {
     const channel = guild.channels.cache.get(row.channelId)
     const stillPresent = channel?.isVoiceBased() && channel.members.has(row.userId)
 
+    // Downtime clamp (both branches): the tracker can only have OBSERVED up
+    // to one flush interval past the persisted watermark before it died.
+    // Crediting all the way to `now` would fabricate the entire bot-downtime
+    // as voice time (a 2-day outage → 48h of voice credited to whoever had a
+    // session open when it crashed).
+    const watermark = row.rolledUpTo ?? row.joinedAt
+    const observedEnd = new Date(Math.min(now.getTime(), watermark.getTime() + FLUSH_INTERVAL_MS))
+
     if (stillPresent) {
+      // Credit the observed sliver, then fast-forward the watermark to `now`
+      // (memory + DB) so the next tick can't credit the unobserved gap.
+      const { segments } = splitIntoHourBuckets(watermark, observedEnd)
+      for (const seg of segments) {
+        await upsertVoiceStats({
+          guildId: row.guildId, userId: row.userId, channelId: row.channelId,
+          channelName: row.channelName, bucket: seg.bucket, seconds: seg.seconds,
+        })
+      }
+      await db.update(activityVoiceSessions)
+        .set({ rolledUpTo: now })
+        .where(eq(activityVoiceSessions.id, row.id))
+        .catch(err => logger.warn(`activity: reconcile adopt watermark failed session=${row.id}: ${(err as Error).message}`))
       openVoiceSessions.set(key, {
         id: row.id,
         guildId: row.guildId,
@@ -262,24 +317,23 @@ async function reconcileVoiceSessions(client: Client): Promise<void> {
         channelId: row.channelId,
         channelName: row.channelName,
         joinedAt: row.joinedAt,
-        rolledUpTo: row.rolledUpTo ?? row.joinedAt,
+        rolledUpTo: now,
         warnedLongSession: false,
       })
       adopted.add(key)
       continue
     }
 
-    const rolledUpTo = row.rolledUpTo ?? row.joinedAt
-    const segments = splitIntoHourBuckets(rolledUpTo, now)
+    const { segments } = splitIntoHourBuckets(watermark, observedEnd)
     for (const seg of segments) {
       await upsertVoiceStats({
         guildId: row.guildId, userId: row.userId, channelId: row.channelId,
         channelName: row.channelName, bucket: seg.bucket, seconds: seg.seconds,
       })
     }
-    const durationSeconds = Math.max(0, Math.round((now.getTime() - row.joinedAt.getTime()) / 1000))
+    const durationSeconds = Math.max(0, Math.round((observedEnd.getTime() - row.joinedAt.getTime()) / 1000))
     await db.update(activityVoiceSessions)
-      .set({ leftAt: now, durationSeconds, rolledUpTo: now })
+      .set({ leftAt: observedEnd, durationSeconds, rolledUpTo: observedEnd })
       .where(eq(activityVoiceSessions.id, row.id))
       .catch(err => logger.warn(`activity: reconcile close failed session=${row.id}: ${(err as Error).message}`))
   }
@@ -348,14 +402,16 @@ export function recordVoiceActivity(oldState: VoiceState, newState: VoiceState):
 // ---------------------------------------------------------------------------
 
 async function rollUpGameSession(session: OpenGameSession, to: Date): Promise<void> {
-  const segments = splitIntoHourBuckets(session.watermark, to)
+  const { segments, creditedTo } = splitIntoHourBuckets(session.watermark, to)
+  // Watermark advances before the awaits — same double-count race as
+  // rollUpVoiceSession (a stop/offline close can land mid-tick).
+  session.watermark = creditedTo
   for (const seg of segments) {
     await upsertPresenceStats({
       guildId: session.guildId, userId: session.userId, gameName: session.gameName,
       bucket: seg.bucket, seconds: seg.seconds,
     })
   }
-  session.watermark = to
 }
 
 async function rollUpOpenGameSessions(): Promise<void> {
@@ -529,18 +585,47 @@ export async function setActivityStatsEnabled(enabled: boolean, byDiscordId?: st
   }
 
   // Do the transition work here (rather than waiting up to 30s for the next
-  // tick) and mark it done so the tick's own ON/OFF-transition detector
-  // doesn't redo it.
-  lastFeatureEnabled = enabled
+  // tick). lastFeatureEnabled only advances AFTER the work succeeds — if the
+  // client isn't attached yet or the reconcile/close throws, the tick's
+  // transition detector must still see a pending transition and retry it.
   if (enabled) {
     if (cachedClient) {
-      await reconcileVoiceSessions(cachedClient).catch(err =>
-        logger.warn(`activity: reconcile on enable failed: ${(err as Error).message}`),
-      )
+      try {
+        await reconcileVoiceSessions(cachedClient)
+        lastFeatureEnabled = true
+      } catch (err) {
+        logger.warn(`activity: reconcile on enable failed (next tick retries): ${(err as Error).message}`)
+      }
     }
   } else {
-    await closeAllOpenSessions()
+    try {
+      await closeAllOpenSessions()
+      await flushActivityBuffers()
+      lastFeatureEnabled = false
+    } catch (err) {
+      logger.warn(`activity: close-on-disable failed (next tick retries): ${(err as Error).message}`)
+    }
+  }
+}
+
+/**
+ * Deploy-time shutdown: stop the tick, persist open-session watermarks, and
+ * drain the buffers so the last ≤30s of counts survive the restart (open
+ * voice rows stay open — the next boot's reconcile adopts them).
+ */
+export async function shutdownActivityTracker(): Promise<void> {
+  if (flushInterval) {
+    clearInterval(flushInterval)
+    flushInterval = null
+  }
+  try {
+    if (getBoolSetting(FEATURE_KEY, false)) {
+      await rollUpOpenVoiceSessions()
+      await rollUpOpenGameSessions()
+    }
     await flushActivityBuffers()
+  } catch (err) {
+    logger.warn(`activity: shutdown flush failed: ${(err as Error).message}`)
   }
 }
 
