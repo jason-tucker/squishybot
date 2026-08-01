@@ -31,6 +31,12 @@ How to delegate well:
 
 ---
 
+## Merge policy
+
+PRs target `main` directly (same model as botpanel — see its CLAUDE.md rule 6). **Standing merge authorization (Jason, 2026-08-01):** once a Claude-authored PR is CI-green and expected to work, squash-merge it (one commit per PR) without waiting for a per-PR go-ahead — the deploy workflow + watchtower ship `main` automatically. When a botpanel PR depends on a schema change here, this repo merges first (botpanel's `verify-schemas` vendors from squishybot `main`). Hold for explicit approval only on risky/destructive changes (migrations that drop or rewrite data, auth/permission changes) or when the change is genuinely ambiguous.
+
+---
+
 ## Convention: every per-user setting must be sudo-editable on behalf of users
 
 The user community for this bot is mostly non-technical. **Most members will not edit their own bot settings**, so any per-user setting added here must be reachable from two surfaces:
