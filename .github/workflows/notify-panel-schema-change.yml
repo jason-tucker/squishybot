@@ -21,12 +21,18 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Send repository_dispatch to botpanel
+        # Values pass through env, never inline in the script: an interpolated
+        # commit message containing a quote broke out of the single-quoted -F
+        # arg ("accepts 1 arg(s), received 4" on b238359) and doubled as a
+        # script-injection vector — same flaw botpanel#270 fixed on its side.
         env:
           GH_TOKEN: ${{ secrets.BOTPANEL_DISPATCH_PAT }}
+          SOURCE_REF: ${{ github.sha }}
+          HEAD_COMMIT_MESSAGE: ${{ github.event.head_commit.message }}
         run: |
           gh api -X POST repos/jason-tucker/botpanel/dispatches \
             -f event_type='bot-schema-changed' \
             -F 'client_payload[source_repo]=squishybot' \
-            -F 'client_payload[source_ref]=${{ github.sha }}' \
+            -F "client_payload[source_ref]=${SOURCE_REF}" \
             -F 'client_payload[schema_dir]=squishy' \
-            -F 'client_payload[head_commit_message]=${{ github.event.head_commit.message }}'
+            -F "client_payload[head_commit_message]=${HEAD_COMMIT_MESSAGE}"
