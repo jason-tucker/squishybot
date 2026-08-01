@@ -29,6 +29,13 @@
       "when": 1785467033539,
       "tag": "0003_harsh_oracle",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1785565506591,
+      "tag": "0004_crazy_lake",
+      "breakpoints": true
     }
   ]
 }
