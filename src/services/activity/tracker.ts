@@ -51,6 +51,7 @@ import {
   type EmojiStatsDelta,
   type MessageStatsDelta,
 } from './aggregate'
+import { classifyChannelKind, sweepLegacyChannelKinds, type ActivityChannelKind } from './channelKinds'
 
 const FEATURE_KEY = 'feature.activity_stats'
 const FLUSH_INTERVAL_MS = 30_000
@@ -70,6 +71,7 @@ interface OpenVoiceSession {
   userId: string
   channelId: string
   channelName: string | null
+  channelKind: ActivityChannelKind | null
   joinedAt: Date
   rolledUpTo: Date
   warnedLongSession: boolean
@@ -114,6 +116,7 @@ export function startActivityTracker(client: Client): void {
     void reconcileVoiceSessions(client).catch(err =>
       logger.warn(`activity tracker: startup reconcile failed: ${(err as Error).message}`),
     )
+    void sweepLegacyChannelKinds(client)
   }
   flushInterval = setInterval(() => {
     void tick(client).catch(err => logger.warn(`activity tracker: tick failed: ${(err as Error).message}`))
@@ -137,6 +140,7 @@ async function tickInner(client: Client): Promise<void> {
     if (enabled) {
       logger.info('Activity stats: feature flag turned ON — reconciling voice sessions')
       await reconcileVoiceSessions(client)
+      void sweepLegacyChannelKinds(client)
     } else {
       logger.info('Activity stats: feature flag turned OFF — closing open sessions')
       await closeAllOpenSessions()
@@ -179,13 +183,16 @@ async function openVoiceSession(
   joinedAt: Date,
 ): Promise<void> {
   const key = `${channelId}:${userId}`
+  // NULL for the room creator (their hub join precedes the auto_channels
+  // row) — re-classified on the next rollup tick and by the teardown stamp.
+  const channelKind = classifyChannelKind(channelId)
   try {
     const [row] = await db.insert(activityVoiceSessions).values({
-      guildId, userId, channelId, channelName, joinedAt, rolledUpTo: joinedAt,
+      guildId, userId, channelId, channelName, channelKind, joinedAt, rolledUpTo: joinedAt,
     }).returning()
     if (row) {
       openVoiceSessions.set(key, {
-        id: row.id, guildId, userId, channelId, channelName, joinedAt,
+        id: row.id, guildId, userId, channelId, channelName, channelKind, joinedAt,
         rolledUpTo: joinedAt, warnedLongSession: false,
       })
     }
@@ -212,25 +219,33 @@ async function rollUpVoiceSession(session: OpenVoiceSession, to: Date, persist: 
       userId: session.userId,
       channelId: session.channelId,
       channelName: session.channelName,
+      channelKind: session.channelKind,
       bucket: seg.bucket,
       seconds: seg.seconds,
     })
   }
   if (persist) {
+    // channelName/channelKind ride along: rollUpOpenVoiceSessions refreshes
+    // both from the live cache (rooms rename via Smart auto-naming; the
+    // creator's session starts unclassified), so the session row tracks them.
     await db.update(activityVoiceSessions)
-      .set({ rolledUpTo: creditedTo })
+      .set({ rolledUpTo: creditedTo, channelName: session.channelName, channelKind: session.channelKind })
       .where(eq(activityVoiceSessions.id, session.id))
       .catch(err => logger.warn(`activity: failed to persist voice watermark session=${session.id}: ${(err as Error).message}`))
   }
 }
 
 async function closeVoiceSession(session: OpenVoiceSession, now: Date): Promise<void> {
+  // Last-chance classification BEFORE the final rollup — a short creator
+  // stay can open AND close before any rollup tick re-classified it, and
+  // the sliver upserted below should carry the kind.
+  session.channelKind ??= classifyChannelKind(session.channelId)
   // In-memory-only rollup here — the close update below writes rolled_up_to
   // itself, so persisting it twice would be a wasted round trip.
   await rollUpVoiceSession(session, now, false)
   const durationSeconds = Math.max(0, Math.round((now.getTime() - session.joinedAt.getTime()) / 1000))
   await db.update(activityVoiceSessions)
-    .set({ leftAt: now, durationSeconds, rolledUpTo: now })
+    .set({ leftAt: now, durationSeconds, rolledUpTo: now, channelName: session.channelName, channelKind: session.channelKind })
     .where(eq(activityVoiceSessions.id, session.id))
     .catch(err => logger.warn(`activity: failed to close voice session=${session.id}: ${(err as Error).message}`))
 }
@@ -253,6 +268,11 @@ async function rollUpOpenVoiceSessions(): Promise<void> {
         await closeVoiceSession(session, cappedEnd)
         continue
       }
+      // Track live renames (auto rooms Smart-rename to game names; the
+      // creator's session opens under the hub's name) and pick up the
+      // classification the creator's join preceded.
+      if (channel && channel.name !== session.channelName) session.channelName = channel.name
+      session.channelKind ??= classifyChannelKind(session.channelId)
     }
     if (!session.warnedLongSession && now.getTime() - session.joinedAt.getTime() > VOICE_LONG_SESSION_WARN_MS) {
       logger.warn(`activity: voice session user=${session.userId} vc=${session.channelId} has been open > 24h — still rolling up`)
@@ -296,6 +316,10 @@ async function reconcileVoiceSessions(client: Client): Promise<void> {
     const watermark = row.rolledUpTo ?? row.joinedAt
     const observedEnd = new Date(Math.min(now.getTime(), watermark.getTime() + FLUSH_INTERVAL_MS))
 
+    // Pre-feature rows (and creator sessions the restart interrupted) may
+    // still be unclassified — the registry is loaded by now, so fill it in.
+    const channelKind = row.channelKind ?? classifyChannelKind(row.channelId)
+
     if (stillPresent) {
       // Credit the observed sliver, then fast-forward the watermark to `now`
       // (memory + DB) so the next tick can't credit the unobserved gap.
@@ -303,11 +327,11 @@ async function reconcileVoiceSessions(client: Client): Promise<void> {
       for (const seg of segments) {
         await upsertVoiceStats({
           guildId: row.guildId, userId: row.userId, channelId: row.channelId,
-          channelName: row.channelName, bucket: seg.bucket, seconds: seg.seconds,
+          channelName: row.channelName, channelKind, bucket: seg.bucket, seconds: seg.seconds,
         })
       }
       await db.update(activityVoiceSessions)
-        .set({ rolledUpTo: now })
+        .set({ rolledUpTo: now, channelKind })
         .where(eq(activityVoiceSessions.id, row.id))
         .catch(err => logger.warn(`activity: reconcile adopt watermark failed session=${row.id}: ${(err as Error).message}`))
       openVoiceSessions.set(key, {
@@ -316,6 +340,7 @@ async function reconcileVoiceSessions(client: Client): Promise<void> {
         userId: row.userId,
         channelId: row.channelId,
         channelName: row.channelName,
+        channelKind,
         joinedAt: row.joinedAt,
         rolledUpTo: now,
         warnedLongSession: false,
@@ -328,12 +353,12 @@ async function reconcileVoiceSessions(client: Client): Promise<void> {
     for (const seg of segments) {
       await upsertVoiceStats({
         guildId: row.guildId, userId: row.userId, channelId: row.channelId,
-        channelName: row.channelName, bucket: seg.bucket, seconds: seg.seconds,
+        channelName: row.channelName, channelKind, bucket: seg.bucket, seconds: seg.seconds,
       })
     }
     const durationSeconds = Math.max(0, Math.round((observedEnd.getTime() - row.joinedAt.getTime()) / 1000))
     await db.update(activityVoiceSessions)
-      .set({ leftAt: observedEnd, durationSeconds, rolledUpTo: observedEnd })
+      .set({ leftAt: observedEnd, durationSeconds, rolledUpTo: observedEnd, channelKind })
       .where(eq(activityVoiceSessions.id, row.id))
       .catch(err => logger.warn(`activity: reconcile close failed session=${row.id}: ${(err as Error).message}`))
   }
@@ -354,7 +379,8 @@ async function reconcileVoiceSessions(client: Client): Promise<void> {
 }
 
 async function upsertVoiceStats(row: {
-  guildId: string; userId: string; channelId: string; channelName: string | null; bucket: Date; seconds: number
+  guildId: string; userId: string; channelId: string; channelName: string | null
+  channelKind: ActivityChannelKind | null; bucket: Date; seconds: number
 }): Promise<void> {
   if (row.seconds <= 0) return
   await db.insert(activityVoiceStats).values(row).onConflictDoUpdate({
@@ -362,6 +388,7 @@ async function upsertVoiceStats(row: {
     set: {
       seconds: sql`${activityVoiceStats.seconds} + ${row.seconds}`,
       channelName: row.channelName ?? undefined,
+      channelKind: row.channelKind ?? undefined,
     },
   }).catch(err => logger.warn(`activity: voice stats upsert failed: ${(err as Error).message}`))
 }

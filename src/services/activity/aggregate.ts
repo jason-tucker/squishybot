@@ -13,6 +13,7 @@ import type { Message } from 'discord.js'
 import { db } from '../../db/client'
 import { activityEmojiStats, activityMessageStats } from '../../db/schema'
 import { logger } from '../logger'
+import { classifyChannelKind, type ActivityChannelKind } from './channelKinds'
 
 const HOUR_MS = 3_600_000
 
@@ -120,6 +121,7 @@ export interface MessageStatsDelta {
   userId: string
   channelId: string
   channelName: string | null
+  channelKind: ActivityChannelKind | null
   bucket: Date
   messageCount: number
   wordCount: number
@@ -139,6 +141,9 @@ export function computeMessageDelta(msg: Message): MessageStatsDelta {
     userId: msg.author.id,
     channelId: msg.channelId,
     channelName: 'name' in msg.channel ? (msg.channel.name ?? null) : null,
+    // Classified while the channel still exists — by flush time an auto
+    // room's "delete now" teardown may already have emptied the registry.
+    channelKind: classifyChannelKind(msg.channelId),
     bucket: hourBucket(msg.createdTimestamp),
     messageCount: 1,
     wordCount: words.length,
@@ -166,6 +171,7 @@ export function mergeMessageDelta(buffer: Map<string, MessageStatsDelta>, delta:
   existing.mentionCount += delta.mentionCount
   existing.replyCount += delta.replyCount
   if (delta.channelName) existing.channelName = delta.channelName
+  if (delta.channelKind) existing.channelKind = delta.channelKind
 }
 
 export async function upsertMessageStats(row: MessageStatsDelta): Promise<boolean> {
@@ -180,6 +186,7 @@ export async function upsertMessageStats(row: MessageStatsDelta): Promise<boolea
         mentionCount: sql`${activityMessageStats.mentionCount} + ${row.mentionCount}`,
         replyCount: sql`${activityMessageStats.replyCount} + ${row.replyCount}`,
         channelName: row.channelName ?? undefined,
+        channelKind: row.channelKind ?? undefined,
       },
     })
     return true

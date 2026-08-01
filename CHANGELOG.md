@@ -5,6 +5,16 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [0.14.0] — 2026-08-01
+
+### Added
+- **Activity Stats — auto voice channels are classified instead of becoming ghosts.** New nullable `channel_kind` column (`'auto_voice'` | `'auto_text'`) on `activity_message_stats`, `activity_voice_stats`, and `activity_voice_sessions` (migration `0004_crazy_lake.sql`), so the botpanel dashboard can fold every ephemeral auto-room's dead channel ID into one "Auto voice rooms" group instead of listing each deleted room. Three layers keep it correct (`src/services/activity/channelKinds.ts`): synchronous record-time classification via the in-memory auto-channel registry, a teardown stamp on every channel-pair delete path (`deleteAutoChannel`, `deleteStaticText`, reconciler orphan cleanup), and a startup/flag-on sweep that classifies legacy rows whose channels no longer exist. Static VCs stay ordinary individual channels in stats; only their ephemeral companion text channels classify as `auto_text`.
+
+### Fixed
+- Open voice-session rows now refresh `channel_name` from the live channel on each rollup tick, so a room's Smart auto-rename (and the hub→room rename the creator's session predates) is reflected in stats instead of freezing the name captured at join.
+
+---
+
 ## [0.13.0] — 2026-07-31
 
 ### Added

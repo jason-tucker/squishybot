@@ -15,6 +15,7 @@ import { backfillMembers, clearMembers } from './voiceMembers'
 import { clearChannelLog } from './channelLog'
 import { logger } from '../logger'
 import { getSetting, unregisterHubChannel, untrackAutoChannelText, untrackAutoChannelVoice, updateHubChannelId } from '../settings'
+import { stampActivityChannelKinds } from '../activity/channelKinds'
 
 export interface ReconcilerResult {
   recovered: number
@@ -68,6 +69,9 @@ export async function runReconciler(client: Client): Promise<ReconcilerResult> {
         await clearChannelLog(record.voiceChannelId)
         untrackAutoChannelText(record.textChannelId)
         untrackAutoChannelVoice(record.voiceChannelId)
+        // Static VC gone externally — its companion text rows still fold
+        // into the auto group; the VC itself stays a normal channel in stats.
+        void stampActivityChannelKinds({ textChannelId: record.textChannelId })
         result.cleaned++
         logger.info(`Reconciler: cleaned static orphan (VC gone) vc=${record.voiceChannelId}`)
         return
@@ -79,6 +83,7 @@ export async function runReconciler(client: Client): Promise<ReconcilerResult> {
       await clearChannelLog(record.voiceChannelId)
       untrackAutoChannelText(record.textChannelId)
       untrackAutoChannelVoice(record.voiceChannelId)
+      void stampActivityChannelKinds({ voiceChannelId: record.voiceChannelId, textChannelId: record.textChannelId })
       result.cleaned++
       logger.info(`Reconciler: cleaned orphan vc=${record.voiceChannelId}`)
       return
@@ -114,6 +119,9 @@ export async function runReconciler(client: Client): Promise<ReconcilerResult> {
       untrackAutoChannelVoice(record.voiceChannelId)
       await clearMembers(record.voiceChannelId)
       await clearChannelLog(record.voiceChannelId)
+      // The old companion text channel is gone (deleted externally) — fold
+      // its stats rows into the auto group before the replacement is created.
+      void stampActivityChannelKinds({ textChannelId: record.textChannelId })
 
       const firstMember = vc.members.first()
       if (firstMember) {
