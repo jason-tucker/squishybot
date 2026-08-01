@@ -5,7 +5,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
-## [0.13.1] — 2026-07-31
+## [0.14.1] — 2026-08-01
 
 ### Added
 - **Interaction errors now posted to LOG_CHANNEL.** The global `interactionCreate` error catch now calls a new `logger.errorReport(context, err)` (in addition to the existing `console.error`), posting a redacted `🔴 Interaction error` summary (message + first ~8 stack lines) to `LOG_CHANNEL_ID` via the cached client. Deduped per context+message key — at most one post per 5 minutes, with `(+N repeats suppressed)` once the window reopens; never throws, no-ops if no client or `LOG_CHANNEL_ID`.
@@ -20,6 +20,16 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - **`/help` section select now acks every value.** `helpPanel.ts`'s `handleHelpPanelSelect` had no trailing `else` in its section if/else-if chain, so an unmatched value (e.g. `admin` picked by a non-sudo member) left the interaction unacknowledged; it now falls back to re-rendering the main help panel via `sendHelpPanel`.
 - **Settings-modal fallback no longer blindly slices unrecognized customIds.** `handleSettingsModalSubmit`'s generic `sudo:set:save:{key}` fallback now guards with `customId.startsWith('sudo:set:save:')` first and replies with an "unrecognized modal" error otherwise, instead of slicing any unmatched `sudo:set:*` modal id and writing garbage into `bot_settings`.
 - **Self-service staff-role grant/remove now defer before the Discord role edit + forced member re-fetch.** `staffRoleSelf.ts`'s `handleStaffRoleSelfAdd` and `handleStaffRoleSelfRemove` defer before `member.roles.add`/`remove` and the subsequent forced `members.fetch({force: true})`, replying via `editReply` (success) / `followUp` (failure) instead of the no-longer-valid `update`/`reply`.
+
+---
+
+## [0.14.0] — 2026-08-01
+
+### Added
+- **Activity Stats — auto voice channels are classified instead of becoming ghosts.** New nullable `channel_kind` column (`'auto_voice'` | `'auto_text'`) on `activity_message_stats`, `activity_voice_stats`, and `activity_voice_sessions` (migration `0004_crazy_lake.sql`), so the botpanel dashboard can fold every ephemeral auto-room's dead channel ID into one "Auto voice rooms" group instead of listing each deleted room. Three layers keep it correct (`src/services/activity/channelKinds.ts`): synchronous record-time classification via the in-memory auto-channel registry, a teardown stamp on every channel-pair delete path (`deleteAutoChannel`, `deleteStaticText`, reconciler orphan cleanup), and a startup/flag-on sweep that classifies legacy rows whose channels no longer exist. Static VCs stay ordinary individual channels in stats; only their ephemeral companion text channels classify as `auto_text`.
+
+### Fixed
+- Open voice-session rows now refresh `channel_name` from the live channel on each rollup tick, so a room's Smart auto-rename (and the hub→room rename the creator's session predates) is reflected in stats instead of freezing the name captured at join.
 
 ---
 

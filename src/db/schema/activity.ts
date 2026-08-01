@@ -19,6 +19,13 @@ export const activityMessageStats = pgTable('activity_message_stats', {
   userId: text('user_id').notNull(),
   channelId: text('channel_id').notNull(),
   channelName: text('channel_name'),
+  // 'auto_voice' (ephemeral auto voice room — includes its text-in-voice
+  // chat) | 'auto_text' (companion text channel, incl. static-VC companions)
+  // | NULL (normal persistent channel). Classified at record time via
+  // ./services/activity/channelKinds.ts, re-stamped on channel teardown, and
+  // legacy rows swept on startup — the panel folds non-NULL kinds into one
+  // "Auto voice rooms" group instead of listing every dead room ID.
+  channelKind: text('channel_kind').$type<'auto_voice' | 'auto_text'>(),
   bucket: timestamp('bucket').notNull(),
   messageCount: integer('message_count').notNull().default(0),
   wordCount: integer('word_count').notNull().default(0),
@@ -66,6 +73,10 @@ export const activityVoiceSessions = pgTable('activity_voice_sessions', {
   userId: text('user_id').notNull(),
   channelId: text('channel_id').notNull(),
   channelName: text('channel_name'),
+  // See activity_message_stats.channel_kind. A session opened the instant a
+  // hub is joined (before the auto_channels row exists) starts NULL and is
+  // re-classified on the next rollup tick / close / teardown stamp.
+  channelKind: text('channel_kind').$type<'auto_voice' | 'auto_text'>(),
   joinedAt: timestamp('joined_at').notNull(),
   leftAt: timestamp('left_at'),
   durationSeconds: integer('duration_seconds'),
@@ -85,6 +96,8 @@ export const activityVoiceStats = pgTable('activity_voice_stats', {
   userId: text('user_id').notNull(),
   channelId: text('channel_id').notNull(),
   channelName: text('channel_name'),
+  // See activity_message_stats.channel_kind.
+  channelKind: text('channel_kind').$type<'auto_voice' | 'auto_text'>(),
   bucket: timestamp('bucket').notNull(),
   seconds: integer('seconds').notNull().default(0),
 }, t => ({

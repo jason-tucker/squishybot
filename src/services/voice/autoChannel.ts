@@ -17,6 +17,7 @@ import { clearRenameThrottle } from '../../bot/events/presenceUpdate'
 import { clearStickyDebounce } from '../../bot/events/messageCreate'
 import { logger } from '../logger'
 import { publish, voiceCh, type VoiceChannelCreatedEvent, type VoiceChannelDeletedEvent } from '../eventBus'
+import { stampActivityChannelKinds } from '../activity/channelKinds'
 
 export async function createAutoChannel(
   client: Client,
@@ -241,6 +242,9 @@ export async function deleteStaticText(client: Client, record: AutoChannelRecord
   await clearChannelLog(record.voiceChannelId)
   untrackAutoChannelText(record.textChannelId)
   untrackAutoChannelVoice(record.voiceChannelId)
+  // Static VC stays alive and stays an ordinary channel in stats — only the
+  // companion text channel's rows get folded into the auto group.
+  void stampActivityChannelKinds({ textChannelId: record.textChannelId })
 
   logger.info(`Static channel text deleted (VC kept): vc=${record.voiceChannelId} tc=${record.textChannelId}`)
 
@@ -280,6 +284,10 @@ export async function deleteAutoChannel(client: Client, record: AutoChannelRecor
   await clearChannelLog(record.voiceChannelId)
   untrackAutoChannelText(record.textChannelId)
   untrackAutoChannelVoice(record.voiceChannelId)
+  // Catch-all stamp so every stats row for this dead pair carries its kind —
+  // including rows recorded before the pair's auto_channels row existed
+  // (the creator's hub-join voice session).
+  void stampActivityChannelKinds({ voiceChannelId: record.voiceChannelId, textChannelId: record.textChannelId })
 
   logger.info(`Auto channel deleted: vc=${record.voiceChannelId}`)
 
