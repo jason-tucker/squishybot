@@ -1,4 +1,5 @@
 import { ActivityType, type VoiceBasedChannel, type Guild } from 'discord.js'
+import { getSetting } from '../settings'
 
 /**
  * Smart auto-naming. NAMING ONLY — it never touches user limit, lock, hide, or
@@ -133,4 +134,19 @@ export function plainChannelName(guild: Guild, baseName: string, selfChannelId: 
     const candidate = `${base} ${n}`
     if (!taken.has(candidate.toLowerCase())) return candidate
   }
+}
+
+const DEFAULT_TEXT_EMOJI = '💬'
+
+/**
+ * Derive the companion TEXT channel name for a voice channel's display name:
+ * slugify exactly as before, then prefix the configured emoji (no separator),
+ * e.g. `💬squishy-lounge`. The emoji comes from `bot_settings` key
+ * `voice.text_emoji` (falls back to 💬 when unset/empty). Prefixing happens
+ * AFTER slugifying so the emoji itself is never stripped.
+ */
+export function textChannelNameFor(displayName: string): string {
+  const slug = displayName.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'voice-chat'
+  const emoji = getSetting('voice.text_emoji')?.trim() || DEFAULT_TEXT_EMOJI
+  return `${emoji}${slug}`
 }

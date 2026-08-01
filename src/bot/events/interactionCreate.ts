@@ -18,6 +18,7 @@ import { execute as playExecute, autocomplete as playAutocomplete } from '../../
 import { execute as colorExecute } from '../../commands/color'
 import { isVcCustomId } from '../../utils/customId'
 import { recordActivity } from '../../services/presence'
+import { errorReport } from '../../services/logger'
 
 const commandHandlers = new Map<string, (i: ChatInputCommandInteraction) => Promise<void>>([
   ['voice', voiceExecute],
@@ -296,6 +297,7 @@ export function registerInteractionCreate(client: Client) {
       const userTag = `user=${interaction.user.id}`
       const guildTag = interaction.guildId ? `guild=${interaction.guildId}` : 'guild=dm'
       console.error(`Interaction error: ${tag} ${userTag} ${guildTag}`, err)
+      errorReport(`${tag} ${userTag} ${guildTag}`, err)
       const reply = { content: '❌ An unexpected error occurred.', ephemeral: true }
       if (interaction.isRepliable()) {
         if (interaction.deferred || interaction.replied) {

@@ -70,16 +70,22 @@ export async function renderSudoHome(): Promise<{ flags: number; components: any
 }
 
 export async function execute(interaction: ChatInputCommandInteraction): Promise<void> {
+  // Defer FIRST — before the member fetch + sudo check. guild.members.fetch()
+  // can hit the network on a cold cache (common right after a deploy); if that
+  // took >3s before we acked, Discord would kill the interaction with 10062.
+  await interaction.deferReply({ ephemeral: true })
   const member = await interaction.guild!.members.fetch(interaction.user.id)
-  if (!member) return
+  if (!member) {
+    await interaction.editReply({ content: '❌ Could not resolve your member record.' })
+    return
+  }
   // Re-use the same auth path as the rest of the sudo surface.
   const { isSudo } = await import('../services/voice/permissions')
   if (!isSudo(member)) {
-    await interaction.reply({ content: '❌ Sudo access required.', ephemeral: true })
+    await interaction.editReply({ content: '❌ Sudo access required.' })
     return
   }
 
-  await interaction.deferReply({ ephemeral: true })
   await interaction.editReply(await renderSudoHome() as any)
 }
 

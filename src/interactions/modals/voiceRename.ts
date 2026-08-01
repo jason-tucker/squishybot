@@ -7,7 +7,7 @@ import { canControlChannel, isSudo } from '../../services/voice/permissions'
 import { postOrUpdateControlPanel } from '../../services/voice/controlPanel'
 import { maybeRenameChannel } from '../../services/voice/autoRename'
 import { sanitizeChannelName } from '../../utils/channelName'
-import { plainChannelName } from '../../services/voice/autoNaming'
+import { plainChannelName, textChannelNameFor } from '../../services/voice/autoNaming'
 import { logChannelEvent } from '../../services/voice/channelLog'
 
 export async function handleVoiceRenameModal(interaction: ModalSubmitInteraction): Promise<void> {
@@ -75,7 +75,7 @@ export async function handleVoiceRenameModal(interaction: ModalSubmitInteraction
   // collision-dodging suffix if it clashes with another channel. The DB keeps
   // the user's typed name as manual/fallback.
   const finalName = vc?.isVoiceBased() ? plainChannelName(vc.guild, newName, vc.id) : newName
-  const textName = finalName.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'voice-chat'
+  const textName = textChannelNameFor(finalName)
 
   await Promise.all([
     vc?.isVoiceBased() ? vc.setName(finalName).catch(() => {}) : Promise.resolve(),

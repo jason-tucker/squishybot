@@ -12,7 +12,7 @@ import { scheduleCleanup, cancelCleanup } from './cleanupScheduler'
 import { cancelAllHideGracesFor } from './hideGrace'
 import { clearMembers, recordMemberJoin } from './voiceMembers'
 import { clearChannelLog, logChannelEvent } from './channelLog'
-import { plainChannelName } from './autoNaming'
+import { plainChannelName, textChannelNameFor } from './autoNaming'
 import { clearRenameThrottle } from '../../bot/events/presenceUpdate'
 import { clearStickyDebounce } from '../../bot/events/messageCreate'
 import { logger } from '../logger'
@@ -125,7 +125,7 @@ async function createTextChannelForVoice(
   owner: GuildMember,
   displayName: string,
 ): Promise<import('discord.js').TextChannel | null> {
-  const textChannelName = displayName.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'voice-chat'
+  const textChannelName = textChannelNameFor(displayName)
   try {
     const tc = await guild.channels.create({
       name: textChannelName,

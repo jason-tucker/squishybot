@@ -16,7 +16,7 @@ import { autoChannels } from '../../db/schema'
 import { eq } from 'drizzle-orm'
 import type { AutoChannelRecord } from '../../types/voice'
 import { logger } from '../logger'
-import { computeAutoName, decorateGameName, plainChannelName } from './autoNaming'
+import { computeAutoName, decorateGameName, plainChannelName, textChannelNameFor } from './autoNaming'
 import { logChannelEvent } from './channelLog'
 
 const RENAME_COOLDOWN_MS = 10 * 60 * 1000
@@ -101,7 +101,7 @@ export async function maybeRenameChannel(
   const tc = guild.channels.cache.get(record.textChannelId)
     ?? await guild.channels.fetch(record.textChannelId).catch(() => null)
   if (tc?.isTextBased()) {
-    const textName = desired.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'voice-chat'
+    const textName = textChannelNameFor(desired)
     await (tc as any).setName(textName).catch(() => {})
   }
 

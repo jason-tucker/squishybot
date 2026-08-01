@@ -39,12 +39,15 @@ async function markReportLogStatus(
 }
 
 export async function handleReportReview(interaction: ButtonInteraction): Promise<void> {
+  // Defer FIRST — before the bot-owner check. isBotOwner() can do a live
+  // app.fetch() when its 60s cache has expired, which can blow the 3s ack
+  // window (especially right after a deploy). Denial goes via followUp since
+  // we're already acknowledged by then.
+  await interaction.deferUpdate()
   if (!await isBotOwner(interaction.client, interaction.user.id)) {
-    await interaction.reply({ content: '❌ Only a bot owner can review reports.', ephemeral: true })
+    await interaction.followUp({ content: '❌ Only a bot owner can review reports.', ephemeral: true })
     return
   }
-
-  await interaction.deferUpdate()
 
   // customId is one of:
   //   report_approve_notice:{key}, report_approve_silent:{key}

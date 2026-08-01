@@ -182,16 +182,20 @@ export async function handleStaffRoleSelfAdd(interaction: ButtonInteraction): Pr
     await interaction.update(renderStaffRoleSelf(member) as any)
     return
   }
+  // Defer FIRST — before member.roles.add() and the forced member re-fetch
+  // below, both REST calls that can be slow on a cold cache. Failure now
+  // goes via followUp (editReply would fight the CV2 message's flags).
+  await interaction.deferUpdate()
   try {
     await member.roles.add(role, `self-grant via /settings (sudo: ${interaction.user.tag})`)
     logger.info(`Self-granted ${def.label} to sudo ${interaction.user.tag}`)
   } catch (err) {
-    await interaction.reply({ content: `❌ Failed to grant **${def.label}**: ${(err as Error).message}`, ephemeral: true })
+    await interaction.followUp({ content: `❌ Failed to grant **${def.label}**: ${(err as Error).message}`, ephemeral: true })
     return
   }
   // Re-fetch with cache invalidation so the snapshot reflects the new role.
   const refreshed = await member.guild.members.fetch({ user: member.id, force: true }).catch(() => member)
-  await interaction.update(renderStaffRoleSelf(refreshed) as any)
+  await interaction.editReply(renderStaffRoleSelf(refreshed) as any)
 }
 
 /** `settings:staff_role:remove:{slug}` — anyone removes a role from themselves. */
@@ -209,13 +213,17 @@ export async function handleStaffRoleSelfRemove(interaction: ButtonInteraction):
     await interaction.update(renderStaffRoleSelf(member) as any)
     return
   }
+  // Defer FIRST — before member.roles.remove() and the forced member re-fetch
+  // below, both REST calls that can be slow on a cold cache. Failure now
+  // goes via followUp (editReply would fight the CV2 message's flags).
+  await interaction.deferUpdate()
   try {
     await member.roles.remove(roleId, `self-remove via /settings (${interaction.user.tag})`)
     logger.info(`Self-removed ${def.label} from ${interaction.user.tag}`)
   } catch (err) {
-    await interaction.reply({ content: `❌ Failed to remove **${def.label}**: ${(err as Error).message}`, ephemeral: true })
+    await interaction.followUp({ content: `❌ Failed to remove **${def.label}**: ${(err as Error).message}`, ephemeral: true })
     return
   }
   const refreshed = await member.guild.members.fetch({ user: member.id, force: true }).catch(() => member)
-  await interaction.update(renderStaffRoleSelf(refreshed) as any)
+  await interaction.editReply(renderStaffRoleSelf(refreshed) as any)
 }

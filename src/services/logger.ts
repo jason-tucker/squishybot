@@ -102,3 +102,64 @@ export const logger = {
     }
   },
 }
+
+// Dedup/rate-limit window for `errorReport` posts to LOG_CHANNEL — keyed by
+// `${context}|${errMessage}` so the same failure (e.g. a recurring
+// button handler bug) doesn't spam the channel once per click.
+const ERROR_REPORT_WINDOW_MS = 5 * 60 * 1000
+const ERROR_REPORT_MAP_CAP = 200
+
+interface ErrorReportEntry {
+  lastPostedAt: number
+  suppressed: number
+}
+
+const errorReportSeen = new Map<string, ErrorReportEntry>()
+
+function pruneErrorReportMap(now: number): void {
+  if (errorReportSeen.size <= ERROR_REPORT_MAP_CAP) return
+  for (const [key, entry] of errorReportSeen) {
+    if (now - entry.lastPostedAt >= ERROR_REPORT_WINDOW_MS) {
+      errorReportSeen.delete(key)
+    }
+  }
+}
+
+/**
+ * Report an interaction (or other runtime) error: logs to console via the
+ * normal `log('error', ...)` path, then — if a client is attached
+ * (`attachClientToLogger`) and `LOG_CHANNEL_ID` is set — posts a formatted,
+ * redacted summary to the LOG_CHANNEL. Deduped per `context` + error
+ * message: at most one post per key per 5 minutes, with a
+ * `(+N repeats suppressed)` suffix once the window reopens. Never throws.
+ */
+export function errorReport(context: string, err: unknown): void {
+  log('error', `Interaction error: ${context}`, err)
+
+  const client = cachedClient
+  if (!client || !env.LOG_CHANNEL_ID) return
+
+  context = context.slice(0, 200)
+
+  const errMessage = (err instanceof Error ? err.message : String(err)).slice(0, 300)
+  const stack = err instanceof Error && err.stack ? err.stack : ''
+  const stackLines = stack.split('\n').slice(0, 8).join('\n').slice(0, 1000)
+
+  const key = `${context}|${errMessage}`
+  const now = Date.now()
+  const prev = errorReportSeen.get(key)
+
+  if (prev && now - prev.lastPostedAt < ERROR_REPORT_WINDOW_MS) {
+    prev.suppressed += 1
+    return
+  }
+
+  const suppressedCount = prev?.suppressed ?? 0
+  errorReportSeen.set(key, { lastPostedAt: now, suppressed: 0 })
+  pruneErrorReportMap(now)
+
+  const suffix = suppressedCount > 0 ? `\n(+${suppressedCount} repeats suppressed)` : ''
+  const body = `🔴 **Interaction error** — ${context}\n\`\`\`\n${errMessage}\n${stackLines}\n\`\`\`${suffix}`
+
+  logger.discord(client, body).catch(() => {})
+}

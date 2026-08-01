@@ -230,5 +230,12 @@ export async function handleHelpPanelSelect(interaction: StringSelectMenuInterac
       new ButtonBuilder().setCustomId('help:back').setLabel('Back').setStyle(ButtonStyle.Secondary)
     )
     await interaction.update({ flags: MessageFlags.IsComponentsV2, components: [container, backRow] } as any)
+
+  } else {
+    // Unmatched section (e.g. 'admin' picked by a non-sudo member, or a stale
+    // customId from an older panel) — fall back to re-rendering the main help
+    // panel instead of leaving the interaction unacknowledged.
+    const { sendHelpPanel } = await import('../../commands/help')
+    await sendHelpPanel(interaction, isSudo(member))
   }
 }
