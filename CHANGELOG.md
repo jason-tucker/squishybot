@@ -20,6 +20,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - **`/help` section select now acks every value.** `helpPanel.ts`'s `handleHelpPanelSelect` had no trailing `else` in its section if/else-if chain, so an unmatched value (e.g. `admin` picked by a non-sudo member) left the interaction unacknowledged; it now falls back to re-rendering the main help panel via `sendHelpPanel`.
 - **Settings-modal fallback no longer blindly slices unrecognized customIds.** `handleSettingsModalSubmit`'s generic `sudo:set:save:{key}` fallback now guards with `customId.startsWith('sudo:set:save:')` first and replies with an "unrecognized modal" error otherwise, instead of slicing any unmatched `sudo:set:*` modal id and writing garbage into `bot_settings`.
 - **Self-service staff-role grant/remove now defer before the Discord role edit + forced member re-fetch.** `staffRoleSelf.ts`'s `handleStaffRoleSelfAdd` and `handleStaffRoleSelfRemove` defer before `member.roles.add`/`remove` and the subsequent forced `members.fetch({force: true})`, replying via `editReply` (success) / `followUp` (failure) instead of the no-longer-valid `update`/`reply`.
+- `notify-panel-schema-change` workflow no longer shell-interpolates the head commit message inline in `run:` — a message containing a quote broke the `gh api` invocation (`accepts 1 arg(s), received 4`), silently skipping the botpanel schema-sync dispatch, and was a script-injection vector. Values now pass through `env:` (mirrors botpanel#270's fix on the receiving side).
 
 ---
 
