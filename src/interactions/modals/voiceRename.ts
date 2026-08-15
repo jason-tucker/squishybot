@@ -57,7 +57,10 @@ export async function handleVoiceRenameModal(interaction: ModalSubmitInteraction
     await postOrUpdateControlPanel(interaction.client, reverted)
     const msg = '✅ Auto-naming is back **on** (Smart) — the room will follow whatever game 2+ people are playing.'
     if (interaction.isFromMessage()) {
-      await interaction.editReply({ content: msg, components: [] })
+      // The triggering message is the CV2 control panel — a content edit is
+      // rejected with 50035. The panel was already refreshed above; confirm
+      // via an ephemeral follow-up instead.
+      await interaction.followUp({ content: msg, ephemeral: true })
     } else {
       await interaction.editReply({ content: msg })
     }
@@ -91,7 +94,8 @@ export async function handleVoiceRenameModal(interaction: ModalSubmitInteraction
   await postOrUpdateControlPanel(interaction.client, updated)
 
   if (interaction.isFromMessage()) {
-    await interaction.editReply({ content: `✅ Channel renamed to **${finalName}**.`, components: [] })
+    // Same as the blank-rename branch: never content-edit the CV2 panel.
+    await interaction.followUp({ content: `✅ Channel renamed to **${finalName}**.`, ephemeral: true })
   } else {
     await interaction.editReply({ content: `✅ Channel renamed to **${finalName}**.` })
   }

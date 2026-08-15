@@ -5,6 +5,15 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [0.14.2] — 2026-08-15
+
+### Fixed
+- **Rename modal no longer throws `MESSAGE_CANNOT_USE_LEGACY_FIELDS_WITH_COMPONENTS_V2` (50035).** When submitted from a panel button, `voiceRename.ts` deferred with `deferUpdate()` and then tried to `editReply({ content })` — but the triggering message is the CV2 control panel, which rejects any `content` edit. The rename itself succeeded (channel + DB + panel refresh) but the confirmation errored every time. Confirmations now go via ephemeral `followUp`, leaving the panel intact (same pattern as `staffRoleSelf.ts`).
+- **Manage User panel — Force panel / Disconnect no longer hit the same 50035.** `sudoUser.ts`'s `force_panel` and `kick_voice` branches content-edited the CV2 Manage User panel after `deferUpdate()`; their status lines now go via ephemeral `followUp` and the panel stays up.
+- **Force owner transfer notices no longer hit the same 50035.** `forceOwnerTransfer.ts`'s "channel no longer exists" / "already the owner" paths content-edited CV2 `/sudo` panel messages; they now re-render as a CV2 container with the 🏠 Back to /sudo button, matching the success card.
+
+---
+
 ## [0.14.1] — 2026-08-01
 
 ### Added
