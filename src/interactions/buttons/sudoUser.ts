@@ -25,20 +25,22 @@ export async function handleSudoUserButton(interaction: ButtonInteraction): Prom
   const targetId = parts[2]
 
   if (action === 'force_panel') {
+    // The Manage User panel is CV2 — editReply with content is rejected
+    // (50035). Status lines go via ephemeral followUp; the panel stays up.
     await interaction.deferUpdate()
     const target = await interaction.guild!.members.fetch(targetId).catch(() => null)
     const voiceChannelId = target?.voice.channelId
     if (!voiceChannelId) {
-      await interaction.editReply({ content: 'User is not in a voice channel.' })
+      await interaction.followUp({ content: 'User is not in a voice channel.', ephemeral: true })
       return
     }
     const [record] = await db.select().from(autoChannels).where(eq(autoChannels.voiceChannelId, voiceChannelId))
     if (!record) {
-      await interaction.editReply({ content: 'Not in an auto channel.' })
+      await interaction.followUp({ content: 'Not in an auto channel.', ephemeral: true })
       return
     }
     await postOrUpdateControlPanel(interaction.client, record)
-    await interaction.editReply({ content: '✅ Panel refreshed in their text channel.' })
+    await interaction.followUp({ content: '✅ Panel refreshed in their text channel.', ephemeral: true })
     return
   }
 
@@ -46,11 +48,11 @@ export async function handleSudoUserButton(interaction: ButtonInteraction): Prom
     await interaction.deferUpdate()
     const target = await interaction.guild!.members.fetch(targetId).catch(() => null)
     if (!target?.voice.channel) {
-      await interaction.editReply({ content: 'User is not in a voice channel.' })
+      await interaction.followUp({ content: 'User is not in a voice channel.', ephemeral: true })
       return
     }
     await target.voice.disconnect(`Disconnected by sudo: ${caller.displayName}`)
-    await interaction.editReply({ content: `✅ Disconnected ${target.displayName} from voice.` })
+    await interaction.followUp({ content: `✅ Disconnected ${target.displayName} from voice.`, ephemeral: true })
     return
   }
 

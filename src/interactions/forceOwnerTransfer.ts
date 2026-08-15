@@ -29,6 +29,18 @@ import { sep } from '../utils/cv2'
 import { logger } from '../services/logger'
 import { logChannelEvent } from '../services/voice/channelLog'
 
+// The /sudo panel messages are CV2 — a content edit is rejected (50035), so
+// notices re-render the message as a CV2 container with the Back button.
+function noticePayload(text: string, accentColor: number) {
+  const container = new ContainerBuilder()
+    .setAccentColor(accentColor)
+    .addTextDisplayComponents(new TextDisplayBuilder().setContent(text))
+  const back = new ActionRowBuilder<MessageActionRowComponentBuilder>().addComponents(
+    new ButtonBuilder().setCustomId('sudo:home').setLabel('Back to /sudo').setEmoji('🏠').setStyle(ButtonStyle.Secondary),
+  )
+  return { flags: MessageFlags.IsComponentsV2, components: [container, back] }
+}
+
 export async function handleForceOwnerChannelPick(interaction: StringSelectMenuInteraction): Promise<void> {
   if (!await requireSudo(interaction)) return
   const channelId = interaction.values[0]
@@ -36,7 +48,7 @@ export async function handleForceOwnerChannelPick(interaction: StringSelectMenuI
 
   const [record] = await db.select().from(autoChannels).where(eq(autoChannels.voiceChannelId, channelId))
   if (!record) {
-    await interaction.update({ content: '❌ Channel no longer exists.', components: [] } as any).catch(() => {})
+    await interaction.update(noticePayload('❌ Channel no longer exists.', 0xed4245) as any).catch(() => {})
     return
   }
 
@@ -72,12 +84,12 @@ export async function handleForceOwnerUserPick(interaction: UserSelectMenuIntera
 
   const [record] = await db.select().from(autoChannels).where(eq(autoChannels.voiceChannelId, channelId))
   if (!record) {
-    await interaction.editReply({ content: '❌ Channel no longer exists.', components: [] } as any).catch(() => {})
+    await interaction.editReply(noticePayload('❌ Channel no longer exists.', 0xed4245) as any).catch(() => {})
     return
   }
 
   if (record.ownerUserId === newOwnerId) {
-    await interaction.editReply({ content: `ℹ️ <@${newOwnerId}> is already the owner. Nothing to do.`, components: [] } as any).catch(() => {})
+    await interaction.editReply(noticePayload(`ℹ️ <@${newOwnerId}> is already the owner. Nothing to do.`, 0x5865f2) as any).catch(() => {})
     return
   }
 
