@@ -5,6 +5,11 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [Unreleased]
+
+### Added
+- chore: add `/project-manager` Claude Code skill (`.claude/skills/project-manager/SKILL.md`) — delegates all requested work to agents with written prompts: Opus for planning, Sonnet for coding, Haiku for lookups and low-level tasks.
+
 ## [0.14.2] — 2026-08-15
 
 ### Fixed
