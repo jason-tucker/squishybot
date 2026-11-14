@@ -8,6 +8,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ## [Unreleased]
 
 ### Added
+- **AutoVoice overflow mode (opt-in, default OFF).** New `voice.overflow_mode` setting (`/sudo → Settings → Overflow Mode`, or the Voice panel toggle): hub voice channels are hidden from @everyone (ViewChannel deny; nothing deleted, no migration) until every watched 24/7 voice channel is full (`userLimit > 0` and members >= limit), then shown so a new auto channel can be made; hidden again when space reappears. Watched channels come from `voice.overflow_watch_channel_ids` (comma-separated; falls back to `voice.static_channel_ids`). Unlimited (limit 0) channels never count as full; no resolvable watched channel fails open; auto rooms don't count as capacity; bots count toward full. New `src/services/voice/overflowGate.ts` (3 s trailing debounce, diff-only overwrite edits, ~60 s safety sweep, applied on boot/reconcile/settings change). When the gate is closed, new hubs are hidden straight after creation (a failed hide leaves them visible); a hub converting into a room has the deny cleared. Disabling clears the ViewChannel overwrite on all hubs (including any an admin hid manually).
 - chore: add `/project-manager` Claude Code skill (`.claude/skills/project-manager/SKILL.md`) — delegates all requested work to agents with written prompts: Opus for planning, Sonnet for coding, Haiku for lookups and low-level tasks.
 
 ## [0.14.2] — 2026-08-15

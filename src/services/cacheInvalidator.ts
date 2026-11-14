@@ -59,6 +59,12 @@ async function handleInvalidate(params: { table?: unknown; key?: unknown }): Pro
       // in trying to surgically invalidate. `key` is logged for traceability.
       logger.info(`cacheInvalidator: reload bot_settings (key=${key ?? '*'})`)
       await loadSettings()
+      // AutoVoice overflow mode: a panel edit of voice.* (mode, watch list,
+      // static list) re-applies the gate without a restart.
+      if (!key || key.startsWith('voice.')) {
+        const { requestOverflowGateApply } = await import('./voice/overflowGate')
+        requestOverflowGateApply('settings')
+      }
       return
     case 'reaction_role_messages':
       // Same posture as bot_settings — reload the whole reaction-role cache

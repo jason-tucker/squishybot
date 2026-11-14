@@ -20,6 +20,7 @@ import { publish, voiceCh, type VoiceOwnerChangedEvent } from '../../services/ev
 import { isStaticChannel } from '../../services/voice/staticChannels'
 import { createStaticChannelText } from '../../services/voice/autoChannel'
 import { recordVoiceActivity } from '../../services/activity/tracker'
+import { noteVoiceStateForOverflow } from '../../services/voice/overflowGate'
 
 export function registerVoiceStateUpdate(client: Client): void {
   client.on('voiceStateUpdate', async (oldState: VoiceState, newState: VoiceState) => {
@@ -33,6 +34,10 @@ export function registerVoiceStateUpdate(client: Client): void {
     // promise crashes the worker.
     try {
       recordVoiceActivity(oldState, newState)
+      // Overflow gate: must run before handleVoiceStateUpdate's bot filter and
+      // unmanaged-leave early return (watched VCs are usually unmanaged and
+      // bots count toward "full").
+      noteVoiceStateForOverflow(oldState, newState)
       await handleVoiceStateUpdate(client, oldState, newState)
     } catch (err) {
       logger.error('voiceStateUpdate handler threw — swallowed', err)

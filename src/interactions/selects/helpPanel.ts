@@ -26,7 +26,8 @@ export async function handleHelpPanelSelect(interaction: StringSelectMenuInterac
         '3. A new hub is created instantly to replace it\n' +
         '4. A private **text channel** appears, only visible to people in your voice channel\n' +
         '5. A **control panel** posts in that text channel with all your options\n' +
-        '6. When everyone leaves, both channels delete themselves after 90 seconds'
+        '6. When everyone leaves, both channels delete themselves after 90 seconds\n\n' +
+        '_Overflow mode (if staff enable it): hubs stay hidden until all the always-on voice channels are full, then a hub appears so you can make a new channel._'
       ))
       .addSeparatorComponents(sep())
       .addTextDisplayComponents(new TextDisplayBuilder().setContent(

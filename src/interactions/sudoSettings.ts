@@ -78,6 +78,15 @@ import { addStaticChannel, getStaticChannelIds, removeStaticChannel } from '../s
 import { setActivityStatsEnabled, flushActivityBuffers } from '../services/activity/tracker'
 import { getBackfillSummary, resetBackfillProgress, seedBackfillProgress } from '../services/activity/backfill'
 import { panelUrl } from '../utils/panelLink'
+import {
+  OVERFLOW_MODE_KEY,
+  OVERFLOW_WATCH_KEY,
+  getOverflowWatchIds,
+  getWatchedSnapshot,
+  hasExplicitWatchList,
+  requestOverflowGateApply,
+  shouldShowHubs,
+} from '../services/voice/overflowGate'
 
 // ---------------------------------------------------------------------------
 // Setting key registry — adding a new setting is mostly just adding a row here
@@ -136,6 +145,12 @@ const VOICE_BOOL_SETTINGS: BoolSettingDef[] = [
     key: 'voice.no_voice_chat_messages',
     label: 'No Voice Channel Messages',
     description: 'When on, the bot replies to messages sent in an auto-voice channel\'s built-in chat, pointing folks at the attached text channel instead.',
+    defaultValue: false,
+  },
+  {
+    key: 'voice.overflow_mode',
+    label: 'Overflow Mode',
+    description: 'When on, hub channels are hidden from @everyone until every watched 24/7 voice channel is full, then shown so a new auto channel can be made. Pick the watched channels under Overflow Mode (defaults to Static Channels). Disabling clears the ViewChannel overwrite on all hubs.',
     defaultValue: false,
   },
 ]
@@ -239,11 +254,14 @@ function renderHome() {
     new ButtonBuilder().setCustomId('sudo:set:nav:static').setLabel('Static Channels').setEmoji('🎙️').setStyle(ButtonStyle.Secondary),
     new ButtonBuilder().setCustomId('sudo:set:nav:stats').setLabel('Activity Stats').setEmoji('📊').setStyle(ButtonStyle.Secondary),
   )
+  const row6 = new ActionRowBuilder<MessageActionRowComponentBuilder>().addComponents(
+    new ButtonBuilder().setCustomId('sudo:set:nav:overflow').setLabel('Overflow Mode').setEmoji('🌊').setStyle(ButtonStyle.Secondary),
+  )
   const navRow = new ActionRowBuilder<MessageActionRowComponentBuilder>().addComponents(
     new ButtonBuilder().setCustomId('sudo:home').setLabel('Back to /sudo').setEmoji('🏠').setStyle(ButtonStyle.Secondary),
   )
 
-  return { flags: MessageFlags.IsComponentsV2 as number, components: [container, row1, row2, row3, row4, row5, navRow] }
+  return { flags: MessageFlags.IsComponentsV2 as number, components: [container, row1, row2, row3, row4, row5, row6, navRow] }
 }
 
 async function renderSudoUsers() {
@@ -1765,6 +1783,57 @@ async function renderProfiles(guildId: string) {
   return renderSudoUserPicker(guildId)
 }
 
+function renderOverflow(guild: Guild | null) {
+  const on = getBoolSetting(OVERFLOW_MODE_KEY, false)
+  const ids = getOverflowWatchIds()
+  const snap = guild ? getWatchedSnapshot(guild) : []
+  const lines: string[] = [
+    '### 🌊 Overflow Mode',
+    '_When on, hub channels are hidden from @everyone until **every** watched voice channel is full, then shown so a new auto channel can be made. Auto rooms never count as capacity; bots count toward full. Disabling clears the hidden state on all hubs._\n',
+    `**Status** · ${on ? '🟢 On' : '⚪ Off'}`,
+    `**Watching** · ${hasExplicitWatchList() ? 'custom list' : 'Static Channels (no custom list set)'}`,
+  ]
+  if (ids.length === 0) {
+    lines.push('_No watched channels — overflow mode fails open (hubs stay visible)._')
+  } else {
+    for (const id of ids) {
+      const s = snap.find(x => x.id === id)
+      if (!s) { lines.push(`• <#${id}> — ⚠️ not found`); continue }
+      const limit = s.userLimit > 0 ? String(s.userLimit) : '∞'
+      lines.push(`• <#${id}> — ${s.memberCount}/${limit}${s.userLimit === 0 ? ' ⚠️ no user limit — never counts as full, so hubs stay hidden' : ''}`)
+    }
+    if (on) lines.push(`**Hubs right now** · ${shouldShowHubs(snap) ? '👁️ shown' : '🙈 hidden'}`)
+  }
+
+  const container = new ContainerBuilder()
+    .setAccentColor(0x5865f2)
+    .addTextDisplayComponents(new TextDisplayBuilder().setContent(lines.join('\n')))
+  const components: any[] = [container]
+  components.push(
+    new ActionRowBuilder<MessageActionRowComponentBuilder>().addComponents(
+      new ButtonBuilder()
+        .setCustomId('sudo:set:overflow:toggle')
+        .setLabel(on ? 'Disable Overflow Mode' : 'Enable Overflow Mode')
+        .setEmoji(on ? '🔕' : '🔔')
+        .setStyle(on ? ButtonStyle.Secondary : ButtonStyle.Success),
+    ),
+  )
+  const explicit = hasExplicitWatchList() ? ids.slice(0, 10) : []
+  const picker = new ChannelSelectMenuBuilder()
+    .setCustomId('sudo:set:overflow:watch')
+    .setPlaceholder('Watched voice channels (none = use Static Channels)')
+    .setChannelTypes([ChannelType.GuildVoice])
+    .setMinValues(0).setMaxValues(10)
+  if (explicit.length > 0) picker.setDefaultChannels(explicit)
+  components.push(new ActionRowBuilder<MessageActionRowComponentBuilder>().addComponents(picker))
+  components.push(
+    new ActionRowBuilder<MessageActionRowComponentBuilder>().addComponents(
+      new ButtonBuilder().setCustomId('sudo:set:home').setLabel('Back').setStyle(ButtonStyle.Secondary),
+    ),
+  )
+  return { flags: MessageFlags.IsComponentsV2 as number, components }
+}
+
 async function renderStaticChannels() {
   const ids = getStaticChannelIds()
 
@@ -2164,6 +2233,8 @@ export async function handleSettingsButton(interaction: ButtonInteraction): Prom
       await interaction.editReply((await renderSelfAssign(interaction.guild!)) as any)
     } else if (category === 'static') {
       await interaction.editReply((await renderStaticChannels()) as any)
+    } else if (category === 'overflow') {
+      await interaction.editReply(renderOverflow(interaction.guild) as any)
     } else if (category === 'stats') {
       await interaction.editReply((await renderActivityStats()) as any)
     } else {
@@ -2473,11 +2544,21 @@ export async function handleSettingsButton(interaction: ButtonInteraction): Prom
     const fallback = voiceDef?.defaultValue ?? false
     const next = !getBoolSetting(key, fallback)
     await setSetting(key, next ? 'true' : 'false', interaction.user.id)
+    if (key === OVERFLOW_MODE_KEY) requestOverflowGateApply('toggle')
     if (key === 'welcome.enabled' || key === 'goodbye.enabled') {
       await interaction.editReply((await renderWelcome()) as any)
     } else {
       await interaction.editReply(renderVoice() as any)
     }
+    return
+  }
+
+  // sudo:set:overflow:toggle — flip overflow mode and re-apply the hub gate now
+  if (id === 'sudo:set:overflow:toggle') {
+    const next = !getBoolSetting(OVERFLOW_MODE_KEY, false)
+    await setSetting(OVERFLOW_MODE_KEY, next ? 'true' : 'false', interaction.user.id)
+    requestOverflowGateApply('toggle')
+    await interaction.editReply(renderOverflow(interaction.guild) as any)
     return
   }
 
@@ -2599,10 +2680,20 @@ export async function handleSettingsChannelSelect(interaction: ChannelSelectMenu
     return
   }
 
+  if (id === 'sudo:set:overflow:watch') {
+    const ids = interaction.values.filter(v => /^\d+$/.test(v))
+    if (ids.length > 0) await setSetting(OVERFLOW_WATCH_KEY, ids.join(','), interaction.user.id)
+    else                await clearSetting(OVERFLOW_WATCH_KEY, interaction.user.id)
+    requestOverflowGateApply('watch')
+    await interaction.editReply(renderOverflow(interaction.guild) as any)
+    return
+  }
+
   if (id === 'sudo:set:static:add') {
     const channelId = interaction.values[0]
     if (channelId) {
       await addStaticChannel(channelId, interaction.user.id)
+      requestOverflowGateApply('watch')
     }
     await interaction.editReply((await renderStaticChannels()) as any)
     return
@@ -2859,7 +2950,10 @@ export async function handleSettingsStringSelect(interaction: StringSelectMenuIn
   }
   if (id === 'sudo:set:static:remove') {
     const channelId = interaction.values[0]
-    if (channelId) await removeStaticChannel(channelId, interaction.user.id)
+    if (channelId) {
+      await removeStaticChannel(channelId, interaction.user.id)
+      requestOverflowGateApply('watch')
+    }
     await interaction.editReply((await renderStaticChannels()) as any)
     return
   }
