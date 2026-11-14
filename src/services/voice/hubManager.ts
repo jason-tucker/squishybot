@@ -136,7 +136,6 @@ export async function handleHubJoin(client: Client, guild: Guild, member: GuildM
 
     // Create replacement hub in same category
     await createReplacementHub(guild, hubRecord)
-    requestOverflowEval('hub_join')
 
     // Insta-leave race: the joiner may have already left the renamed VC before
     // this multi-await creation finished. If they left *before* the auto_channels
@@ -155,6 +154,9 @@ export async function handleHubJoin(client: Client, guild: Guild, member: GuildM
   } finally {
     unmarkHubConverting(hubChannelId)
     handlingHubs.delete(hubChannelId)
+    // Re-evaluate on every exit, including a failed conversion that left the
+    // hub revealed. No-op unless the gate is on or its marker is set.
+    requestOverflowEval('hub_join')
   }
 }
 

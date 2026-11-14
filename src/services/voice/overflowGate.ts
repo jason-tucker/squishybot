@@ -29,9 +29,13 @@ export const OVERFLOW_WATCH_KEY = 'voice.overflow_watch_channel_ids'
 const ACTIVE_MARKER_KEY = 'voice.overflow_gate_active'
 const BOT_HUB_ALLOW = PermissionFlagsBits.ViewChannel | PermissionFlagsBits.Connect
 
-/** Persist the marker. Returns false (and logs) when the DB write failed. */
+/**
+ * Persist the marker. Returns false (and logs) when the DB write failed.
+ * `true` is always written (no cache short-circuit) so a hide is never recorded
+ * only in a cache that a concurrent clear has made stale.
+ */
 async function setActiveMarker(active: boolean): Promise<boolean> {
-  if (getBoolSetting(ACTIVE_MARKER_KEY, false) === active) return true
+  if (!active && !getBoolSetting(ACTIVE_MARKER_KEY, false)) return true
   try {
     await setSetting(ACTIVE_MARKER_KEY, active ? 'true' : 'false', undefined, { audit: false })
     return true
@@ -58,9 +62,18 @@ async function hideHub(guild: Guild, ch: VoiceBasedChannel, reason: string): Pro
       .catch(err => { logger.warn(`overflowGate: failed to grant bot access on hub ${ch.id}: ${err?.message ?? err}`); return false })
     if (!granted) return
   }
-  await ch.permissionOverwrites.edit(guild.roles.everyone, { ViewChannel: false })
-    .then(() => logger.info(`overflowGate(${reason}): hid hub ${ch.id}`))
-    .catch(err => logger.warn(`overflowGate: failed to hide hub ${ch.id}: ${err?.message ?? err}`))
+  // The awaits above can overlap a hub join: never deny a hub that is becoming a room.
+  if (isConvertingOrRoom(ch.id)) return
+  const hid = await ch.permissionOverwrites.edit(guild.roles.everyone, { ViewChannel: false })
+    .then(() => { logger.info(`overflowGate(${reason}): hid hub ${ch.id}`); return true })
+    .catch(err => { logger.warn(`overflowGate: failed to hide hub ${ch.id}: ${err?.message ?? err}`); return false })
+  // A conversion that started while the deny was in flight: undo it so the room
+  // is not left hidden (the conversion's own clear may have landed first).
+  if (hid && isConvertingOrRoom(ch.id)) {
+    await ch.permissionOverwrites.edit(guild.roles.everyone, { ViewChannel: null })
+      .then(() => logger.info(`overflowGate(${reason}): undid hide on converting hub ${ch.id}`))
+      .catch(err => logger.warn(`overflowGate: failed to undo hide on converting hub ${ch.id}: ${err?.message ?? err}`))
+  }
 }
 
 /**
@@ -163,14 +176,16 @@ export function isOverflowGateClosed(guild: Guild): boolean {
 const convertingHubs = new Set<string>()
 export function markHubConverting(id: string): void { convertingHubs.add(id) }
 export function unmarkHubConverting(id: string): void { convertingHubs.delete(id) }
+function isConvertingOrRoom(id: string): boolean { return convertingHubs.has(id) || isAutoChannelVoice(id) }
 
 /**
  * H3 — called right before a hub is renamed into a room: remove the overflow
- * deny so the new room is visible (record.isHidden is false).
+ * deny so the new room is visible (record.isHidden is false). Runs while the
+ * flag is on or the marker says hubs may still be hidden (flag just turned off).
  */
 export async function clearOverflowHideForConversion(guild: Guild, hub: VoiceBasedChannel): Promise<void> {
   markHubConverting(hub.id)
-  if (!isOverflowEnabled()) return
+  if (!isOverflowEnabled() && !getBoolSetting(ACTIVE_MARKER_KEY, false)) return
   // No hasViewDeny pre-check: permissionOverwrites.edit can leave the cache stale.
   await hub.permissionOverwrites.edit(guild.roles.everyone, { ViewChannel: null })
     .catch(err => logger.warn(`overflowGate: failed to reveal converting hub ${hub.id}: ${err?.message ?? err}`))
@@ -237,13 +252,16 @@ async function applyOnce(client: Client, reason: string): Promise<void> {
   }
 
   for (const hub of listHubs()) {
-    if (convertingHubs.has(hub.channelId) || isAutoChannelVoice(hub.channelId)) continue
+    if (isConvertingOrRoom(hub.channelId)) continue
     const ch = guild.channels.cache.get(hub.channelId)
       ?? await guild.channels.fetch(hub.channelId).catch(() => null)
     if (!ch || ch.type !== ChannelType.GuildVoice) continue
     const denied = hasViewDeny(guild, ch)
     if (hide && !denied) {
       await hideHub(guild, ch, reason)
+    } else if (hide && denied && !getBoolSetting(ACTIVE_MARKER_KEY, false)) {
+      // Self-heal: a hub is hidden but the marker was lost; restore it.
+      await setActiveMarker(true)
     } else if (!hide && denied) {
       await ch.permissionOverwrites.edit(guild.roles.everyone, { ViewChannel: null })
         .then(() => logger.info(`overflowGate(${reason}): revealed hub ${ch.id}`))
@@ -251,7 +269,8 @@ async function applyOnce(client: Client, reason: string): Promise<void> {
     }
   }
   // Flag off and every reveal succeeded: drop the marker (the sweep retries otherwise).
-  if (!enabled && !revealFailed) await setActiveMarker(false)
+  // Re-read the flag: it may have been turned back on during the awaits above.
+  if (!enabled && !revealFailed && !isOverflowEnabled()) await setActiveMarker(false)
 }
 
 /** Trailing debounce (~3 s): coalesces bursts of voice events into one apply. */
