@@ -15,6 +15,7 @@ import { getBoolSetting } from '../../services/settings'
 import { publishHeartbeat, publishReady } from '../../services/eventBus'
 import { startRpcServer } from '../../services/rpcServer'
 import { startCacheInvalidator } from '../../services/cacheInvalidator'
+import { startOverflowGate } from '../../services/voice/overflowGate'
 // Side-effect import: registers the `echo` verb on the RPC registry.
 // Follow-up PRs add more handlers; each one is a side-effect import too.
 import '../../services/rpc/handlers/echo'
@@ -121,6 +122,10 @@ export function registerReadyEvent(client: Client) {
     } catch (err) {
       await logger.errorAndDm('Reconciler failed on startup', err, c)
     }
+
+    // AutoVoice overflow mode (opt-in): remember the client, apply the gate
+    // once and start the ~60 s safety sweep. No-ops while the flag is off.
+    startOverflowGate(c)
 
     // One-time backfill: game channels now default to @everyone-visible
     // (opt-out model). Flip every existing game channel visible once — guarded

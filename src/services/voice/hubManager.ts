@@ -1,5 +1,6 @@
 import type { Client, Guild, GuildMember, VoiceChannel } from 'discord.js'
 import { ChannelType } from 'discord.js'
+import { clearOverflowHideForConversion, hideNewHubIfGateClosed, requestOverflowEval, unmarkHubConverting } from './overflowGate'
 import { db } from '../../db/client'
 import { hubChannels, autoChannels } from '../../db/schema'
 import { eq } from 'drizzle-orm'
@@ -122,6 +123,10 @@ export async function handleHubJoin(client: Client, guild: Guild, member: GuildM
 
     const channelName = generateChannelName(member, existingNames)
 
+    // Overflow mode: reveal the hub first so the new room isn't left with the
+    // gate's ViewChannel deny (its Hide state is record.isHidden=false).
+    await clearOverflowHideForConversion(guild, hubVc)
+
     // Create the auto channel (renames hub in place, creates text channel)
     const record = await createAutoChannel(client, guild, member, hubVc, hubChannelId, channelName)
     if (!record) {
@@ -131,6 +136,7 @@ export async function handleHubJoin(client: Client, guild: Guild, member: GuildM
 
     // Create replacement hub in same category
     await createReplacementHub(guild, hubRecord)
+    requestOverflowEval('hub_join')
 
     // Insta-leave race: the joiner may have already left the renamed VC before
     // this multi-await creation finished. If they left *before* the auto_channels
@@ -147,18 +153,25 @@ export async function handleHubJoin(client: Client, guild: Guild, member: GuildM
       await scheduleCleanup(client, record.voiceChannelId)
     }
   } finally {
+    unmarkHubConverting(hubChannelId)
     handlingHubs.delete(hubChannelId)
   }
 }
 
 async function createReplacementHub(guild: Guild, originalHub: typeof hubChannels.$inferSelect): Promise<void> {
   try {
+    // No permissionOverwrites: the hub inherits the category, and the create
+    // can't fail on overwrite bits the bot doesn't hold.
     const newHub = await guild.channels.create({
       name: originalHub.label,
       type: ChannelType.GuildVoice,
       parent: originalHub.categoryId,
       position: originalHub.position,
     })
+
+    // Overflow mode: hide it before it is registered as a hub when the gate is
+    // closed (brief visible window; fails open, never throws).
+    await hideNewHubIfGateClosed(guild, newHub)
 
     // Update the cache *before* the DB write so a voiceStateUpdate for someone
     // joining the new hub immediately is recognized as a hub join.
