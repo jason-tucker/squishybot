@@ -6,10 +6,11 @@ on:
   pull_request:
   workflow_dispatch:
 
-# Never cancel an in-progress deploy — wait for it to finish first
+# Main pushes deploy one at a time and are never cancelled. PRs and manual runs
+# get their own groups so they can never replace a pending main deploy.
 concurrency:
-  group: deploy-squishybot
-  cancel-in-progress: false
+  group: ${{ (github.event_name == 'push' && github.ref == 'refs/heads/main') && 'deploy-squishybot-main' || format('ci-squishybot-{0}-{1}', github.event_name, github.event.pull_request.number || github.ref) }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 # Least-privilege default for the whole workflow (including PR-triggered runs).
 # Jobs opt into more as needed — the deploy job adds `packages: write` for GHCR.
@@ -23,8 +24,75 @@ env:
   IMAGE_NAME: ${{ github.repository }}
 
 jobs:
+  # Unprivileged: runs repo code (pnpm install / tests) with no secrets and a
+  # read-only token, so a compromised dependency can't reach GHCR or the VPS.
+  test:
+    name: Test
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+
+      - name: Set up Node
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 24        # matches Dockerfile node:24-alpine
+          package-manager-cache: false
+
+      - name: Install dependencies
+        run: |
+          corepack enable pnpm     # pnpm version from package.json packageManager
+          pnpm install --frozen-lockfile
+
+      - name: Run tests
+        run: pnpm test
+
+  # Reports a red test run on a main push (the deploy job is skipped then, so
+  # its own failure notification can't fire). Webhook problems never fail it.
+  notify-test-failure:
+    name: Notify test failure
+    needs: test
+    if: failure() && github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+
+      - name: Notify failure
+        env:
+          WEBHOOK: ${{ secrets.DISCORD_DEPLOY_WEBHOOK }}
+        run: |
+          if [ -z "$WEBHOOK" ]; then echo "DISCORD_DEPLOY_WEBHOOK not set — skipping notification"; exit 0; fi
+          COMMIT_MSG=$(git log -1 --pretty=format:"%s" || true)
+          # jq builds the JSON so quotes/backslashes in the commit subject are escaped.
+          PAYLOAD=$(jq -n \
+            --arg title "❌ SquishyBot deploy FAILED" \
+            --arg desc "[\`${GITHUB_SHA::7}\`](${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/commit/${GITHUB_SHA}) ${COMMIT_MSG}" \
+            --arg footer "Triggered by ${GITHUB_ACTOR} — check Actions logs" \
+            '{embeds: [{title: $title, description: $desc, color: 15548997, footer: {text: $footer}}]}') \
+            || { echo "::warning::Could not build Discord payload (deploy result unaffected)"; exit 0; }
+          # Webhook problems only warn; they never change the job result.
+          curl -sS --fail-with-body --max-time 15 -o /dev/null -X POST "$WEBHOOK" \
+            -H "Content-Type: application/json" --data-binary "$PAYLOAD" \
+            || echo "::warning::Discord deploy notification failed (deploy result unaffected)"
+
   deploy:
     name: Build, Push & Deploy
+    needs: test
     runs-on: ubuntu-latest
     timeout-minutes: 20
 
@@ -35,17 +103,19 @@ jobs:
     steps:
       # ── 1. Checkout ──────────────────────────────────────────────────────────
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
 
       # ── 2. Docker Buildx (enables layer caching) ──────────────────────────────
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v4
+        uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
 
       # ── 3. Log in to GHCR (uses automatic GITHUB_TOKEN — no extra secret) ─────
       # Only on push to main — PRs validate the build but never push, so no login.
       - name: Log in to GHCR
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-        uses: docker/login-action@v4
+        uses: docker/login-action@8aa5831fb8d48d8f76594c7ddde61ae58019f550 # v4.8.0
         with:
           registry: ${{ env.REGISTRY }}
           username: ${{ github.actor }}
@@ -54,7 +124,7 @@ jobs:
       # ── 4. Compute image tags ─────────────────────────────────────────────────
       - name: Docker metadata
         id: meta
-        uses: docker/metadata-action@v5
+        uses: docker/metadata-action@c299e40c65443455700f0fdfc63efafe5b349051 # v5.10.0
         with:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
           tags: |
@@ -67,7 +137,7 @@ jobs:
       # On a PR this still builds the image (validating the TS compile) but
       # `push` is false, so nothing is published to GHCR.
       - name: Build and push image
-        uses: docker/build-push-action@v7
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         with:
           context: .
           push: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
@@ -84,11 +154,15 @@ jobs:
       - name: Deploy slash commands
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         continue-on-error: true
+        env:
+          DISCORD_BOT_TOKEN: ${{ secrets.DISCORD_BOT_TOKEN }}
+          DISCORD_CLIENT_ID: ${{ secrets.DISCORD_CLIENT_ID }}
+          GUILD_ID: ${{ secrets.GUILD_ID }}
         run: |
           docker run --rm --entrypoint="" \
-            -e DISCORD_BOT_TOKEN="${{ secrets.DISCORD_BOT_TOKEN }}" \
-            -e DISCORD_CLIENT_ID="${{ secrets.DISCORD_CLIENT_ID }}" \
-            -e GUILD_ID="${{ secrets.GUILD_ID }}" \
+            -e DISCORD_BOT_TOKEN \
+            -e DISCORD_CLIENT_ID \
+            -e GUILD_ID \
             -e DATABASE_URL="postgresql://placeholder/placeholder" \
             -e AUTO_VOICE_CATEGORY_ID="placeholder" \
             -e HUB_CHANNEL_IDS="placeholder" \
@@ -99,14 +173,17 @@ jobs:
       # Push-to-main only — never deploy from a PR.
       - name: Deploy to VPS
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-        uses: appleboy/ssh-action@v1.2.5
+        env:
+          PROJECT_DIR: ${{ secrets.PROJECT_DIR }}
+        uses: appleboy/ssh-action@0ff4204d59e8e51228ff73bce53f80d53301dee2 # v1.2.5
         with:
           host: ${{ secrets.VPS_HOST }}
           username: ${{ secrets.VPS_USER }}
           key: ${{ secrets.VPS_SSH_KEY }}
+          envs: PROJECT_DIR
           script: |
             set -Eeuo pipefail
-            cd ${{ secrets.PROJECT_DIR }}
+            cd "$PROJECT_DIR"
 
             # Pull latest source (for docker-compose.yml and .env updates)
             git fetch --all
@@ -181,18 +258,18 @@ jobs:
           WEBHOOK: ${{ secrets.DISCORD_DEPLOY_WEBHOOK }}
         run: |
           if [ -z "$WEBHOOK" ]; then echo "DISCORD_DEPLOY_WEBHOOK not set — skipping notification"; exit 0; fi
-          SHORT_SHA="${GITHUB_SHA::7}"
-          COMMIT_MSG=$(git log -1 --pretty=format:"%s")
-          curl -s -o /dev/null -X POST "$WEBHOOK" \
-            -H "Content-Type: application/json" \
-            -d "{
-              \"embeds\": [{
-                \"title\": \"✅ SquishyBot deployed\",
-                \"description\": \"[\`${SHORT_SHA}\`](${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/commit/${GITHUB_SHA}) ${COMMIT_MSG}\",
-                \"color\": 5763719,
-                \"footer\": { \"text\": \"Triggered by ${GITHUB_ACTOR}\" }
-              }]
-            }"
+          COMMIT_MSG=$(git log -1 --pretty=format:"%s" || true)
+          # jq builds the JSON so quotes/backslashes in the commit subject are escaped.
+          PAYLOAD=$(jq -n \
+            --arg title "✅ SquishyBot deployed" \
+            --arg desc "[\`${GITHUB_SHA::7}\`](${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/commit/${GITHUB_SHA}) ${COMMIT_MSG}" \
+            --arg footer "Triggered by ${GITHUB_ACTOR}" \
+            '{embeds: [{title: $title, description: $desc, color: 5763719, footer: {text: $footer}}]}') \
+            || { echo "::warning::Could not build Discord payload (deploy result unaffected)"; exit 0; }
+          # Webhook problems only warn; they never change the job result.
+          curl -sS --fail-with-body --max-time 15 -o /dev/null -X POST "$WEBHOOK" \
+            -H "Content-Type: application/json" --data-binary "$PAYLOAD" \
+            || echo "::warning::Discord deploy notification failed (deploy result unaffected)"
 
       # ── 9. Notify Discord — failure ───────────────────────────────────────────
       # Push-to-main only — a failed PR build reports via the check itself.
@@ -202,15 +279,15 @@ jobs:
           WEBHOOK: ${{ secrets.DISCORD_DEPLOY_WEBHOOK }}
         run: |
           if [ -z "$WEBHOOK" ]; then echo "DISCORD_DEPLOY_WEBHOOK not set — skipping notification"; exit 0; fi
-          SHORT_SHA="${GITHUB_SHA::7}"
-          COMMIT_MSG=$(git log -1 --pretty=format:"%s")
-          curl -s -o /dev/null -X POST "$WEBHOOK" \
-            -H "Content-Type: application/json" \
-            -d "{
-              \"embeds\": [{
-                \"title\": \"❌ SquishyBot deploy FAILED\",
-                \"description\": \"[\`${SHORT_SHA}\`](${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/commit/${GITHUB_SHA}) ${COMMIT_MSG}\",
-                \"color\": 15548997,
-                \"footer\": { \"text\": \"Triggered by ${GITHUB_ACTOR} — check Actions logs\" }
-              }]
-            }"
+          COMMIT_MSG=$(git log -1 --pretty=format:"%s" || true)
+          # jq builds the JSON so quotes/backslashes in the commit subject are escaped.
+          PAYLOAD=$(jq -n \
+            --arg title "❌ SquishyBot deploy FAILED" \
+            --arg desc "[\`${GITHUB_SHA::7}\`](${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/commit/${GITHUB_SHA}) ${COMMIT_MSG}" \
+            --arg footer "Triggered by ${GITHUB_ACTOR} — check Actions logs" \
+            '{embeds: [{title: $title, description: $desc, color: 15548997, footer: {text: $footer}}]}') \
+            || { echo "::warning::Could not build Discord payload (deploy result unaffected)"; exit 0; }
+          # Webhook problems only warn; they never change the job result.
+          curl -sS --fail-with-body --max-time 15 -o /dev/null -X POST "$WEBHOOK" \
+            -H "Content-Type: application/json" --data-binary "$PAYLOAD" \
+            || echo "::warning::Discord deploy notification failed (deploy result unaffected)"
