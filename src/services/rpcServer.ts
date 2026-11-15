@@ -33,6 +33,7 @@ import { env } from '../config/env'
 import { buildSignedReply, hmacSha256, timingSafeCompare } from '../utils/hmac'
 import { getVerb } from './rpc/registry'
 import { publish } from './eventBus'
+import { constructWithoutLeak, redactUrl } from '../utils/redact'
 
 const REDIS_URL = process.env.REDIS_URL ?? 'redis://redis:6379'
 const REPLAY_WINDOW_MS = 30_000
@@ -74,14 +75,14 @@ function getSubscriber(): Redis {
     enableOfflineQueue: false,
   }
 
-  const r = new Redis(REDIS_URL, opts)
+  const r = constructWithoutLeak(() => new Redis(REDIS_URL, opts), 'rpcServer', REDIS_URL)
 
   r.on('connect', () => {
     if (warnedDown) {
-      logger.info(`rpcServer: reconnected to Redis at ${REDIS_URL}`)
+      logger.info(`rpcServer: reconnected to Redis at ${redactUrl(REDIS_URL)}`)
       warnedDown = false
     } else {
-      logger.info(`rpcServer: connected to Redis at ${REDIS_URL}`)
+      logger.info(`rpcServer: connected to Redis at ${redactUrl(REDIS_URL)}`)
     }
   })
   r.on('ready', () => {

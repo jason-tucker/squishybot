@@ -1,5 +1,7 @@
 import type { Client, TextChannel, User } from 'discord.js'
 import { env } from '../config/env'
+import { redactSecrets, redisSecretPatterns } from '../utils/redact'
+import { format } from 'node:util'
 import { DmThrottle, dmThrottleKey, formatSuppressed } from './dmThrottle'
 
 type LogLevel = 'info' | 'warn' | 'error'
@@ -30,16 +32,12 @@ const SECRET_PATTERNS: Array<{ value: string | undefined; label: string }> = [
   // HMAC shared secret for the botpanel command bus — an error wrapping it
   // (e.g. from the RPC/HMAC code) must not reach the LOG_CHANNEL or owner DM.
   { value: env.BOTPANEL_RPC_SECRET, label: '[REDACTED:BOTPANEL_RPC_SECRET]' },
+  // Redis URL (will carry a password) and the password itself, raw + decoded.
+  ...redisSecretPatterns(process.env.REDIS_URL),
 ]
 
 function redact(s: string): string {
-  let out = s
-  for (const { value, label } of SECRET_PATTERNS) {
-    if (value && value.length > 6 && out.includes(value)) {
-      out = out.split(value).join(label)
-    }
-  }
-  return out
+  return redactSecrets(s, SECRET_PATTERNS)
 }
 
 function prefix(level: LogLevel): string {
@@ -49,10 +47,12 @@ function prefix(level: LogLevel): string {
 }
 
 export function log(level: LogLevel, message: string, ...args: unknown[]): void {
-  const line = `${prefix(level)} ${message}`
-  if (level === 'error') console.error(line, ...args)
-  else if (level === 'warn') console.warn(line, ...args)
-  else console.log(line, ...args)
+  // Format first, then redact, so secrets inside error objects / extra args
+  // never reach stdout either.
+  const line = redact(format(`${prefix(level)} ${message}`, ...args))
+  if (level === 'error') console.error(line)
+  else if (level === 'warn') console.warn(line)
+  else console.log(line)
 }
 
 async function getOwnerUser(client: Client): Promise<User | null> {

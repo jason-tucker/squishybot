@@ -24,6 +24,7 @@
  *    startup. The bot still boots and runs; cache invalidation is just off.
  *  - Reload errors are caught and warned; never crash the bot.
  */
+import { constructWithoutLeak } from '../utils/redact'
 import Redis, { type RedisOptions } from 'ioredis'
 import { env } from '../config/env'
 import { logger } from './logger'
@@ -102,7 +103,7 @@ export function startCacheInvalidator(): void {
     retryStrategy: (times) => Math.min(times * 500, 10_000),
     enableOfflineQueue: true,
   }
-  const r = new Redis(process.env.REDIS_URL ?? 'redis://redis:6379', opts)
+  const r = constructWithoutLeak(() => new Redis(process.env.REDIS_URL ?? 'redis://redis:6379', opts), 'cacheInvalidator', process.env.REDIS_URL ?? 'redis://redis:6379')
   r.on('error', (err: Error) => {
     logger.warn(`cacheInvalidator: subscriber error: ${err.message}`)
   })
