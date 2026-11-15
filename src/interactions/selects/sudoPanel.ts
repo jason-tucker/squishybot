@@ -66,14 +66,15 @@ export async function handleSudoPanelSelect(interaction: StringSelectMenuInterac
     // empty-channel deletes can pipeline without fanning out into a global
     // REST rate-limit storm. cache.get avoids the fetch entirely when hot.
     const CHUNK = 5
-    let deleted = 0, skipped = 0, staticCleaned = 0
+    let deleted = 0, skipped = 0, staticCleaned = 0, failed = 0
     for (let i = 0; i < rows.length; i += CHUNK) {
       const slice = rows.slice(i, i + CHUNK)
       const results = await Promise.all(slice.map(async r => {
         const vc = guild.channels.cache.get(r.voiceChannelId)
           ?? await guild.channels.fetch(r.voiceChannelId).catch(() => null)
         if (!vc || (vc.isVoiceBased() && vc.members.size === 0)) {
-          await deleteAutoChannel(interaction.client, r)
+          // false = a Discord delete failed; the row is kept and retried.
+          if (!await deleteAutoChannel(interaction.client, r)) return 'failed' as const
           // Static rows only lose their companion text channel (the VC is
           // kept) — count them separately so the summary stays accurate.
           return r.sourceHubId === 'static' ? 'static' as const : 'deleted' as const
@@ -83,9 +84,11 @@ export async function handleSudoPanelSelect(interaction: StringSelectMenuInterac
       deleted += results.filter(x => x === 'deleted').length
       staticCleaned += results.filter(x => x === 'static').length
       skipped += results.filter(x => x === 'skipped').length
+      failed += results.filter(x => x === 'failed').length
     }
     const staticLine = staticCleaned > 0 ? `\n**Static (text cleaned, VC kept):** ${staticCleaned}` : ''
-    await sendPanel(interaction, '🧹 Cleanup Complete', `**Deleted:** ${deleted}${staticLine}\n**Skipped (active):** ${skipped}`, 0x57f287)
+    const failedLine = failed > 0 ? `\n**Failed (kept, will retry):** ${failed}` : ''
+    await sendPanel(interaction, '🧹 Cleanup Complete', `**Deleted:** ${deleted}${staticLine}\n**Skipped (active):** ${skipped}${failedLine}`, 0x57f287)
     return
   }
 

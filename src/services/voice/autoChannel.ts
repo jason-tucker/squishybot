@@ -18,6 +18,7 @@ import { clearStickyDebounce } from '../../bot/events/messageCreate'
 import { logger } from '../logger'
 import { publish, voiceCh, type VoiceChannelCreatedEvent, type VoiceChannelDeletedEvent } from '../eventBus'
 import { stampActivityChannelKinds } from '../activity/channelKinds'
+import { MAX_DELETE_ATTEMPTS, planDeleteRetry, tryDeleteChannel, type DeleteOutcome } from './lifecycle'
 
 export async function createAutoChannel(
   client: Client,
@@ -45,6 +46,14 @@ export async function createAutoChannel(
   // (undecorated) is persisted as `fallback_name` so later renames start clean.
   const displayName = plainChannelName(guild, effectiveName, existingVoiceChannel.id)
 
+  // Saved so a failed conversion can put the hub back the way it was.
+  const originalName = existingVoiceChannel.name
+  const originalUserLimit = existingVoiceChannel.userLimit
+  const originalPosition = existingVoiceChannel.position
+  const revertHubEdit = () => existingVoiceChannel.edit({ name: originalName, userLimit: originalUserLimit, position: originalPosition }).catch(err =>
+    logger.warn(`createAutoChannel: failed to revert hub vc=${existingVoiceChannel.id} after a failed conversion:`, err)
+  )
+
   // 1. Rename the existing hub voice channel and move it to position 0 (top of category).
   // userLimit is bundled into this edit so it takes effect immediately if a hub default applies.
   await existingVoiceChannel.edit({ name: displayName, position: 0, userLimit: effectiveUserLimit }).catch(err =>
@@ -53,7 +62,10 @@ export async function createAutoChannel(
 
   // 2. Create the attached text channel at position 0 (top of category, same name as voice)
   const textChannel = await createTextChannelForVoice(guild, botId, owner, displayName)
-  if (!textChannel) return null
+  if (!textChannel) {
+    await revertHubEdit()
+    return null
+  }
 
   // 3. Insert DB record. Guarded with a try/catch because the unique
   //    constraint on voice_channel_id can fire when a parallel hub-join
@@ -84,7 +96,12 @@ export async function createAutoChannel(
       await textChannel.delete().catch(() => {})
       return null
     }
-    throw err
+    // Any other insert failure: roll back so we leave no orphan text channel
+    // and the hub keeps working as a hub.
+    logger.error(`createAutoChannel: insert failed for vc=${existingVoiceChannel.id} — rolling back text channel and hub rename`, err)
+    await textChannel.delete().catch(e => logger.warn(`createAutoChannel: failed to delete half-created text channel tc=${textChannel.id}:`, e))
+    await revertHubEdit()
+    return null
   }
   trackAutoChannelText(record.textChannelId)
   trackAutoChannelVoice(record.voiceChannelId, record.textChannelId)
@@ -99,8 +116,14 @@ export async function createAutoChannel(
 
   // 4. Post control panel + sticky. Pass the freshly-created textChannel so
   // we don't depend on the bot's channel cache having caught up to the create.
-  await postOrUpdateControlPanel(client, record, textChannel)
-  await postOrUpdateSticky(client, record)
+  // Failures are logged, not thrown: the room exists by now, and throwing would
+  // skip the caller's replacement-hub step.
+  await postOrUpdateControlPanel(client, record, textChannel).catch(err =>
+    logger.warn(`createAutoChannel: control panel post failed for vc=${record.voiceChannelId}:`, err)
+  )
+  await postOrUpdateSticky(client, record).catch(err =>
+    logger.warn(`createAutoChannel: sticky post failed for vc=${record.voiceChannelId}:`, err)
+  )
 
   logger.info(`Auto channel created: ${channelName} (vc=${existingVoiceChannel.id}, tc=${textChannel.id})`)
 
@@ -220,12 +243,56 @@ export async function createStaticChannelText(
 }
 
 /**
+ * Deletes a channel and classifies the result: 'deleted', 'gone' (Unknown
+ * Channel, already deleted) or 'failed' (any other error; the channel may
+ * still exist). Never throws; logs a warning on 'failed'.
+ */
+export async function deleteChannelSafe(guild: Guild, channelId: string): Promise<DeleteOutcome> {
+  const { outcome, error } = await tryDeleteChannel(guild.channels, channelId)
+  if (outcome === 'failed') logger.warn(`Failed to delete channel ${channelId}:`, error)
+  return outcome
+}
+
+// Failed delete attempts per voice channel id, for the bounded cleanup retry.
+const deleteFailures = new Map<string, number>()
+
+/** Forget failed delete attempts for a room (e.g. members came back). */
+export function resetDeleteFailures(voiceChannelId: string): void {
+  deleteFailures.delete(voiceChannelId)
+}
+
+/**
+ * A Discord delete failed: the DB row and cache tracking are kept so the room
+ * is still known. Re-arm the cleanup timer up to MAX_DELETE_ATTEMPTS times,
+ * then alert the owner once. The surviving row lets the next boot's
+ * reconciler retry.
+ */
+async function handleDeleteFailure(client: Client, record: AutoChannelRecord): Promise<void> {
+  const attempts = (deleteFailures.get(record.voiceChannelId) ?? 0) + 1
+  if (planDeleteRetry(attempts) === 'retry') {
+    deleteFailures.set(record.voiceChannelId, attempts)
+    logger.warn(`Channel delete failed for vc=${record.voiceChannelId} (attempt ${attempts}/${MAX_DELETE_ATTEMPTS}) — keeping DB row, re-arming cleanup`)
+    void scheduleCleanup(client, record.voiceChannelId)
+    return
+  }
+  deleteFailures.delete(record.voiceChannelId)
+  await logger.errorAndDm(
+    `Channel delete failed ${MAX_DELETE_ATTEMPTS} times for vc=${record.voiceChannelId} tc=${record.textChannelId} — DB row kept; check the bot's Manage Channels permission`,
+    new Error('auto channel delete retries exhausted'),
+    client,
+  )
+}
+
+/**
  * Deletes ONLY the companion text channel (and the DB row) for a static VC.
  * The voice channel itself is left untouched.
+ *
+ * Returns false (DB row kept, retry scheduled) when the Discord delete fails
+ * for any reason other than the channel already being gone.
  */
-export async function deleteStaticText(client: Client, record: AutoChannelRecord): Promise<void> {
+export async function deleteStaticText(client: Client, record: AutoChannelRecord): Promise<boolean> {
   const guild = client.guilds.cache.get(record.guildId)
-  if (!guild) return
+  if (!guild) return false
 
   cancelCleanup(record.voiceChannelId)
   cancelAllHideGracesFor(record.voiceChannelId)
@@ -235,7 +302,11 @@ export async function deleteStaticText(client: Client, record: AutoChannelRecord
   clearPanelHash(record.voiceChannelId)
 
   // Delete only the text channel; leave the VC alone.
-  await guild.channels.delete(record.textChannelId).catch(() => {})
+  if (await deleteChannelSafe(guild, record.textChannelId) === 'failed') {
+    await handleDeleteFailure(client, record)
+    return false
+  }
+  deleteFailures.delete(record.voiceChannelId)
 
   await db.delete(autoChannels).where(eq(autoChannels.voiceChannelId, record.voiceChannelId)).catch(() => {})
   await clearMembers(record.voiceChannelId)
@@ -255,17 +326,22 @@ export async function deleteStaticText(client: Client, record: AutoChannelRecord
     name: record.fallbackName ?? '',
     ts: new Date().toISOString(),
   })
+  return true
 }
 
-export async function deleteAutoChannel(client: Client, record: AutoChannelRecord): Promise<void> {
+/**
+ * Deletes the voice + text pair and the DB row. Returns false (DB row kept,
+ * retry scheduled) when either Discord delete fails for any reason other than
+ * the channel already being gone.
+ */
+export async function deleteAutoChannel(client: Client, record: AutoChannelRecord): Promise<boolean> {
   // Invariant: static VCs are never deleted — only the companion text channel is.
   if (record.sourceHubId === 'static') {
-    await deleteStaticText(client, record)
-    return
+    return deleteStaticText(client, record)
   }
 
   const guild = client.guilds.cache.get(record.guildId)
-  if (!guild) return
+  if (!guild) return false
 
   cancelCleanup(record.voiceChannelId)
   cancelAllHideGracesFor(record.voiceChannelId)
@@ -274,10 +350,15 @@ export async function deleteAutoChannel(client: Client, record: AutoChannelRecor
   clearStickyDebounce(record.textChannelId)
   clearPanelHash(record.voiceChannelId)
 
-  await Promise.all([
-    guild.channels.delete(record.voiceChannelId).catch(() => {}),
-    guild.channels.delete(record.textChannelId).catch(() => {}),
+  const outcomes = await Promise.all([
+    deleteChannelSafe(guild, record.voiceChannelId),
+    deleteChannelSafe(guild, record.textChannelId),
   ])
+  if (outcomes.includes('failed')) {
+    await handleDeleteFailure(client, record)
+    return false
+  }
+  deleteFailures.delete(record.voiceChannelId)
 
   await db.delete(autoChannels).where(eq(autoChannels.voiceChannelId, record.voiceChannelId)).catch(() => {})
   await clearMembers(record.voiceChannelId)
@@ -298,4 +379,5 @@ export async function deleteAutoChannel(client: Client, record: AutoChannelRecor
     name: record.fallbackName ?? '',
     ts: new Date().toISOString(),
   })
+  return true
 }

@@ -1,4 +1,4 @@
-import type { Client, VoiceState } from 'discord.js'
+import type { Client, Guild, GuildMember, VoiceState } from 'discord.js'
 import { ActivityType } from 'discord.js'
 import { db } from '../../db/client'
 import { autoChannels } from '../../db/schema'
@@ -21,6 +21,12 @@ import { isStaticChannel } from '../../services/voice/staticChannels'
 import { createStaticChannelText } from '../../services/voice/autoChannel'
 import { recordVoiceActivity } from '../../services/activity/tracker'
 import { noteVoiceStateForOverflow } from '../../services/voice/overflowGate'
+import { createKeyedQueue, planTransition } from '../../services/voice/lifecycle'
+
+// One member's voice events are handled strictly in order: discord.js runs
+// async listeners concurrently, and a fast A -> B -> leave sequence must not
+// let the later leave of B finish before the earlier join of B.
+const memberQueue = createKeyedQueue()
 
 export function registerVoiceStateUpdate(client: Client): void {
   client.on('voiceStateUpdate', async (oldState: VoiceState, newState: VoiceState) => {
@@ -38,7 +44,8 @@ export function registerVoiceStateUpdate(client: Client): void {
       // unmanaged-leave early return (watched VCs are usually unmanaged and
       // bots count toward "full").
       noteVoiceStateForOverflow(oldState, newState)
-      await handleVoiceStateUpdate(client, oldState, newState)
+      // VoiceState.id is the member's user id.
+      await memberQueue.run(newState.id, () => handleVoiceStateUpdate(client, oldState, newState))
     } catch (err) {
       logger.error('voiceStateUpdate handler threw — swallowed', err)
     }
@@ -58,8 +65,22 @@ async function handleVoiceStateUpdate(client: Client, oldState: VoiceState, newS
     const leftChannelId = oldState.channelId
     const joinedChannelId = newState.channelId
 
-    // --- JOINED A CHANNEL ---
-    if (joinedChannelId && joinedChannelId !== leftChannelId) {
+    // A move is a leave of the old channel AND a join of the new one. Run the
+    // leave half first and each half in its own try/catch: the join half
+    // returns early for managed rooms, static VCs and hubs, and must never
+    // skip the old room's text-access removal, owner grace or empty cleanup.
+    for (const step of planTransition(leftChannelId, joinedChannelId)) {
+      try {
+        if (step.kind === 'leave') await handleLeave(client, guild, member, step.channelId)
+        else await handleJoin(client, guild, member, step.channelId)
+      } catch (err) {
+        logger.error(`voiceStateUpdate ${step.kind} half threw for vc=${step.channelId} — swallowed`, err)
+      }
+    }
+}
+
+// --- JOINED A CHANNEL ---
+async function handleJoin(client: Client, guild: Guild, member: GuildMember, joinedChannelId: string): Promise<void> {
       // Check the auto-channel cache FIRST (before the hub check). The
       // hub-cache eviction lags the hub→auto rename by a couple of awaits
       // (it lives in createReplacementHub which runs after createAutoChannel
@@ -155,10 +176,10 @@ async function handleVoiceStateUpdate(client: Client, oldState: VoiceState, newS
         await handleHubJoin(client, guild, member, joinedChannelId)
         return
       }
-    }
+}
 
-    // --- LEFT A CHANNEL ---
-    if (leftChannelId && leftChannelId !== joinedChannelId) {
+// --- LEFT A CHANNEL ---
+async function handleLeave(client: Client, guild: Guild, member: GuildMember, leftChannelId: string): Promise<void> {
       // Same hot-path gate as the join branch: leaves from unmanaged voice
       // channels skip the DB read entirely.
       if (!isAutoChannelVoice(leftChannelId)) return
@@ -269,5 +290,4 @@ async function handleVoiceStateUpdate(client: Client, oldState: VoiceState, newS
         // channel name — re-evaluate so the fallback kicks in.
         await maybeRenameChannel(client, updatedRecord).catch(() => {})
       }
-    }
 }

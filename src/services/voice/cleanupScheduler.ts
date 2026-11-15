@@ -74,6 +74,9 @@ async function runCleanup(client: Client, voiceChannelId: string): Promise<void>
   if (vc?.isVoiceBased() && vc.members.size > 0) {
     // Someone rejoined — cancel cleanup
     await db.update(autoChannels).set({ scheduledCleanupAt: null }).where(eq(autoChannels.voiceChannelId, voiceChannelId))
+    // Room is in use again: a later empty-out starts a fresh delete-retry budget.
+    const { resetDeleteFailures } = await import('./autoChannel')
+    resetDeleteFailures(voiceChannelId)
     logger.info(`Cleanup cancelled — members rejoined vc=${voiceChannelId}`)
     return
   }

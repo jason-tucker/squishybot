@@ -40,7 +40,11 @@ export const deleteHandler: VerbHandler = async (params, ctx) => {
   }
 
   try {
-    await deleteAutoChannel(ctx.client, record)
+    if (!await deleteAutoChannel(ctx.client, record)) {
+      // A Discord delete failed (not "already gone"); the row is kept and
+      // cleanup is re-armed, so report it rather than claiming success.
+      return { ok: false, error: 'discord-error', details: 'channel delete failed; kept and will retry' }
+    }
     return { ok: true, data: { voiceChannelId } }
   } catch (err) {
     const msg = (err as Error)?.message ?? String(err)
