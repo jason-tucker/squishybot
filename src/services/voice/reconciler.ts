@@ -276,6 +276,8 @@ export async function runReconciler(client: Client): Promise<ReconcilerResult> {
         // Cache before DB so a join on the new hub is recognized immediately.
         updateHubChannelId(hub.channelId, newHub.id)
         await db.update(hubChannels).set({ channelId: newHub.id }).where(eq(hubChannels.id, hub.id))
+        // Re-apply after the commit in case a reload read the old row first.
+        updateHubChannelId(hub.channelId, newHub.id)
         result.hubs++
         logger.info(`Reconciler: recreated hub ${hub.label} (${newHub.id})`)
       } catch (err) {

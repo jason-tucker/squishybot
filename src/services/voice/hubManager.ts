@@ -183,6 +183,9 @@ async function createReplacementHub(guild: Guild, originalHub: typeof hubChannel
     await db.update(hubChannels)
       .set({ channelId: newHub.id })
       .where(eq(hubChannels.id, originalHub.id))
+    // Re-apply after the commit: a settings reload that read the old row
+    // before the UPDATE landed may have swapped the old id back in.
+    updateHubChannelId(originalHub.channelId, newHub.id)
 
     logger.info(`Replacement hub created: ${newHub.name} (${newHub.id})`)
   } catch (err) {
