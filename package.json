@@ -12,7 +12,8 @@
     "db:migrate": "tsx src/db/migrate.ts",
     "db:check": "drizzle-kit check",
     "db:studio": "drizzle-kit studio",
-    "typecheck": "node --max-old-space-size=384 node_modules/typescript/bin/tsc --noEmit"
+    "typecheck": "node --max-old-space-size=384 node_modules/typescript/bin/tsc --noEmit",
+    "test": "tsx --test \"test/**/*.test.ts\""
   },
   "keywords": [],
   "author": "",
