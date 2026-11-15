@@ -12,7 +12,8 @@
  * On boot, `restoreHubLockdowns(client)` re-applies any in-flight denials and
  * schedules unlock timers (or clears already-expired rows).
  */
-import { ChannelType, type Client } from 'discord.js'
+import { PermissionFlagsBits, type Client } from 'discord.js'
+import { editEveryoneBits } from './hubPermWriter'
 import { db } from '../../db/client'
 import { hubChannels } from '../../db/schema'
 import { eq } from 'drizzle-orm'
@@ -39,12 +40,18 @@ async function applyHubConnect(
 ): Promise<void> {
   const guild = client.guilds.cache.get(guildId)
   if (!guild) return
-  const channel = guild.channels.cache.get(channelId)
-    ?? await guild.channels.fetch(channelId).catch(() => null)
-  if (!channel || channel.type !== ChannelType.GuildVoice) return
-  await channel.permissionOverwrites.edit(guild.roles.everyone, {
-    Connect: allow ? null : false,
-  }).catch(err => logger.warn(`hubLockdown: failed to ${allow ? 'unlock' : 'lock'} hub ${channelId}: ${err?.message ?? err}`))
+  // Serialized with the overflow gate's ViewChannel writes and merged against a
+  // fresh fetch, so neither writer can erase the other's bit.
+  const result = await editEveryoneBits(guild, channelId, ch => {
+    const ow = ch.permissionOverwrites.cache.get(guild.roles.everyone.id)
+    if (allow) {
+      if (!ow || (!ow.deny.has(PermissionFlagsBits.Connect) && !ow.allow.has(PermissionFlagsBits.Connect))) return null
+      return { Connect: null }
+    }
+    if (ow?.deny.has(PermissionFlagsBits.Connect)) return null
+    return { Connect: false }
+  }, allow ? 'hub unlock' : 'hub lockdown')
+  if (result === 'failed') logger.warn(`hubLockdown: failed to ${allow ? 'unlock' : 'lock'} hub ${channelId}`)
 }
 
 function cancelTimer(key: string): void {

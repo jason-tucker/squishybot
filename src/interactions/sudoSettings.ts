@@ -86,6 +86,7 @@ import {
   hasExplicitWatchList,
   requestOverflowGateApply,
   shouldShowHubs,
+  watchIgnoreReason,
 } from '../services/voice/overflowGate'
 
 // ---------------------------------------------------------------------------
@@ -150,7 +151,7 @@ const VOICE_BOOL_SETTINGS: BoolSettingDef[] = [
   {
     key: 'voice.overflow_mode',
     label: 'Overflow Mode',
-    description: 'When on, hub channels are hidden from @everyone until every watched 24/7 voice channel is full, then shown so a new auto channel can be made. Pick the watched channels under Overflow Mode (defaults to Static Channels). Disabling clears the ViewChannel overwrite on all hubs.',
+    description: 'When on, hub channels are hidden from @everyone until every watched 24/7 voice channel is full, then shown so a new auto channel can be made. Pick the watched channels under Overflow Mode (defaults to Static Channels). Disabling restores hubs the gate hid; admin-hidden hubs are left alone.',
     defaultValue: false,
   },
 ]
@@ -1783,20 +1784,23 @@ async function renderProfiles(guildId: string) {
   return renderSudoUserPicker(guildId)
 }
 
-function renderOverflow(guild: Guild | null) {
+function renderOverflow(guild: Guild | null, note?: string) {
   const on = getBoolSetting(OVERFLOW_MODE_KEY, false)
   const ids = getOverflowWatchIds()
   const snap = guild ? getWatchedSnapshot(guild) : []
   const lines: string[] = [
     '### 🌊 Overflow Mode',
-    '_When on, hub channels are hidden from @everyone until **every** watched voice channel is full, then shown so a new auto channel can be made. Auto rooms never count as capacity; bots count toward full. Disabling clears the hidden state on all hubs._\n',
+    '_When on, hub channels are hidden from @everyone until **every** watched voice channel is full, then shown so a new auto channel can be made. Temporary auto rooms and hubs never count as capacity; bots count toward full. Disabling restores hubs the gate hid; hubs an admin hid are left alone._\n',
     `**Status** · ${on ? '🟢 On' : '⚪ Off'}`,
     `**Watching** · ${hasExplicitWatchList() ? 'custom list' : 'Static Channels (no custom list set)'}`,
   ]
+  if (note) lines.push(note)
   if (ids.length === 0) {
     lines.push('_No watched channels — overflow mode fails open (hubs stay visible)._')
   } else {
     for (const id of ids) {
+      const ignored = watchIgnoreReason(id)
+      if (ignored) { lines.push(`• <#${id}> — ${ignored === 'hub' ? 'hub' : 'temporary auto room'}, ignored`); continue }
       const s = snap.find(x => x.id === id)
       if (!s) { lines.push(`• <#${id}> — ⚠️ not found`); continue }
       const limit = s.userLimit > 0 ? String(s.userLimit) : '∞'
@@ -2681,11 +2685,18 @@ export async function handleSettingsChannelSelect(interaction: ChannelSelectMenu
   }
 
   if (id === 'sudo:set:overflow:watch') {
-    const ids = interaction.values.filter(v => /^\d+$/.test(v))
+    // Temporary auto rooms and hubs never count as capacity (the gate ignores
+    // them too); the channel select can't pre-exclude them, so drop them here.
+    const picked = interaction.values.filter(v => /^\d+$/.test(v))
+    const ids = picked.filter(v => !watchIgnoreReason(v))
+    const rejected = picked.length - ids.length
     if (ids.length > 0) await setSetting(OVERFLOW_WATCH_KEY, ids.join(','), interaction.user.id)
     else                await clearSetting(OVERFLOW_WATCH_KEY, interaction.user.id)
     requestOverflowGateApply('watch')
-    await interaction.editReply(renderOverflow(interaction.guild) as any)
+    const note = rejected > 0
+      ? `⚠️ Ignored ${rejected} temporary auto room(s)/hub(s) — they never count as capacity.`
+      : undefined
+    await interaction.editReply(renderOverflow(interaction.guild, note) as any)
     return
   }
 

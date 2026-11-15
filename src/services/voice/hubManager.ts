@@ -123,8 +123,9 @@ export async function handleHubJoin(client: Client, guild: Guild, member: GuildM
 
     const channelName = generateChannelName(member, existingNames)
 
-    // Overflow mode: reveal the hub first so the new room isn't left with the
-    // gate's ViewChannel deny (its Hide state is record.isHidden=false).
+    // Overflow mode: remove the gate's own ViewChannel deny first so the new
+    // room isn't left hidden (its Hide state is record.isHidden=false). An
+    // admin-set deny is left alone.
     await clearOverflowHideForConversion(guild, hubVc)
 
     // Create the auto channel (renames hub in place, creates text channel)
@@ -155,7 +156,7 @@ export async function handleHubJoin(client: Client, guild: Guild, member: GuildM
     unmarkHubConverting(hubChannelId)
     handlingHubs.delete(hubChannelId)
     // Re-evaluate on every exit, including a failed conversion that left the
-    // hub revealed. No-op unless the gate is on or its marker is set.
+    // hub revealed. No-op unless the gate is on or still owns a hidden channel.
     requestOverflowEval('hub_join')
   }
 }
@@ -172,7 +173,8 @@ async function createReplacementHub(guild: Guild, originalHub: typeof hubChannel
     })
 
     // Overflow mode: hide it before it is registered as a hub when the gate is
-    // closed (brief visible window; fails open, never throws).
+    // closed (brief visible window; fails open, never throws). The gate records
+    // ownership before the deny, so a concurrent disable still reveals it.
     await hideNewHubIfGateClosed(guild, newHub)
 
     // Update the cache *before* the DB write so a voiceStateUpdate for someone
