@@ -22,12 +22,15 @@
  *    panel sees a real error instead of timing out.
  *  - Handler exceptions → reply `{ ok: false, error: 'handler-threw' }`
  *    + log; never crash the subscriber.
+ *  - Every reply is signed via `sendReply` (`{...result, ts, hmac}`, see
+ *    `buildSignedReply` in utils/hmac.ts). An unserializable result is
+ *    replaced by a signed `handler-threw` reply.
  */
 import Redis, { type RedisOptions } from 'ioredis'
 import type { Client } from 'discord.js'
 import { logger } from './logger'
 import { env } from '../config/env'
-import { hmacSha256, timingSafeCompare } from '../utils/hmac'
+import { buildSignedReply, hmacSha256, timingSafeCompare } from '../utils/hmac'
 import { getVerb } from './rpc/registry'
 import { publish } from './eventBus'
 
@@ -136,6 +139,11 @@ function verbFromChannel(channel: string): string | null {
   return verb.length > 0 ? verb : null
 }
 
+/** Publish a signed reply on `res.<requestId>`; `ts` is taken now, after the handler ran. */
+async function sendReply(requestId: string, result: unknown, secret: string): Promise<void> {
+  await publish(`res.${requestId}`, buildSignedReply(secret, requestId, result))
+}
+
 async function dispatch(client: Client, channel: string, message: string, secret: string): Promise<void> {
   let envelope: Envelope
   try {
@@ -179,19 +187,18 @@ async function dispatch(client: Client, channel: string, message: string, secret
     return
   }
 
-  const replyChannel = `res.${envelope.requestId}`
   const handler = getVerb(verb)
   if (!handler) {
-    await publish(replyChannel, { ok: false, error: 'unknown-verb' })
+    await sendReply(envelope.requestId, { ok: false, error: 'unknown-verb' }, secret)
     return
   }
 
   try {
     const result = await handler(envelope.params, { client, requestId: envelope.requestId, ts: envelope.ts })
-    await publish(replyChannel, result)
+    await sendReply(envelope.requestId, result, secret)
   } catch (err) {
     logger.error(`rpcServer: handler '${verb}' threw`, err)
-    await publish(replyChannel, { ok: false, error: 'handler-threw', details: (err as Error)?.message })
+    await sendReply(envelope.requestId, { ok: false, error: 'handler-threw', details: (err as Error)?.message }, secret)
   }
 }
 
