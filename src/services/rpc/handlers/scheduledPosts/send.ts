@@ -10,7 +10,7 @@
  * Reply:  { ok: true, data: { channelId, messageId } }
  *         { ok: false, error: 'invalid-params' | 'not-found' | 'already-posted'
  *                            | 'canceled' | 'channel-unreachable' | 'empty-spec'
- *                            | 'discord-error' }
+ *                            | 'in-progress' | 'discord-error' }
  */
 import { registerVerb, type VerbHandler } from '../../registry'
 import { sendScheduledPostNow } from '../../../scheduledPosts/service'

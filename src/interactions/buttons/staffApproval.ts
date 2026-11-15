@@ -6,11 +6,12 @@ import {
 } from 'discord.js'
 import { db } from '../../db/client'
 import { staffApprovals } from '../../db/schema'
-import { eq } from 'drizzle-orm'
+import { and, eq } from 'drizzle-orm'
 import { isSudo } from '../../services/voice/permissions'
 import { logger } from '../../services/logger'
 import { sep } from '../../utils/cv2'
 import { getSetting } from '../../services/settings'
+import { checkAssignableRole } from '../../utils/roleGuard'
 import { BASE_DEFS, findStaffRoleDefByKey, type StaffRoleDef } from '../../services/staffRoles'
 
 export async function handleStaffApprovalButton(interaction: ButtonInteraction): Promise<void> {
@@ -27,22 +28,26 @@ export async function handleStaffApprovalButton(interaction: ButtonInteraction):
     return
   }
 
-  const [row] = await db.select().from(staffApprovals).where(eq(staffApprovals.id, id))
-  if (!row) {
-    await interaction.reply({ content: '❌ This request no longer exists.', ephemeral: true })
-    return
-  }
-  if (row.status !== 'pending') {
-    await interaction.reply({ content: `ℹ️ This request was already ${row.status} by <@${row.reviewedBy}>.`, ephemeral: true })
-    return
-  }
-
+  // Ack first so a slow claim can never leave a row decided with no
+  // grants/DM because the 3s interaction window expired.
   await interaction.deferUpdate()
 
+  // Atomic claim: only a still-pending row flips, so of two concurrent
+  // reviewers (or a double click) exactly one wins and grants/DMs.
   const newStatus = action === 'approve' ? 'approved' : 'denied'
-  await db.update(staffApprovals)
+  const [row] = await db.update(staffApprovals)
     .set({ status: newStatus, reviewedBy: member.id, reviewedAt: new Date() })
-    .where(eq(staffApprovals.id, id))
+    .where(and(eq(staffApprovals.id, id), eq(staffApprovals.status, 'pending')))
+    .returning()
+  if (!row) {
+    const [existing] = await db.select().from(staffApprovals).where(eq(staffApprovals.id, id))
+    if (!existing) {
+      await interaction.followUp({ content: '❌ This request no longer exists.', ephemeral: true })
+      return
+    }
+    await interaction.followUp({ content: `ℹ️ This request was already ${existing.status} by <@${existing.reviewedBy}>.`, ephemeral: true })
+    return
+  }
 
   const data = row.requestedData as Record<string, unknown>
 
@@ -200,6 +205,13 @@ async function tryGrantRoles(
       (await interaction.guild!.roles.fetch(roleId).catch(() => null))
     if (!role) {
       lines.push(`⚠️ Linked role for **${def.label}** (id \`${roleId}\`) no longer exists in Discord.`)
+      continue
+    }
+
+    const verdict = checkAssignableRole(interaction.guild!, role.id)
+    if (!verdict.ok) {
+      logger.warn(`Refused to grant ${def.label} (${role.id}) via staff request: ${verdict.reason}`)
+      lines.push(`⚠️ Refused to grant **${def.label}**: role is not safely assignable (${verdict.reason}). Grant it manually if intended.`)
       continue
     }
 

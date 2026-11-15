@@ -4,7 +4,7 @@
  * old `/sudo → Game Night` flow kept RSVP state in memory and lost it on
  * restart; everything here round-trips through Postgres.
  */
-import { and, eq, isNotNull, lt, lte, or } from 'drizzle-orm'
+import { and, eq, inArray, isNotNull, lt, lte, or } from 'drizzle-orm'
 import type { Channel, Client } from 'discord.js'
 import { db } from '../../db/client'
 import { scheduledPosts, type ScheduledPostRow } from '../../db/schema/scheduledPosts'
@@ -32,6 +32,7 @@ export interface PostOutcome {
  * scheduler (after a claim) or directly from the send-now verb.
  */
 export async function postScheduledPostRow(client: Client, row: ScheduledPostRow): Promise<PostOutcome> {
+  let sent: { id: string }
   try {
     const channel = await fetchSendableChannel(client, row.channelId)
     if (!channel) {
@@ -45,20 +46,45 @@ export async function postScheduledPostRow(client: Client, row: ScheduledPostRow
       return { ok: false, error: 'empty-spec' }
     }
 
-    const sent = await (channel as unknown as { send: (p: unknown) => Promise<{ id: string }> }).send(payload)
-
-    await db
-      .update(scheduledPosts)
-      .set({ status: 'posted', messageId: sent.id, postedAt: new Date(), error: null, updatedAt: new Date() })
-      .where(eq(scheduledPosts.id, row.id))
-
-    logger.info(`scheduledPost posted id=${row.id} kind=${row.kind} channel=${row.channelId} message=${sent.id}`)
-    return { ok: true, messageId: sent.id, channelId: row.channelId }
+    sent = await (channel as unknown as { send: (p: unknown) => Promise<{ id: string }> }).send(payload)
   } catch (err) {
     const msg = (err as Error)?.message ?? String(err)
     logger.warn(`scheduledPost post failed id=${row.id}: ${msg}`)
     await markFailed(row.id, msg.slice(0, 500))
     return { ok: false, error: 'discord-error' }
+  }
+
+  // The message is live from here on. Never mark the row failed: a failed row
+  // is re-sendable, which would post a duplicate. If the success update keeps
+  // failing, the row stays 'posting' and the stale-posting reclaim may repost
+  // it after STALE_POSTING_MS (at-least-once delivery).
+  await markPosted(row, sent.id)
+  logger.info(`scheduledPost posted id=${row.id} kind=${row.kind} channel=${row.channelId} message=${sent.id}`)
+  return { ok: true, messageId: sent.id, channelId: row.channelId }
+}
+
+const MARK_POSTED_ATTEMPTS = 3
+
+async function markPosted(row: ScheduledPostRow, messageId: string): Promise<void> {
+  for (let attempt = 1; attempt <= MARK_POSTED_ATTEMPTS; attempt++) {
+    try {
+      await db
+        .update(scheduledPosts)
+        .set({ status: 'posted', messageId, postedAt: new Date(), error: null, updatedAt: new Date() })
+        .where(eq(scheduledPosts.id, row.id))
+      return
+    } catch (err) {
+      const msg = (err as Error)?.message ?? String(err)
+      if (attempt === MARK_POSTED_ATTEMPTS) {
+        logger.error(
+          `scheduledPost id=${row.id} was sent (message=${messageId}) but marking it posted failed ` +
+            `after ${MARK_POSTED_ATTEMPTS} attempts: ${msg}`,
+        )
+        return
+      }
+      logger.warn(`scheduledPost id=${row.id} mark-posted attempt ${attempt} failed: ${msg}`)
+      await new Promise((r) => setTimeout(r, 500 * attempt))
+    }
   }
 }
 
@@ -71,15 +97,26 @@ async function markFailed(id: string, error: string): Promise<void> {
 }
 
 /**
- * Post a specific row immediately (send-now). Loads the row, refuses if it was
- * already posted, otherwise posts and returns the outcome.
+ * Post a specific row immediately (send-now). Atomically claims the row
+ * (scheduled|failed -> posting) so a double click, or a race with the
+ * scheduler tick, posts it once. A row already 'posting' is refused.
  */
 export async function sendScheduledPostNow(client: Client, id: string): Promise<PostOutcome> {
-  const [row] = await db.select().from(scheduledPosts).where(eq(scheduledPosts.id, id))
+  const [claimed] = await db
+    .update(scheduledPosts)
+    .set({ status: 'posting', updatedAt: new Date() })
+    .where(and(eq(scheduledPosts.id, id), inArray(scheduledPosts.status, ['scheduled', 'failed'])))
+    .returning()
+  if (claimed) return postScheduledPostRow(client, claimed)
+
+  const [row] = await db
+    .select({ status: scheduledPosts.status })
+    .from(scheduledPosts)
+    .where(eq(scheduledPosts.id, id))
   if (!row) return { ok: false, error: 'not-found' }
   if (row.status === 'posted') return { ok: false, error: 'already-posted' }
   if (row.status === 'canceled') return { ok: false, error: 'canceled' }
-  return postScheduledPostRow(client, row)
+  return { ok: false, error: 'in-progress' }
 }
 
 /**
