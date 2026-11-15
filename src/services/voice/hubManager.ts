@@ -1,5 +1,6 @@
 import type { Client, Guild, GuildMember, VoiceChannel } from 'discord.js'
 import { ChannelType } from 'discord.js'
+import { clearOverflowHideForConversion, hideNewHubIfGateClosed, requestOverflowEval, unmarkHubConverting } from './overflowGate'
 import { db } from '../../db/client'
 import { hubChannels, autoChannels } from '../../db/schema'
 import { eq } from 'drizzle-orm'
@@ -122,6 +123,11 @@ export async function handleHubJoin(client: Client, guild: Guild, member: GuildM
 
     const channelName = generateChannelName(member, existingNames)
 
+    // Overflow mode: remove the gate's own ViewChannel deny first so the new
+    // room isn't left hidden (its Hide state is record.isHidden=false). An
+    // admin-set deny is left alone.
+    await clearOverflowHideForConversion(guild, hubVc)
+
     // Create the auto channel (renames hub in place, creates text channel)
     const record = await createAutoChannel(client, guild, member, hubVc, hubChannelId, channelName)
     if (!record) {
@@ -147,18 +153,29 @@ export async function handleHubJoin(client: Client, guild: Guild, member: GuildM
       await scheduleCleanup(client, record.voiceChannelId)
     }
   } finally {
+    unmarkHubConverting(hubChannelId)
     handlingHubs.delete(hubChannelId)
+    // Re-evaluate on every exit, including a failed conversion that left the
+    // hub revealed. No-op unless the gate is on or still owns a hidden channel.
+    requestOverflowEval('hub_join')
   }
 }
 
 async function createReplacementHub(guild: Guild, originalHub: typeof hubChannels.$inferSelect): Promise<void> {
   try {
+    // No permissionOverwrites: the hub inherits the category, and the create
+    // can't fail on overwrite bits the bot doesn't hold.
     const newHub = await guild.channels.create({
       name: originalHub.label,
       type: ChannelType.GuildVoice,
       parent: originalHub.categoryId,
       position: originalHub.position,
     })
+
+    // Overflow mode: hide it before it is registered as a hub when the gate is
+    // closed (brief visible window; fails open, never throws). The gate records
+    // ownership before the deny, so a concurrent disable still reveals it.
+    await hideNewHubIfGateClosed(guild, newHub)
 
     // Update the cache *before* the DB write so a voiceStateUpdate for someone
     // joining the new hub immediately is recognized as a hub join.

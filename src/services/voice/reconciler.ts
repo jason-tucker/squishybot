@@ -16,6 +16,7 @@ import { clearChannelLog } from './channelLog'
 import { logger } from '../logger'
 import { getSetting, unregisterHubChannel, untrackAutoChannelText, untrackAutoChannelVoice, updateHubChannelId } from '../settings'
 import { stampActivityChannelKinds } from '../activity/channelKinds'
+import { applyOverflowGate } from './overflowGate'
 
 export interface ReconcilerResult {
   recovered: number
@@ -274,6 +275,9 @@ export async function runReconciler(client: Client): Promise<ReconcilerResult> {
       result.hubs++
     }
   }
+
+  // Overflow mode: recreated hubs carry no overwrites — re-apply the gate.
+  await applyOverflowGate(client, 'reconciler')
 
   logger.info(`Reconciler: recovered=${result.recovered} cleaned=${result.cleaned} hubs=${result.hubs} panels=${result.panels} adopted=${result.adopted}`)
   return result
