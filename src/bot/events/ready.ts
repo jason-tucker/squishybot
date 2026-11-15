@@ -128,13 +128,24 @@ export function registerReadyEvent(client: Client) {
       // on defaults (flip every game channel visible, re-DM the owner). They
       // are skipped below and run here once the cache is real.
       startSettingsBackgroundRetry(async () => {
+        // The boot loadGames below ran while the DB was failing, so the
+        // catalog may be empty; the backfill would then walk no games and
+        // still mark itself done. Reload first; skip the backfill on failure
+        // (it runs on the next boot instead).
+        let gamesLoaded = true
+        try {
+          await loadGames()
+        } catch (err) {
+          gamesLoaded = false
+          logger.error('Failed to load games after deferred settings load; skipping game-view backfill', err)
+        }
         try {
           await runReconciler(c)
         } catch (err) {
           await logger.errorAndDm('Reconciler failed after deferred settings load', err, c)
         }
         const g = c.guilds.cache.get(env.GUILD_ID)
-        if (g) await ensureDefaultViewOnBackfillOnce(g)
+        if (g && gamesLoaded) await ensureDefaultViewOnBackfillOnce(g)
         await maybePromptOwnerForStats(c)
       })
     }
@@ -146,8 +157,11 @@ export function registerReadyEvent(client: Client) {
     client.on('shardResume', () => { refreshPresence() })
     client.on('shardReady', () => { refreshPresence() })
 
+    let bootGamesLoaded = false
     await Promise.all([
-      loadGames().catch(err => logger.error('Failed to load games on startup', err)),
+      loadGames()
+        .then(() => { bootGamesLoaded = true })
+        .catch(err => logger.error('Failed to load games on startup', err)),
       loadSocialFeeds().catch(err => logger.error('Failed to load social feeds on startup', err)),
       logResolvedBotOwners(c).catch(err => logger.warn('Bot-owner resolution failed on startup', err)),
       loadSelfAssign().catch(err => logger.error('Failed to load self-assign board on startup', err)),
@@ -189,7 +203,9 @@ export function registerReadyEvent(client: Client) {
     // One-time backfill: game channels now default to @everyone-visible
     // (opt-out model). Flip every existing game channel visible once — guarded
     // by a bot_settings flag so it never re-runs. Non-fatal (self-catches).
-    if (guild && loaded.ok) {
+    // Skipped when the game catalog failed to load: on an empty catalog it
+    // would change nothing and still mark itself done.
+    if (guild && loaded.ok && bootGamesLoaded) {
       await ensureDefaultViewOnBackfillOnce(guild)
     }
 

@@ -58,14 +58,40 @@ export async function tryDeleteChannel(
  * own result or rejection is returned to its caller; a rejection never
  * blocks the tasks queued after it. A key's entry is dropped once its queue
  * drains.
+ *
+ * A task that never settles would block its key forever, so the queue moves
+ * on when the task settles or `capMs` after it started, whichever comes
+ * first. A capped task keeps running and its caller still gets the real
+ * result; `onCap` is called once (default: console.warn, since this module
+ * must not import the logger).
  */
-export function createKeyedQueue() {
+export const KEYED_QUEUE_TASK_CAP_MS = 60_000
+
+export interface KeyedQueueOptions {
+  capMs?: number
+  onCap?: (key: string, capMs: number) => void
+}
+
+function warnCapped(key: string, capMs: number): void {
+  console.warn(`keyed queue: task for key=${key} still running after ${capMs}ms; running the next queued task`)
+}
+
+export function createKeyedQueue(opts: KeyedQueueOptions = {}) {
+  const capMs = opts.capMs ?? KEYED_QUEUE_TASK_CAP_MS
+  const onCap = opts.onCap ?? warnCapped
   const tails = new Map<string, Promise<void>>()
   return {
     run<T>(key: string, task: () => Promise<T>): Promise<T> {
       const prev = tails.get(key) ?? Promise.resolve()
       const result = prev.then(task)
-      const tail = result.then(() => {}, () => {})
+      const tail = prev.then(() => new Promise<void>(resolve => {
+        const timer = setTimeout(() => {
+          resolve()
+          try { onCap(key, capMs) } catch { /* a reporting failure must not block the key */ }
+        }, capMs)
+        const settle = () => { clearTimeout(timer); resolve() }
+        result.then(settle, settle)
+      }))
       tails.set(key, tail)
       void tail.then(() => {
         if (tails.get(key) === tail) tails.delete(key)

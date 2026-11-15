@@ -105,7 +105,7 @@ export async function runReconciler(client: Client): Promise<ReconcilerResult> {
     // Schedule cleanup if empty. Static channels schedule text-only cleanup
     // (cleanupScheduler.runCleanup branches on sourceHubId==='static').
     if (vc.isVoiceBased() && vc.members.size === 0) {
-      void scheduleCleanup(client, record.voiceChannelId)
+      void scheduleCleanup(client, record.voiceChannelId).catch(err => logger.warn(`scheduleCleanup failed for vc=${record.voiceChannelId}`, err))
     }
 
     // Backfill member join times for anyone currently in the channel that we

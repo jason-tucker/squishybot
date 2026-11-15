@@ -30,7 +30,7 @@ export async function scheduleCleanup(client: Client, voiceChannelId: string): P
   if (delay === 0) {
     // Instant — run on next tick, still allows a reconnect within the same event loop cycle
     db.update(autoChannels).set({ scheduledCleanupAt: new Date() }).where(eq(autoChannels.voiceChannelId, voiceChannelId)).catch(() => {})
-    setImmediate(() => runCleanup(client, voiceChannelId))
+    setImmediate(() => { void runCleanupSafe(client, voiceChannelId) })
     return
   }
 
@@ -41,9 +41,9 @@ export async function scheduleCleanup(client: Client, voiceChannelId: string): P
     .where(eq(autoChannels.voiceChannelId, voiceChannelId))
     .catch(() => {})
 
-  const timer = setTimeout(async () => {
+  const timer = setTimeout(() => {
     pendingTimers.delete(voiceChannelId)
-    await runCleanup(client, voiceChannelId)
+    void runCleanupSafe(client, voiceChannelId)
   }, delay)
 
   pendingTimers.set(voiceChannelId, timer)
@@ -60,6 +60,18 @@ export function cancelCleanup(voiceChannelId: string): void {
     .set({ scheduledCleanupAt: null })
     .where(eq(autoChannels.voiceChannelId, voiceChannelId))
     .catch(() => {})
+}
+
+/**
+ * runCleanup for timer and boot callers: a DB or Discord error is logged
+ * instead of escaping as an unhandled rejection (owner DM). Never rejects.
+ */
+async function runCleanupSafe(client: Client, voiceChannelId: string): Promise<void> {
+  try {
+    await runCleanup(client, voiceChannelId)
+  } catch (err) {
+    logger.error(`Cleanup failed for vc=${voiceChannelId}`, err)
+  }
 }
 
 async function runCleanup(client: Client, voiceChannelId: string): Promise<void> {
@@ -102,12 +114,12 @@ export async function restoreScheduledCleanups(client: Client): Promise<void> {
     const remaining = record.scheduledCleanupAt.getTime() - now.getTime()
     if (remaining <= 0) {
       // Overdue — run immediately
-      await runCleanup(client, record.voiceChannelId)
+      await runCleanupSafe(client, record.voiceChannelId)
     } else {
       // Reschedule with remaining time
-      const timer = setTimeout(async () => {
+      const timer = setTimeout(() => {
         pendingTimers.delete(record.voiceChannelId)
-        await runCleanup(client, record.voiceChannelId)
+        void runCleanupSafe(client, record.voiceChannelId)
       }, remaining)
       pendingTimers.set(record.voiceChannelId, timer)
       logger.info(`Cleanup rescheduled for vc=${record.voiceChannelId} in ${remaining}ms`)

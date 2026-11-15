@@ -272,7 +272,7 @@ async function handleDeleteFailure(client: Client, record: AutoChannelRecord): P
   if (planDeleteRetry(attempts) === 'retry') {
     deleteFailures.set(record.voiceChannelId, attempts)
     logger.warn(`Channel delete failed for vc=${record.voiceChannelId} (attempt ${attempts}/${MAX_DELETE_ATTEMPTS}) — keeping DB row, re-arming cleanup`)
-    void scheduleCleanup(client, record.voiceChannelId)
+    void scheduleCleanup(client, record.voiceChannelId).catch(err => logger.warn(`scheduleCleanup failed for vc=${record.voiceChannelId}`, err))
     return
   }
   deleteFailures.delete(record.voiceChannelId)

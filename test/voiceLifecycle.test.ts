@@ -101,6 +101,40 @@ test('createKeyedQueue: a rejected task reaches its caller and does not block th
   assert.equal(await next, 'ran')
 })
 
+test('createKeyedQueue: a never-settling task frees the queue after the cap', async () => {
+  const capped: string[] = []
+  const q = createKeyedQueue({ capMs: 20, onCap: key => { capped.push(key) } })
+  const stuck = q.run('member1', () => new Promise<never>(() => {}))
+  let stuckSettled = false
+  stuck.then(() => { stuckSettled = true }, () => { stuckSettled = true })
+  const next = await Promise.race([
+    q.run('member1', async () => 'ran'),
+    tick(500).then(() => 'blocked'),
+  ])
+  assert.equal(next, 'ran')
+  assert.deepEqual(capped, ['member1'])
+  assert.equal(stuckSettled, false) // the stuck task's caller still waits for its real result
+})
+
+test('createKeyedQueue: a slow task past the cap still returns its real result', async () => {
+  const q = createKeyedQueue({ capMs: 10, onCap: () => {} })
+  let release!: (v: string) => void
+  const slow = q.run('member1', () => new Promise<string>(resolve => { release = resolve }))
+  const next = await Promise.race([q.run('member1', async () => 'next'), tick(500).then(() => 'blocked')])
+  release('slow result')
+  assert.equal(next, 'next')
+  assert.equal(await slow, 'slow result')
+})
+
+test('createKeyedQueue: the cap clock starts when a task starts, not when it is queued', async () => {
+  const capped: string[] = []
+  const q = createKeyedQueue({ capMs: 40, onCap: key => { capped.push(key) } })
+  const a = q.run('member1', async () => { await tick(30) })
+  const b = q.run('member1', async () => { await tick(30) })
+  await Promise.all([a, b])
+  assert.deepEqual(capped, [])
+})
+
 test('createKeyedQueue: drops the key once its queue drains', async () => {
   const q = createKeyedQueue()
   await q.run('member1', async () => {})

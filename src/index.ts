@@ -22,14 +22,60 @@ registerGuildMemberAdd(client)
 registerGuildMemberRemove(client)
 registerMessageReaction(client)
 
-process.on('unhandledRejection', async (reason) => {
-  setDnd('Unhandled error — check logs')
-  await logger.errorAndDm('Unhandled promise rejection', reason)
+// Non-fatal: a stray rejection is reported (owner DM deduped by the logger's
+// DmThrottle) and the bot keeps running.
+process.on('unhandledRejection', (reason) => {
+  try { setDnd('Unhandled error — check logs') } catch { /* presence is best effort */ }
+  void logger.errorAndDm('Unhandled promise rejection', reason).catch(() => {})
 })
 
-process.on('uncaughtException', async (err) => {
-  setDnd('Uncaught exception — check logs')
-  await logger.errorAndDm('Uncaught exception', err)
+/**
+ * After an uncaught exception the process state is unknown, so report and
+ * exit(1); Docker's `restart: unless-stopped` brings the bot back. Every
+ * restart re-identifies to Discord (which resets the token after about 1000
+ * identifies per day), so the exit is held until the process has been up for
+ * CRASH_MIN_UPTIME_MS: a crash loop restarts at most once per 2 minutes.
+ */
+const CRASH_DM_TIMEOUT_MS = 5_000
+const CRASH_FLUSH_TIMEOUT_MS = 2_000
+const CRASH_DESTROY_TIMEOUT_MS = 2_000
+const CRASH_MIN_UPTIME_MS = 120_000
+let crashing = false
+
+function settleWithin(work: Promise<unknown>, ms: number): Promise<void> {
+  return new Promise<void>(resolve => {
+    const timer = setTimeout(resolve, ms)
+    work.then(
+      () => { clearTimeout(timer); resolve() },
+      () => { clearTimeout(timer); resolve() },
+    )
+  })
+}
+
+async function exitAfterCrash(err: unknown): Promise<void> {
+  await settleWithin(
+    logger.errorAndDm('Uncaught exception — restarting', err, undefined, { critical: true }),
+    CRASH_DM_TIMEOUT_MS,
+  )
+  await settleWithin(shutdownActivityTracker(), CRASH_FLUSH_TIMEOUT_MS)
+  // Stop handling Discord events in the unknown state while the uptime guard holds.
+  await settleWithin(Promise.resolve().then(() => client.destroy()), CRASH_DESTROY_TIMEOUT_MS)
+  const waitMs = Math.max(0, CRASH_MIN_UPTIME_MS - process.uptime() * 1000)
+  if (waitMs > 0) {
+    logger.warn(`Delaying crash exit by ${Math.round(waitMs / 1000)}s (minimum uptime guard against a restart loop)`)
+    await new Promise(resolve => setTimeout(resolve, waitMs))
+  }
+  process.exit(1)
+}
+
+process.on('uncaughtException', (err) => {
+  if (crashing) {
+    logger.error('Uncaught exception while already shutting down after a crash', err)
+    return
+  }
+  crashing = true
+  try { setDnd('Uncaught exception — restarting') } catch { /* presence is best effort */ }
+  exitAfterCrash(err).catch(() => process.exit(1))
 })
 
 /**

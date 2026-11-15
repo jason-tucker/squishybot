@@ -283,7 +283,7 @@ async function handleLeave(client: Client, guild: Guild, member: GuildMember, le
         // Empty room — any pending grace is moot; cleanup will delete both
         // channels. cancelGraceTimer is idempotent.
         cancelGraceTimer(leftChannelId)
-        void scheduleCleanup(client, leftChannelId)
+        void scheduleCleanup(client, leftChannelId).catch(err => logger.warn(`scheduleCleanup failed for vc=${leftChannelId}`, err))
       } else {
         await postOrUpdateControlPanel(client, updatedRecord).catch(() => {})
         // Member who left may have been the one whose game was driving the

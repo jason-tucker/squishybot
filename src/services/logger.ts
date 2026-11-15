@@ -1,10 +1,12 @@
 import type { Client, TextChannel, User } from 'discord.js'
 import { env } from '../config/env'
+import { DmThrottle, dmThrottleKey, formatSuppressed } from './dmThrottle'
 
 type LogLevel = 'info' | 'warn' | 'error'
 
 let cachedClient: Client | null = null
 let ownerUser: User | null = null
+const dmThrottle = new DmThrottle()
 
 export function attachClientToLogger(client: Client): void {
   cachedClient = client
@@ -91,15 +93,22 @@ export const logger = {
     await dmOwner(c, message, opts?.silent ?? false)
   },
 
-  async errorAndDm(message: string, err: unknown, client?: Client): Promise<void> {
+  /**
+   * Log an error (always) and DM it to the owner, throttled by DmThrottle:
+   * one DM per message + first error line per 10 min (repeats counted and
+   * reported as "(+N suppressed)" on the next DM), at most 10 DMs per hour.
+   * `opts.critical` skips the hourly cap (the per-key window still applies).
+   */
+  async errorAndDm(message: string, err: unknown, client?: Client, opts?: { critical?: boolean }): Promise<void> {
     const errStr = err instanceof Error ? `${err.message}\n${err.stack ?? ''}` : String(err)
     log('error', message, err)
     const c = client ?? cachedClient
-    if (c) {
-      // dmOwner already runs `redact`, but we explicitly slice the err
-      // string here so length budgeting is predictable.
-      await dmOwner(c, `❌ **${message}**\n\`\`\`\n${errStr.slice(0, 1500)}\n\`\`\``)
-    }
+    if (!c) return
+    const decision = dmThrottle.check(dmThrottleKey(message, err), { bypassGlobal: opts?.critical === true })
+    if (!decision.send) return
+    // dmOwner already runs `redact`, but we explicitly slice the err
+    // string here so length budgeting is predictable.
+    await dmOwner(c, `❌ **${message}**\n\`\`\`\n${errStr.slice(0, 1500)}\n\`\`\`${formatSuppressed(decision.suppressed)}`)
   },
 }
 
