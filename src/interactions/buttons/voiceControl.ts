@@ -219,11 +219,15 @@ export async function handleVoiceControlButton(interaction: ButtonInteraction): 
     await interaction.deferReply({ ephemeral: true })
     if (record.sourceHubId === 'static') {
       // Static VC: remove only the companion text channel; keep the voice channel.
-      await deleteStaticText(interaction.client, record)
-      await interaction.editReply({ content: '✅ Text channel closed. The voice channel was kept (static channel).' })
+      const ok = await deleteStaticText(interaction.client, record)
+      await interaction.editReply({ content: ok
+        ? '✅ Text channel closed. The voice channel was kept (static channel).'
+        : '⚠️ Could not close the text channel right now. The bot will retry once the voice channel is empty.' })
     } else {
-      await deleteAutoChannel(interaction.client, record)
-      await interaction.editReply({ content: '✅ Channel deleted.' })
+      const ok = await deleteAutoChannel(interaction.client, record)
+      await interaction.editReply({ content: ok
+        ? '✅ Channel deleted.'
+        : '⚠️ Could not delete the channel right now. The bot will retry once it is empty.' })
     }
     return
   }

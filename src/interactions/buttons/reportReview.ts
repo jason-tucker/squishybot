@@ -2,7 +2,12 @@ import type { ButtonInteraction } from 'discord.js'
 import { env } from '../../config/env'
 import { isBotOwner } from '../../services/botOwner'
 import { logger } from '../../services/logger'
-import { getReportSession, deleteReportSession } from '../../services/reportCache'
+import {
+  releaseReportSession,
+  reportSessionState,
+  restoreReportSession,
+  takeReportSession,
+} from '../../services/reportCache'
 import { db } from '../../db/client'
 import { reportLog } from '../../db/schema'
 import { and, desc, eq } from 'drizzle-orm'
@@ -38,6 +43,8 @@ async function markReportLogStatus(
   return latest.id
 }
 
+const GITHUB_TIMEOUT_MS = 15_000
+
 export async function handleReportReview(interaction: ButtonInteraction): Promise<void> {
   // Defer FIRST — before the bot-owner check. isBotOwner() can do a live
   // app.fetch() when its 60s cache has expired, which can blow the 3s ack
@@ -56,8 +63,22 @@ export async function handleReportReview(interaction: ButtonInteraction): Promis
   const action = interaction.customId.slice(0, colonIdx)
   const sessionKey = interaction.customId.slice(colonIdx + 1)
 
-  const session = getReportSession(sessionKey)
+  // Take (get + delete) synchronously, before any await, so a double click
+  // or a second reviewer cannot act on the same session twice. Every
+  // failure path below that keeps the session usable restores it.
+  const session = takeReportSession(sessionKey)
   if (!session) {
+    const state = reportSessionState(sessionKey)
+    if (state === 'in-flight' || state === 'handled') {
+      // Another click owns (or owned) this card; leave its content alone.
+      await interaction.followUp({
+        content: state === 'in-flight'
+          ? 'ℹ️ This report is already being handled.'
+          : 'ℹ️ This report was already handled.',
+        ephemeral: true,
+      })
+      return
+    }
     await interaction.editReply({
       content: '⚠️ Report session expired or already handled.',
       components: [],
@@ -69,7 +90,7 @@ export async function handleReportReview(interaction: ButtonInteraction): Promis
   const isApprove = action.startsWith('report_approve')
 
   if (!isApprove) {
-    deleteReportSession(sessionKey)
+    releaseReportSession(sessionKey)
     const droppedId = await markReportLogStatus(session.reporterId, session.title, 'dropped', null, interaction.user.id)
     if (droppedId !== null) {
       void publish<ReportRejectedEvent>(reportCh('rejected'), {
@@ -91,35 +112,71 @@ export async function handleReportReview(interaction: ButtonInteraction): Promis
 
   // Approve path
   if (!env.GITHUB_TOKEN || !env.GITHUB_REPO) {
+    restoreReportSession(sessionKey, session)
+    // Keep the buttons: the session is still usable (reject, or retry once set).
     await interaction.editReply({
-      content: '❌ Cannot file: `GITHUB_TOKEN` / `GITHUB_REPO` not set on the bot.',
-      components: [],
+      content: '❌ Cannot file: `GITHUB_TOKEN` / `GITHUB_REPO` not set on the bot. Session preserved — fix the config and retry, or reject.',
     })
     return
   }
 
-  const res = await fetch(`https://api.github.com/repos/${env.GITHUB_REPO}/issues`, {
-    method: 'POST',
-    headers: {
-      Authorization: `Bearer ${env.GITHUB_TOKEN}`,
-      Accept: 'application/vnd.github+json',
-      'X-GitHub-Api-Version': '2022-11-28',
-      'User-Agent': 'squishybot-report',
-    },
-    body: JSON.stringify({ title: session.title, body: session.body, labels: session.labels }),
-  })
+  let data: { html_url: string; number: number }
+  let created = false
+  try {
+    const res = await fetch(`https://api.github.com/repos/${env.GITHUB_REPO}/issues`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${env.GITHUB_TOKEN}`,
+        Accept: 'application/vnd.github+json',
+        'X-GitHub-Api-Version': '2022-11-28',
+        'User-Agent': 'squishybot-report',
+      },
+      body: JSON.stringify({ title: session.title, body: session.body, labels: session.labels }),
+      signal: AbortSignal.timeout(GITHUB_TIMEOUT_MS),
+    })
 
-  if (!res.ok) {
-    const errText = await res.text().catch(() => '<no body>')
-    logger.error(`/report approve: GitHub API ${res.status}: ${errText}`)
+    if (!res.ok) {
+      const errText = await res.text().catch(() => '<no body>')
+      logger.error(`/report approve: GitHub API ${res.status}: ${errText}`)
+      restoreReportSession(sessionKey, session)
+      await interaction.editReply({
+        content: `❌ Failed to file issue (HTTP ${res.status}). Session preserved — try again or reject.`,
+      })
+      return
+    }
+
+    created = true
+    data = (await res.json()) as { html_url: string; number: number }
+  } catch (err) {
+    const msg = (err as Error)?.message ?? String(err)
+    if (created) {
+      // GitHub accepted the issue but the response body was unreadable. Do
+      // not restore: a retry would file a duplicate.
+      logger.error(`/report approve: issue created but response unreadable: ${msg}`)
+      releaseReportSession(sessionKey)
+      const unreadId = await markReportLogStatus(session.reporterId, session.title, 'filed', null, interaction.user.id)
+      if (unreadId !== null) {
+        void publish<ReportApprovedEvent>(reportCh('approved'), {
+          id: unreadId, status: 'filed', ts: new Date().toISOString(),
+        })
+      }
+      await interaction.editReply({
+        content: '⚠️ GitHub accepted the issue but its reply could not be read. Check the repo before filing again.',
+        components: [],
+      })
+      return
+    }
+    // Network error or timeout. GitHub may still have created the issue if
+    // the response was lost; the reviewer sees the error and can check.
+    logger.error(`/report approve: GitHub request failed: ${msg}`)
+    restoreReportSession(sessionKey, session)
     await interaction.editReply({
-      content: `❌ Failed to file issue (HTTP ${res.status}). Session preserved — try again or reject.`,
+      content: '❌ GitHub unreachable or timed out. The issue may still have been filed — check the repo before retrying. Session preserved — retry or reject.',
     })
     return
   }
 
-  const data = (await res.json()) as { html_url: string; number: number }
-  deleteReportSession(sessionKey)
+  releaseReportSession(sessionKey)
   const filedId = await markReportLogStatus(session.reporterId, session.title, 'filed', data.html_url, interaction.user.id)
   if (filedId !== null) {
     void publish<ReportApprovedEvent>(reportCh('approved'), {

@@ -22,7 +22,7 @@ jobs:
     steps:
       - name: Send repository_dispatch to botpanel
         # Values pass through env, never inline in the script: an interpolated
-        # commit message containing a quote broke out of the single-quoted -F
+        # commit message containing a quote broke out of the single-quoted typed-field
         # arg ("accepts 1 arg(s), received 4" on b238359) and doubled as a
         # script-injection vector — same flaw botpanel#270 fixed on its side.
         env:
@@ -32,7 +32,7 @@ jobs:
         run: |
           gh api -X POST repos/jason-tucker/botpanel/dispatches \
             -f event_type='bot-schema-changed' \
-            -F 'client_payload[source_repo]=squishybot' \
-            -F "client_payload[source_ref]=${SOURCE_REF}" \
-            -F 'client_payload[schema_dir]=squishy' \
-            -F "client_payload[head_commit_message]=${HEAD_COMMIT_MESSAGE}"
+            -f 'client_payload[source_repo]=squishybot' \
+            -f "client_payload[source_ref]=${SOURCE_REF}" \
+            -f 'client_payload[schema_dir]=squishy' \
+            -f "client_payload[head_commit_message]=${HEAD_COMMIT_MESSAGE}"

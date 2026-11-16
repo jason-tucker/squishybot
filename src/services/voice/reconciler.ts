@@ -17,6 +17,7 @@ import { logger } from '../logger'
 import { getSetting, unregisterHubChannel, untrackAutoChannelText, untrackAutoChannelVoice, updateHubChannelId } from '../settings'
 import { stampActivityChannelKinds } from '../activity/channelKinds'
 import { applyOverflowGate } from './overflowGate'
+import { deleteChannelSafe } from './autoChannel'
 
 export interface ReconcilerResult {
   recovered: number
@@ -63,8 +64,12 @@ export async function runReconciler(client: Client): Promise<ReconcilerResult> {
     if (!vc) {
       if (isStatic) {
         // Static VC is gone externally — just clean up text channel and DB row;
-        // we never recreate the VC (we don't own it).
-        await guild.channels.delete(record.textChannelId).catch(() => {})
+        // we never recreate the VC (we don't own it). If the text delete fails
+        // (other than already gone), keep the row so the next boot retries.
+        if (await deleteChannelSafe(guild, record.textChannelId) === 'failed') {
+          logger.warn(`Reconciler: could not delete text channel for static orphan vc=${record.voiceChannelId} — keeping DB row for retry`)
+          return
+        }
         await db.delete(autoChannels).where(eq(autoChannels.voiceChannelId, record.voiceChannelId)).catch(() => {})
         await clearMembers(record.voiceChannelId)
         await clearChannelLog(record.voiceChannelId)
@@ -77,8 +82,13 @@ export async function runReconciler(client: Client): Promise<ReconcilerResult> {
         logger.info(`Reconciler: cleaned static orphan (VC gone) vc=${record.voiceChannelId}`)
         return
       }
-      // Regular auto channel: voice channel gone — clean up text channel and DB row
-      await guild.channels.delete(record.textChannelId).catch(() => {})
+      // Regular auto channel: voice channel gone — clean up text channel and DB row.
+      // If the text delete fails (other than already gone), keep the row so the
+      // next boot retries.
+      if (await deleteChannelSafe(guild, record.textChannelId) === 'failed') {
+        logger.warn(`Reconciler: could not delete text channel for orphan vc=${record.voiceChannelId} — keeping DB row for retry`)
+        return
+      }
       await db.delete(autoChannels).where(eq(autoChannels.voiceChannelId, record.voiceChannelId)).catch(() => {})
       await clearMembers(record.voiceChannelId)
       await clearChannelLog(record.voiceChannelId)
@@ -95,7 +105,7 @@ export async function runReconciler(client: Client): Promise<ReconcilerResult> {
     // Schedule cleanup if empty. Static channels schedule text-only cleanup
     // (cleanupScheduler.runCleanup branches on sourceHubId==='static').
     if (vc.isVoiceBased() && vc.members.size === 0) {
-      void scheduleCleanup(client, record.voiceChannelId)
+      void scheduleCleanup(client, record.voiceChannelId).catch(err => logger.warn(`scheduleCleanup failed for vc=${record.voiceChannelId}`, err))
     }
 
     // Backfill member join times for anyone currently in the channel that we
@@ -266,6 +276,8 @@ export async function runReconciler(client: Client): Promise<ReconcilerResult> {
         // Cache before DB so a join on the new hub is recognized immediately.
         updateHubChannelId(hub.channelId, newHub.id)
         await db.update(hubChannels).set({ channelId: newHub.id }).where(eq(hubChannels.id, hub.id))
+        // Re-apply after the commit in case a reload read the old row first.
+        updateHubChannelId(hub.channelId, newHub.id)
         result.hubs++
         logger.info(`Reconciler: recreated hub ${hub.label} (${newHub.id})`)
       } catch (err) {

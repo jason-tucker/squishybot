@@ -15,7 +15,12 @@ import { getBoolSetting } from '../../services/settings'
 import { publishHeartbeat, publishReady } from '../../services/eventBus'
 import { startRpcServer } from '../../services/rpcServer'
 import { startCacheInvalidator } from '../../services/cacheInvalidator'
-import { startOverflowGate } from '../../services/voice/overflowGate'
+import { requestOverflowGateApply, startOverflowGate } from '../../services/voice/overflowGate'
+import {
+  retryWithDelays,
+  SETTINGS_BACKGROUND_RETRY_MS,
+  SETTINGS_LOAD_RETRY_DELAYS_MS,
+} from '../../services/cacheMerge'
 // Side-effect import: registers the `echo` verb on the RPC registry.
 // Follow-up PRs add more handlers; each one is a side-effect import too.
 import '../../services/rpc/handlers/echo'
@@ -72,6 +77,31 @@ function sep() {
   return new SeparatorBuilder().setSpacing(SeparatorSpacingSize.Small).setDivider(true)
 }
 
+/**
+ * Keep retrying loadSettings every 60 s (unref'd, one attempt in flight at a
+ * time) until it succeeds, then run `onLoaded` (the boot steps that were
+ * skipped because they would have acted on an empty cache) and re-apply the
+ * overflow gate, whose earlier runs saw default settings. Logs each failure;
+ * the DM was already sent.
+ */
+function startSettingsBackgroundRetry(onLoaded: () => Promise<void>): void {
+  let inFlight = false
+  const timer = setInterval(() => {
+    if (inFlight) return
+    inFlight = true
+    loadSettings()
+      .then(async () => {
+        clearInterval(timer)
+        logger.info('Settings loaded by background retry')
+        await onLoaded().catch(err => logger.error('Deferred boot steps failed after settings load', err))
+        requestOverflowGateApply('settings')
+      })
+      .catch(err => logger.warn('Background settings load failed; retrying', err))
+      .finally(() => { inFlight = false })
+  }, SETTINGS_BACKGROUND_RETRY_MS)
+  timer.unref()
+}
+
 export function registerReadyEvent(client: Client) {
   client.once('clientReady', async (c) => {
     attachClientToLogger(c)
@@ -80,7 +110,45 @@ export function registerReadyEvent(client: Client) {
     // Load runtime settings FIRST so initPresence can read the persisted
     // `presence.last_used_at` from the cache. The other caches don't gate
     // anything on the boot path, so they run in parallel after.
-    await loadSettings().catch(err => logger.error('Failed to load settings on startup', err))
+    // Retried on a short schedule: with empty caches the voice feature is
+    // inert (no hub or room is recognized) and DB sudo users are lost. Never
+    // exits; after the schedule a 60 s background retry keeps trying.
+    const loaded = await retryWithDelays(loadSettings, SETTINGS_LOAD_RETRY_DELAYS_MS, {
+      onRetry: (attempt, err, delayMs) =>
+        logger.warn(`Failed to load settings on startup (attempt ${attempt}); retrying in ${delayMs / 1000}s`, err),
+    })
+    if (!loaded.ok) {
+      await logger.errorAndDm(
+        `Failed to load settings on startup after ${loaded.attempts} attempts; retrying every ${SETTINGS_BACKGROUND_RETRY_MS / 1000}s`,
+        loaded.error,
+        c,
+      )
+      // Reconciler, game-view backfill and the stats owner DM read settings
+      // (static channels, one-shot flags); on an empty cache they would act
+      // on defaults (flip every game channel visible, re-DM the owner). They
+      // are skipped below and run here once the cache is real.
+      startSettingsBackgroundRetry(async () => {
+        // The boot loadGames below ran while the DB was failing, so the
+        // catalog may be empty; the backfill would then walk no games and
+        // still mark itself done. Reload first; skip the backfill on failure
+        // (it runs on the next boot instead).
+        let gamesLoaded = true
+        try {
+          await loadGames()
+        } catch (err) {
+          gamesLoaded = false
+          logger.error('Failed to load games after deferred settings load; skipping game-view backfill', err)
+        }
+        try {
+          await runReconciler(c)
+        } catch (err) {
+          await logger.errorAndDm('Reconciler failed after deferred settings load', err, c)
+        }
+        const g = c.guilds.cache.get(env.GUILD_ID)
+        if (g && gamesLoaded) await ensureDefaultViewOnBackfillOnce(g)
+        await maybePromptOwnerForStats(c)
+      })
+    }
     initPresence(c)
 
     // Discord drops the bot's activity on every gateway resume — without
@@ -89,8 +157,11 @@ export function registerReadyEvent(client: Client) {
     client.on('shardResume', () => { refreshPresence() })
     client.on('shardReady', () => { refreshPresence() })
 
+    let bootGamesLoaded = false
     await Promise.all([
-      loadGames().catch(err => logger.error('Failed to load games on startup', err)),
+      loadGames()
+        .then(() => { bootGamesLoaded = true })
+        .catch(err => logger.error('Failed to load games on startup', err)),
       loadSocialFeeds().catch(err => logger.error('Failed to load social feeds on startup', err)),
       logResolvedBotOwners(c).catch(err => logger.warn('Bot-owner resolution failed on startup', err)),
       loadSelfAssign().catch(err => logger.error('Failed to load self-assign board on startup', err)),
@@ -117,10 +188,12 @@ export function registerReadyEvent(client: Client) {
     const otherGuilds = c.guilds.cache.filter(g => g.id !== env.GUILD_ID).map(g => `${g.name} (${g.id})`)
 
     let result
-    try {
-      result = await runReconciler(c)
-    } catch (err) {
-      await logger.errorAndDm('Reconciler failed on startup', err, c)
+    if (loaded.ok) {
+      try {
+        result = await runReconciler(c)
+      } catch (err) {
+        await logger.errorAndDm('Reconciler failed on startup', err, c)
+      }
     }
 
     // AutoVoice overflow mode (opt-in): remember the client, apply the gate
@@ -130,7 +203,9 @@ export function registerReadyEvent(client: Client) {
     // One-time backfill: game channels now default to @everyone-visible
     // (opt-out model). Flip every existing game channel visible once — guarded
     // by a bot_settings flag so it never re-runs. Non-fatal (self-catches).
-    if (guild) {
+    // Skipped when the game catalog failed to load: on an empty catalog it
+    // would change nothing and still mark itself done.
+    if (guild && loaded.ok && bootGamesLoaded) {
       await ensureDefaultViewOnBackfillOnce(guild)
     }
 
@@ -155,7 +230,7 @@ export function registerReadyEvent(client: Client) {
     // internally when the flag is off.
     startActivityTracker(c)
     startActivityBackfill(c)
-    void maybePromptOwnerForStats(c)
+    if (loaded.ok) void maybePromptOwnerForStats(c)
 
     // Build a richer startup DM. Only the BOT_OWNER_ID env target gets this
     // (logger.dmOwner reads env directly — not the dynamic isBotOwner set).

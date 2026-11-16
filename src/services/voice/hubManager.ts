@@ -123,6 +123,14 @@ export async function handleHubJoin(client: Client, guild: Guild, member: GuildM
 
     const channelName = generateChannelName(member, existingNames)
 
+    // This join may run late from the member queue. Read live voice state on
+    // purpose: if the member is no longer in the hub, don't convert it into a
+    // room for someone who isn't there.
+    if (member.voice.channelId !== hubChannelId) {
+      logger.info(`handleHubJoin: ${member.id} is no longer in hub ${hubChannelId} (now ${member.voice.channelId ?? 'none'}) — skipping conversion`)
+      return
+    }
+
     // Overflow mode: remove the gate's own ViewChannel deny first so the new
     // room isn't left hidden (its Hide state is record.isHidden=false). An
     // admin-set deny is left alone.
@@ -183,6 +191,9 @@ async function createReplacementHub(guild: Guild, originalHub: typeof hubChannel
     await db.update(hubChannels)
       .set({ channelId: newHub.id })
       .where(eq(hubChannels.id, originalHub.id))
+    // Re-apply after the commit: a settings reload that read the old row
+    // before the UPDATE landed may have swapped the old id back in.
+    updateHubChannelId(originalHub.channelId, newHub.id)
 
     logger.info(`Replacement hub created: ${newHub.name} (${newHub.id})`)
   } catch (err) {

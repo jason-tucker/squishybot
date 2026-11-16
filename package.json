@@ -12,24 +12,25 @@
     "db:migrate": "tsx src/db/migrate.ts",
     "db:check": "drizzle-kit check",
     "db:studio": "drizzle-kit studio",
-    "typecheck": "node --max-old-space-size=384 node_modules/typescript/bin/tsc --noEmit"
+    "typecheck": "node --max-old-space-size=384 node_modules/typescript/bin/tsc --noEmit",
+    "test": "tsx --test \"test/**/*.test.ts\""
   },
   "keywords": [],
   "author": "",
   "license": "ISC",
   "packageManager": "pnpm@10.33.2",
   "dependencies": {
-    "discord.js": "^14.26.3",
+    "discord.js": "^14.28.1",
     "dotenv": "^17.4.2",
     "drizzle-orm": "^0.45.2",
     "ioredis": "^5.11.1",
     "postgres": "^3.4.9",
-    "zod": "^4.4.1"
+    "zod": "^4.6.7"
   },
   "devDependencies": {
     "@types/node": "^25.9.2",
     "drizzle-kit": "^0.31.10",
-    "tsx": "^4.22.4",
+    "tsx": "^4.23.15",
     "typescript": "^6.0.3"
   },
   "pnpm": {

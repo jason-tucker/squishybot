@@ -17,6 +17,14 @@ import {
   type SudoGrantedEvent,
   type SudoRevokedEvent,
 } from './eventBus'
+import {
+  createReloadTracker,
+  mergeMapSnapshot,
+  mergeSetSnapshot,
+  touchTrackers,
+  type CacheKind,
+  type ReloadTracker,
+} from './cacheMerge'
 
 // ---------------------------------------------------------------------------
 // In-memory caches
@@ -55,6 +63,34 @@ const autoChannelTextIdsCache = new Set<string>()
 // can both identify the voice channel and link the user to the proper chat.
 const autoChannelVoiceMapCache = new Map<string, string>()
 
+// ---------------------------------------------------------------------------
+// Reload tracking. A reload reads the DB, then swaps the result in. Any cache
+// mutation that lands while its queries are in flight would be reverted by a
+// plain clear+rebuild (the snapshot may predate it). So each reload registers
+// a tracker before querying, every mutator calls touch() after changing the
+// live cache, and the swap keeps the live state for touched keys.
+// ---------------------------------------------------------------------------
+
+const activeReloads = new Set<ReloadTracker>()
+
+function touch(kind: CacheKind, key: string): void {
+  touchTrackers(activeReloads, kind, key)
+}
+
+function toHubInfo(h: typeof hubChannels.$inferSelect): HubInfo {
+  return {
+    id: h.id,
+    channelId: h.channelId,
+    guildId: h.guildId,
+    categoryId: h.categoryId,
+    position: h.position,
+    label: h.label,
+    defaultTemplateKey: h.defaultTemplateKey,
+    defaultManualName: h.defaultManualName,
+    defaultUserLimit: h.defaultUserLimit,
+  }
+}
+
 export async function loadSettings(): Promise<void> {
   // Read everything BEFORE touching the live caches. The swap below is fully
   // synchronous, so concurrent event handlers (voiceStateUpdate, messageCreate,
@@ -65,45 +101,46 @@ export async function loadSettings(): Promise<void> {
   // in-memory config until the next successful reload (the old per-query
   // `.catch(() => [])` silently blanked whichever cache had failed). Callers
   // are expected to catch and log the rejection.
-  const [rows, sudo, threads, hubs, autos] = await Promise.all([
-    db.select().from(botSettings),
-    db.select().from(sudoUsers),
-    db.select().from(autoThreadChannels),
-    db.select().from(hubChannels),
-    db.select({ voiceChannelId: autoChannels.voiceChannelId, textChannelId: autoChannels.textChannelId }).from(autoChannels),
-  ])
-  settingsCache.clear()
-  sudoUsersCache.clear()
-  autoThreadCache.clear()
-  hubsCache.clear()
-  autoChannelTextIdsCache.clear()
-  autoChannelVoiceMapCache.clear()
-  for (const r of rows) settingsCache.set(r.key, r.value)
-  for (const s of sudo) sudoUsersCache.add(s.userId)
-  for (const t of threads) {
-    autoThreadCache.set(t.channelId, {
-      channelId: t.channelId,
-      guildId: t.guildId,
-      nameTemplate: t.nameTemplate,
-      archiveDuration: t.archiveDuration,
-    })
-  }
-  for (const h of hubs) {
-    hubsCache.set(h.channelId, {
-      id: h.id,
-      channelId: h.channelId,
-      guildId: h.guildId,
-      categoryId: h.categoryId,
-      position: h.position,
-      label: h.label,
-      defaultTemplateKey: h.defaultTemplateKey,
-      defaultManualName: h.defaultManualName,
-      defaultUserLimit: h.defaultUserLimit,
-    })
-  }
-  for (const a of autos) {
-    autoChannelTextIdsCache.add(a.textChannelId)
-    autoChannelVoiceMapCache.set(a.voiceChannelId, a.textChannelId)
+  const tracker = createReloadTracker()
+  activeReloads.add(tracker)
+  try {
+    const [rows, sudo, threads, hubs, autos] = await Promise.all([
+      db.select().from(botSettings),
+      db.select().from(sudoUsers),
+      db.select().from(autoThreadChannels),
+      db.select().from(hubChannels),
+      db.select({ voiceChannelId: autoChannels.voiceChannelId, textChannelId: autoChannels.textChannelId }).from(autoChannels),
+    ])
+    const snapSettings = new Map<string, string>()
+    for (const r of rows) snapSettings.set(r.key, r.value)
+    const snapSudo = new Set<string>()
+    for (const u of sudo) snapSudo.add(u.userId)
+    const snapThreads = new Map<string, AutoThreadConfig>()
+    for (const t of threads) {
+      snapThreads.set(t.channelId, {
+        channelId: t.channelId,
+        guildId: t.guildId,
+        nameTemplate: t.nameTemplate,
+        archiveDuration: t.archiveDuration,
+      })
+    }
+    const snapHubs = new Map<string, HubInfo>()
+    for (const h of hubs) snapHubs.set(h.channelId, toHubInfo(h))
+    const snapText = new Set<string>()
+    const snapVoice = new Map<string, string>()
+    for (const a of autos) {
+      snapText.add(a.textChannelId)
+      snapVoice.set(a.voiceChannelId, a.textChannelId)
+    }
+    // Synchronous swap: the snapshot, except keys mutated during the queries.
+    mergeMapSnapshot(settingsCache, snapSettings, tracker.settings)
+    mergeSetSnapshot(sudoUsersCache, snapSudo, tracker.sudo)
+    mergeMapSnapshot(autoThreadCache, snapThreads, tracker.threads)
+    mergeMapSnapshot(hubsCache, snapHubs, tracker.hubs)
+    mergeSetSnapshot(autoChannelTextIdsCache, snapText, tracker.autoText)
+    mergeMapSnapshot(autoChannelVoiceMapCache, snapVoice, tracker.autoVoice)
+  } finally {
+    activeReloads.delete(tracker)
   }
 }
 
@@ -137,6 +174,7 @@ export async function setSetting(
       set: { value, updatedByDiscordId: byDiscordId ?? null, updatedAt: new Date() },
     })
   settingsCache.set(key, value)
+  touch('settings', key)
   // Audit log (#31) — only when the value actually changed, to avoid noise.
   if (oldValue !== value && opts?.audit !== false) {
     const { settingChanges } = await import('../db/schema')
@@ -151,6 +189,7 @@ export async function clearSetting(key: string, byDiscordId?: string): Promise<v
   const oldValue = settingsCache.get(key) ?? null
   await db.delete(botSettings).where(eq(botSettings.key, key))
   settingsCache.delete(key)
+  touch('settings', key)
   if (oldValue !== null) {
     const { settingChanges } = await import('../db/schema')
     await db.insert(settingChanges).values({ key, oldValue, newValue: null, changedByUserId: byDiscordId ?? null }).catch(() => {})
@@ -198,6 +237,7 @@ export async function addSudoUser(userId: string, byDiscordId?: string, note?: s
     .values({ userId, addedByDiscordId: byDiscordId ?? null, note: note ?? null })
     .onConflictDoNothing()
   sudoUsersCache.add(userId)
+  touch('sudo', userId)
   if (!wasAlreadySudo) {
     void publish<SudoGrantedEvent>(sudoCh('granted'), {
       userId, by: byDiscordId ?? null, ts: new Date().toISOString(),
@@ -209,6 +249,7 @@ export async function removeSudoUser(userId: string, byDiscordId?: string): Prom
   const hadSudo = sudoUsersCache.has(userId)
   await db.delete(sudoUsers).where(eq(sudoUsers.userId, userId))
   sudoUsersCache.delete(userId)
+  touch('sudo', userId)
   if (hadSudo) {
     void publish<SudoRevokedEvent>(sudoCh('revoked'), {
       userId, by: byDiscordId ?? null, ts: new Date().toISOString(),
@@ -262,6 +303,7 @@ export async function addAutoThreadChannel(
       },
     })
   autoThreadCache.set(channelId, cfg)
+  touch('threads', channelId)
 }
 
 export async function updateAutoThreadChannel(
@@ -279,11 +321,13 @@ export async function updateAutoThreadChannel(
     .set({ nameTemplate: next.nameTemplate, archiveDuration: next.archiveDuration })
     .where(eq(autoThreadChannels.channelId, channelId))
   autoThreadCache.set(channelId, next)
+  touch('threads', channelId)
 }
 
 export async function removeAutoThreadChannel(channelId: string): Promise<void> {
   await db.delete(autoThreadChannels).where(eq(autoThreadChannels.channelId, channelId))
   autoThreadCache.delete(channelId)
+  touch('threads', channelId)
 }
 
 // ---------------------------------------------------------------------------
@@ -323,17 +367,8 @@ export async function registerHubChannel(input: {
   // If we hit the conflict, fetch the existing row instead.
   const final = row ?? (await db.select().from(hubChannels).where(eq(hubChannels.channelId, input.channelId)))[0]
   if (!final) return
-  hubsCache.set(final.channelId, {
-    id: final.id,
-    channelId: final.channelId,
-    guildId: final.guildId,
-    categoryId: final.categoryId,
-    position: final.position,
-    label: final.label,
-    defaultTemplateKey: final.defaultTemplateKey,
-    defaultManualName: final.defaultManualName,
-    defaultUserLimit: final.defaultUserLimit,
-  })
+  hubsCache.set(final.channelId, toHubInfo(final))
+  touch('hubs', final.channelId)
 }
 
 /**
@@ -359,12 +394,14 @@ export async function setHubDefaults(
       defaultManualName: defaults.manualName,
       defaultUserLimit: defaults.userLimit,
     })
+    touch('hubs', channelId)
   }
 }
 
 export async function unregisterHubChannel(channelId: string): Promise<void> {
   await db.delete(hubChannels).where(eq(hubChannels.channelId, channelId))
   hubsCache.delete(channelId)
+  touch('hubs', channelId)
 }
 
 /**
@@ -379,26 +416,30 @@ export async function unregisterHubChannel(channelId: string): Promise<void> {
  * Returns the new hub count so callers can confirm what landed.
  */
 export async function reloadHubsCache(): Promise<number> {
-  const hubs = await db.select().from(hubChannels)
-  hubsCache.clear()
-  for (const h of hubs) {
-    hubsCache.set(h.channelId, {
-      id: h.id,
-      channelId: h.channelId,
-      guildId: h.guildId,
-      categoryId: h.categoryId,
-      position: h.position,
-      label: h.label,
-      defaultTemplateKey: h.defaultTemplateKey,
-      defaultManualName: h.defaultManualName,
-      defaultUserLimit: h.defaultUserLimit,
-    })
+  const tracker = createReloadTracker()
+  activeReloads.add(tracker)
+  try {
+    const hubs = await db.select().from(hubChannels)
+    const snapHubs = new Map<string, HubInfo>()
+    for (const h of hubs) snapHubs.set(h.channelId, toHubInfo(h))
+    mergeMapSnapshot(hubsCache, snapHubs, tracker.hubs)
+    return hubs.length
+  } finally {
+    activeReloads.delete(tracker)
   }
-  return hubs.length
 }
 
-/** Update the cached hub's tracked channelId after the reconciler creates a replacement. */
+/**
+ * Update the cached hub's tracked channelId after a replacement hub is
+ * created. Callers run it before the hub_channels UPDATE (so a join on the
+ * new hub is recognized at once) and again after it commits: idempotent, and
+ * the second call repairs a reload that read the old row before the commit.
+ * Both ids are touched even on the no-op path so an in-flight reload keeps
+ * the live state for them.
+ */
 export function updateHubChannelId(oldChannelId: string, newChannelId: string): void {
+  touch('hubs', oldChannelId)
+  touch('hubs', newChannelId)
   const hub = hubsCache.get(oldChannelId)
   if (!hub) return
   hubsCache.delete(oldChannelId)
@@ -415,10 +456,12 @@ export function isAutoChannelText(textChannelId: string): boolean {
 
 export function trackAutoChannelText(textChannelId: string): void {
   autoChannelTextIdsCache.add(textChannelId)
+  touch('autoText', textChannelId)
 }
 
 export function untrackAutoChannelText(textChannelId: string): void {
   autoChannelTextIdsCache.delete(textChannelId)
+  touch('autoText', textChannelId)
 }
 
 // ---------------------------------------------------------------------------
@@ -446,10 +489,12 @@ export function listAutoChannelVoiceIds(): string[] {
 
 export function trackAutoChannelVoice(voiceChannelId: string, textChannelId: string): void {
   autoChannelVoiceMapCache.set(voiceChannelId, textChannelId)
+  touch('autoVoice', voiceChannelId)
 }
 
 export function untrackAutoChannelVoice(voiceChannelId: string): void {
   autoChannelVoiceMapCache.delete(voiceChannelId)
+  touch('autoVoice', voiceChannelId)
 }
 
 // ---------------------------------------------------------------------------
