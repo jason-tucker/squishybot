@@ -4,8 +4,10 @@ import {
   classifyDeleteError,
   createKeyedQueue,
   MAX_DELETE_ATTEMPTS,
+  membersAfterLeave,
   planDeleteRetry,
   planTransition,
+  queueVoiceUpdate,
   tryDeleteChannel,
 } from '../src/services/voice/lifecycle'
 
@@ -140,4 +142,61 @@ test('createKeyedQueue: drops the key once its queue drains', async () => {
   await q.run('member1', async () => {})
   await tick(0)
   assert.equal(q.pendingKeys(), 0)
+})
+
+// --- queued voice handlers must see the arrival-time channels ---
+
+// Mimics discord.js 14.28.1: newState is the cached VoiceState, patched in place
+// by the member's next update (VoiceStateManager._add -> existing._patch);
+// oldState is a shallow _clone() of the cache taken before that patch.
+function makeFakeVoiceCache() {
+  const guild = { id: 'g1' }
+  const member = { id: 'u1' }
+  const cached = { id: 'u1', channelId: null as string | null, guild, member }
+  return {
+    update(channelId: string | null) {
+      const oldState = Object.assign(Object.create(cached), cached) as typeof cached
+      cached.channelId = channelId
+      return { oldState, newState: cached }
+    },
+  }
+}
+
+test('queueVoiceUpdate: queued handlers see arrival-time channels after the cached state is patched', async () => {
+  const q = createKeyedQueue()
+  const cache = makeFakeVoiceCache()
+  const seen: string[] = []
+  const handler = async (o: { channelId: string | null }, n: { channelId: string | null }) => {
+    seen.push(`${o.channelId} -> ${n.channelId}`)
+  }
+  // Hold the member's queue so every event below is queued, not run inline.
+  let release!: () => void
+  const gate = new Promise<void>(resolve => { release = resolve })
+  const blocker = q.run('u1', () => gate)
+
+  const e1 = cache.update('roomA')
+  const p1 = queueVoiceUpdate(q, e1.oldState, e1.newState, handler)
+  const e2 = cache.update('hubB')
+  const p2 = queueVoiceUpdate(q, e2.oldState, e2.newState, handler)
+  const e3 = cache.update(null)
+  const p3 = queueVoiceUpdate(q, e3.oldState, e3.newState, handler)
+
+  release()
+  await Promise.all([blocker, p1, p2, p3])
+  assert.deepEqual(seen, ['null -> roomA', 'roomA -> hubB', 'hubB -> null'])
+})
+
+// --- a late leave must not treat the leaver as a remaining member ---
+
+test('membersAfterLeave: leaver gone, remaining keeps order', () => {
+  assert.deepEqual(membersAfterLeave(['u2', 'u3'], 'u1'), { leaverStillPresent: false, remaining: ['u2', 'u3'] })
+})
+
+test('membersAfterLeave: leaver already back (late queued leave) is flagged and excluded', () => {
+  assert.deepEqual(membersAfterLeave(['u1', 'u2'], 'u1'), { leaverStillPresent: true, remaining: ['u2'] })
+  assert.deepEqual(membersAfterLeave(['u1'], 'u1'), { leaverStillPresent: true, remaining: [] })
+})
+
+test('membersAfterLeave: empty room', () => {
+  assert.deepEqual(membersAfterLeave([], 'u1'), { leaverStillPresent: false, remaining: [] })
 })
