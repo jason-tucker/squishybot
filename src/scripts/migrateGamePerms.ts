@@ -24,6 +24,7 @@ import { eq, and } from 'drizzle-orm'
 import { db } from '../db/client'
 import { games, userGamePrefs } from '../db/schema'
 import { env } from '../config/env'
+import { summarizeError, urlSecretPatterns } from '../utils/redact'
 
 interface DiscordRole {
   id: string
@@ -221,6 +222,12 @@ async function main(): Promise<void> {
 }
 
 main().catch(err => {
-  console.error('Migration failed:', err)
+  // Never print the raw error object: a DrizzleQueryError carries SQL +
+  // params, and connection errors can carry DATABASE_URL.
+  const patterns = [
+    ...urlSecretPatterns(process.env.DATABASE_URL, 'DATABASE'),
+    { value: process.env.DISCORD_BOT_TOKEN, label: '[REDACTED:DISCORD_BOT_TOKEN]' },
+  ]
+  console.error(`Migration failed: ${summarizeError(err, patterns)}`)
   process.exit(1)
 })

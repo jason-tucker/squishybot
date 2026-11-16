@@ -32,6 +32,7 @@ import { logger } from './logger'
 import { env } from '../config/env'
 import { buildSignedReply, hmacSha256, timingSafeCompare } from '../utils/hmac'
 import { getVerb } from './rpc/registry'
+import { handlerThrewReply } from './rpc/handlerThrewReply'
 import { publish } from './eventBus'
 import { constructWithoutLeak, redactUrl } from '../utils/redact'
 
@@ -199,7 +200,8 @@ async function dispatch(client: Client, channel: string, message: string, secret
     await sendReply(envelope.requestId, result, secret)
   } catch (err) {
     logger.error(`rpcServer: handler '${verb}' threw`, err)
-    await sendReply(envelope.requestId, { ok: false, error: 'handler-threw', details: (err as Error)?.message }, secret)
+    // Fixed details: the error message can carry SQL + params (logged above, redacted).
+    await sendReply(envelope.requestId, handlerThrewReply(), secret)
   }
 }
 
