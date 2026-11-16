@@ -8,6 +8,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ## [Unreleased]
 
 ### Security
+- **Production image is runtime-only and pnpm is hash-pinned.** The Dockerfile runs `pnpm prune --prod` so devDependencies (tsx, drizzle-kit, esbuild, typescript) no longer ship, and `packageManager` carries the pnpm 10.33.2 sha512 so corepack verifies the download.
 - **Redis credentials no longer reach logs.** `eventBus`/`rpcServer` connect messages print only `scheme://host:port/db` via `redactUrl` (`src/utils/redact.ts`); `logger` now redacts stdout (not just Discord/DM output) and scrubs `REDIS_URL` and its password; a malformed `REDIS_URL`/`DATABASE_URL` no longer prints the raw value via the thrown error (`migrate.ts`, Redis clients). Tests: `test/redact.test.ts`.
 
 ### Added
