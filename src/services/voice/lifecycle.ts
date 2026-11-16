@@ -105,6 +105,69 @@ export function createKeyedQueue(opts: KeyedQueueOptions = {}) {
   }
 }
 
+/** The VoiceState fields the queued voice handlers read. */
+export interface VoiceStateLike<G, M> {
+  readonly id: string
+  readonly channelId: string | null
+  readonly guild: G
+  readonly member: M | null
+}
+
+/**
+ * A copy of a VoiceState taken when the event arrives. discord.js passes the
+ * CACHED VoiceState as `newState` and patches that same object in place on the
+ * member's next update (VoiceStateManager._add -> existing._patch), so a
+ * handler that runs later from the queue would read a later channelId.
+ * guild and member are live objects and are fine to read later; channel
+ * identity must come from the snapshot.
+ */
+export interface VoiceStateSnapshot<G, M> {
+  readonly id: string
+  readonly channelId: string | null
+  readonly guild: G
+  readonly member: M | null
+}
+
+export function snapshotVoiceState<G, M>(state: VoiceStateLike<G, M>): VoiceStateSnapshot<G, M> {
+  return { id: state.id, channelId: state.channelId, guild: state.guild, member: state.member }
+}
+
+/**
+ * Snapshot both states synchronously, then queue the handler under the
+ * member's key. The handler only ever sees the arrival-time snapshots.
+ */
+export function queueVoiceUpdate<G, M, T>(
+  queue: Pick<ReturnType<typeof createKeyedQueue>, 'run'>,
+  oldState: VoiceStateLike<G, M>,
+  newState: VoiceStateLike<G, M>,
+  handler: (oldSnap: VoiceStateSnapshot<G, M>, newSnap: VoiceStateSnapshot<G, M>) => Promise<T>,
+): Promise<T> {
+  const oldSnap = snapshotVoiceState(oldState)
+  const newSnap = snapshotVoiceState(newState)
+  return queue.run(newSnap.id, () => handler(oldSnap, newSnap))
+}
+
+/**
+ * Who is left in a room after `leaverId` left it, from the room's live member
+ * ids. A queued leave can run after the member has already come back (A ->
+ * null then null -> A), so the live list may still contain the leaver:
+ * `leaverStillPresent` tells the caller to skip any ownership change, and
+ * `remaining` never includes the leaver. Order is kept, so `remaining[0]`
+ * matches the old `vc.members.first()` pick.
+ */
+export function membersAfterLeave(
+  liveMemberIds: Iterable<string>,
+  leaverId: string,
+): { leaverStillPresent: boolean; remaining: string[] } {
+  const remaining: string[] = []
+  let leaverStillPresent = false
+  for (const id of liveMemberIds) {
+    if (id === leaverId) leaverStillPresent = true
+    else remaining.push(id)
+  }
+  return { leaverStillPresent, remaining }
+}
+
 export const MAX_DELETE_ATTEMPTS = 5
 
 /**
