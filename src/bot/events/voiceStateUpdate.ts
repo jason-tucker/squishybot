@@ -21,7 +21,7 @@ import { isStaticChannel } from '../../services/voice/staticChannels'
 import { createStaticChannelText } from '../../services/voice/autoChannel'
 import { recordVoiceActivity } from '../../services/activity/tracker'
 import { noteVoiceStateForOverflow } from '../../services/voice/overflowGate'
-import { createKeyedQueue, planTransition } from '../../services/voice/lifecycle'
+import { createKeyedQueue, membersAfterLeave, planTransition, queueVoiceUpdate, type VoiceStateSnapshot } from '../../services/voice/lifecycle'
 
 // One member's voice events are handled strictly in order: discord.js runs
 // async listeners concurrently, and a fast A -> B -> leave sequence must not
@@ -44,15 +44,21 @@ export function registerVoiceStateUpdate(client: Client): void {
       // unmanaged-leave early return (watched VCs are usually unmanaged and
       // bots count toward "full").
       noteVoiceStateForOverflow(oldState, newState)
-      // VoiceState.id is the member's user id.
-      await memberQueue.run(newState.id, () => handleVoiceStateUpdate(client, oldState, newState))
+      // VoiceState.id is the member's user id. Both states are snapshotted
+      // now, before queuing: newState is discord.js's cached VoiceState and is
+      // patched in place by the member's next update, so a queued handler
+      // reading it later could see a later channel.
+      await queueVoiceUpdate(memberQueue, oldState, newState, (oldSnap, newSnap) =>
+        handleVoiceStateUpdate(client, oldSnap, newSnap))
     } catch (err) {
       logger.error('voiceStateUpdate handler threw — swallowed', err)
     }
   })
 }
 
-async function handleVoiceStateUpdate(client: Client, oldState: VoiceState, newState: VoiceState): Promise<void> {
+type VoiceSnapshot = VoiceStateSnapshot<Guild, GuildMember>
+
+async function handleVoiceStateUpdate(client: Client, oldState: VoiceSnapshot, newState: VoiceSnapshot): Promise<void> {
     // Only handle the configured guild
     if (newState.guild.id !== env.GUILD_ID && oldState.guild.id !== env.GUILD_ID) return
 
@@ -217,9 +223,17 @@ async function handleLeave(client: Client, guild: Guild, member: GuildMember, le
       }
 
       let updatedRecord = record
-      const remainingMemberIds = new Set(vc.members.map(m => m.id))
+      // This leave may run late from the member queue, after the member has
+      // already rejoined; the live member list then still contains them.
+      // Never count the leaver as remaining, and if they are back in the room
+      // skip the ownership change: they are present, and the queued rejoin
+      // that follows refreshes the panel.
+      const { leaverStillPresent, remaining } = membersAfterLeave(vc.members.keys(), member.id)
+      const remainingMemberIds = new Set(remaining)
 
-      if (record.ownerUserId === member.id && remainingMemberIds.size > 0) {
+      if (leaverStillPresent) {
+        logger.info(`Leave of ${member.id} from vc=${leftChannelId} ran after they rejoined — ownership left unchanged`)
+      } else if (record.ownerUserId === member.id && remainingMemberIds.size > 0) {
         // OWNER LEFT — try to enter a grace window.
         const graceMs = getOwnerGraceMs()
         const actingOwner = graceMs > 0 ? await pickActingOwner(record, remainingMemberIds) : null
@@ -235,7 +249,7 @@ async function handleLeave(client: Client, guild: Guild, member: GuildMember, le
           logger.info(`Owner ${member.id} stepped out — acting owner ${actingOwner} in vc=${leftChannelId} for ${graceMs}ms`)
         } else {
           // Grace disabled or nobody eligible — fall back to instant transfer.
-          const newOwner = vc.members.first()!
+          const newOwner = vc.members.get(remaining[0]!)!
           const newOwnerHosts = record.hostUserIds.filter(id => id !== newOwner.id)
           await db.update(autoChannels)
             .set({ ownerUserId: newOwner.id, hostUserIds: newOwnerHosts, actingOwnerUserId: null, ownerGraceExpiresAt: null })
@@ -255,11 +269,11 @@ async function handleLeave(client: Client, guild: Guild, member: GuildMember, le
         // ACTING OWNER LEFT during grace — per design, this breaks the chain:
         // the original owner forfeits their reclaim, and the next person
         // present becomes the permanent owner. Reusing the instant-transfer
-        // path with vc.members.first() — pickActingOwner's host-first heuristic
+        // path with the first remaining member — pickActingOwner's host-first heuristic
         // doesn't apply here because the previous acting owner already failed
         // to hold the seat.
         cancelGraceTimer(leftChannelId)
-        const newOwner = vc.members.first()!
+        const newOwner = vc.members.get(remaining[0]!)!
         const newOwnerHosts = record.hostUserIds.filter(id => id !== newOwner.id)
         await db.update(autoChannels)
           .set({ ownerUserId: newOwner.id, hostUserIds: newOwnerHosts, actingOwnerUserId: null, ownerGraceExpiresAt: null })
