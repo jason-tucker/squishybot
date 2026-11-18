@@ -18,6 +18,7 @@ import { getSetting, unregisterHubChannel, untrackAutoChannelText, untrackAutoCh
 import { stampActivityChannelKinds } from '../activity/channelKinds'
 import { applyOverflowGate } from './overflowGate'
 import { deleteChannelSafe } from './autoChannel'
+import { createSingleFlight } from '../../utils/concurrency'
 
 export interface ReconcilerResult {
   recovered: number
@@ -27,7 +28,21 @@ export interface ReconcilerResult {
   adopted: number
 }
 
-export async function runReconciler(client: Client): Promise<ReconcilerResult> {
+// Single client per process; the job captures it when a run starts.
+let reconcileClient: Client | null = null
+const reconcileOnce = createSingleFlight(() => runReconcilerOnce(reconcileClient!))
+
+/**
+ * Run the reconciler. Boot, the deferred-settings path, /sudo and the RPC
+ * admin verb can all trigger it; overlapping calls share the one in-flight
+ * run (and its result) so e.g. a missing hub is not recreated twice.
+ */
+export function runReconciler(client: Client): Promise<ReconcilerResult> {
+  reconcileClient = client
+  return reconcileOnce()
+}
+
+async function runReconcilerOnce(client: Client): Promise<ReconcilerResult> {
   // Fetch guild via API rather than cache — ensures it's available even on first boot
   const guild = client.guilds.cache.get(env.GUILD_ID)
     ?? await client.guilds.fetch(env.GUILD_ID).catch(() => null)

@@ -67,5 +67,5 @@ Resolved transitively by securing the bus (H6). No code change recommended in is
 ## Residual risks after this branch
 - Confused-deputy on the RPC bus is **by design** (the panel is trusted). Acceptable once Redis is authenticated (H6); to go further, carry a signed acting-user identity in the envelope and re-check it bot-side before role mutations.
 - Intermediate 3xx redirect response bodies in `poller.ts` are not explicitly cancelled (undici GC-cleans them; ≤5 short-lived hops) — negligible.
-- `esbuild` moderate advisory remains (dev/build-only via `drizzle-kit`); not exploitable at runtime. Resolves when `drizzle-kit` is removed from the runtime image (tied to H5) or upgraded.
+- `esbuild` moderate advisory remains (dev/build-only via `drizzle-kit`); not exploitable at runtime. Resolves when `drizzle-kit` is removed from the runtime image (tied to H5) or upgraded. **Update 2026-11-15: resolved** — `pnpm prune --prod` (Dockerfile:20) keeps `drizzle-kit`/`esbuild` out of the runtime image.
 - DNS-rebinding TOCTOU on the SSRF allowlist (pre-existing, acknowledged in code) — out of scope for the "rogue sudo" threat model; a `connect`-hook socket-level check would close it.

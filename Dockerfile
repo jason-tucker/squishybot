@@ -15,12 +15,16 @@ RUN pnpm install --frozen-lockfile
 COPY . .
 RUN node --max-old-space-size=4096 node_modules/typescript/bin/tsc
 
+# Drop devDependencies (tsx, drizzle-kit, typescript, esbuild) so only runtime
+# deps are copied into the production stage.
+RUN pnpm prune --prod
+
 # ── Stage 2: Production ───────────────────────────────────────────────────────
 FROM node:24-alpine AS production
 
 WORKDIR /app
 
-# Copy compiled output and all node_modules
+# Copy compiled output and production-only node_modules
 COPY --from=builder /build/dist ./dist
 COPY --from=builder /build/node_modules ./node_modules
 COPY --from=builder /build/package.json ./package.json
