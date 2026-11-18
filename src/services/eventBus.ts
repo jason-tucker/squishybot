@@ -18,6 +18,7 @@
 import Redis, { type RedisOptions } from 'ioredis'
 import type { Client } from 'discord.js'
 import { logger } from './logger'
+import { constructWithoutLeak, redactUrl } from '../utils/redact'
 
 const REDIS_URL = process.env.REDIS_URL ?? 'redis://redis:6379'
 const BOT_NAME = 'squishy'
@@ -43,14 +44,14 @@ function getPublisher(): Redis {
     enableOfflineQueue: true,
   }
 
-  const r = new Redis(REDIS_URL, opts)
+  const r = constructWithoutLeak(() => new Redis(REDIS_URL, opts), 'eventBus', REDIS_URL)
 
   r.on('connect', () => {
     if (warnedDown) {
-      logger.info(`eventBus: reconnected to Redis at ${REDIS_URL}`)
+      logger.info(`eventBus: reconnected to Redis at ${redactUrl(REDIS_URL)}`)
       warnedDown = false
     } else {
-      logger.info(`eventBus: connected to Redis at ${REDIS_URL}`)
+      logger.info(`eventBus: connected to Redis at ${redactUrl(REDIS_URL)}`)
     }
   })
   r.on('error', (err: Error) => {

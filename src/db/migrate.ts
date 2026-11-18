@@ -4,6 +4,7 @@ import postgres from 'postgres'
 import { createHash } from 'node:crypto'
 import { readFileSync } from 'node:fs'
 import 'dotenv/config'
+import { summarizeError, urlSecretPatterns } from '../utils/redact'
 
 const MIGRATIONS_FOLDER = './src/db/migrations'
 
@@ -66,6 +67,15 @@ async function main() {
 }
 
 main().catch((err) => {
-  console.error('Migration failed:', err)
+  // Never print the error object: postgres' ERR_INVALID_URL carries the raw
+  // DATABASE_URL in `input`. Drizzle wraps failed queries in DrizzleQueryError
+  // with the Postgres error in `.cause`, so print a scrubbed summary of the
+  // whole cause chain (name/code/message + Postgres detail fields) instead.
+  const patterns = [
+    ...urlSecretPatterns(process.env.DATABASE_URL, 'DATABASE'),
+    ...urlSecretPatterns(process.env.REDIS_URL, 'REDIS'),
+    { value: process.env.POSTGRES_PASSWORD, label: '[REDACTED:POSTGRES_PASSWORD]' },
+  ]
+  console.error(`Migration failed: ${summarizeError(err, patterns)}`)
   process.exit(1)
 })
