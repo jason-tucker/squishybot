@@ -362,6 +362,7 @@ pnpm db:migrate
 The bot exposes most flows as RPC verbs over a Redis command bus:
 
 - **Commands from panel** → `cmd.squishy.<verb>` — panel publishes, bot subscribes via `src/services/rpc/registry.ts`. HMAC-signed with `BOTPANEL_RPC_SECRET` (`HMAC-SHA256(secret, "${channel}|${requestId}|${ts}|${JSON.stringify(params)}")`). Reply goes to `res.<requestId>`.
+- **Replies to panel** → every reply on `res.<requestId>` is signed: published as `{...result, ts, hmac}` with `ts = Date.now()` (epoch ms number) and `hmac = HMAC-SHA256(BOTPANEL_RPC_SECRET, "res.${requestId}|${requestId}|${ts}|${JSON.stringify(result)}")` (lowercase hex); the panel verifies within 30 s. All reply paths go through `sendReply` in `src/services/rpcServer.ts` (`buildSignedReply` in `src/utils/hmac.ts`); an unserializable result becomes a signed `handler-threw` reply.
 - **Events from bot** → `bot.squishy.*` — bot publishes via `src/services/eventBus.ts`; panel subscribes.
 - **Cache invalidation** → `cmd.squishy.cache.invalidate` — panel triggers; `src/services/cacheInvalidator.ts` refreshes in-memory caches.
 - **Schema sync** → when a push to `main` touches `src/db/schema/**`, `.github/workflows/notify-panel-schema-change.yml` fires a `repository_dispatch` at `jason-tucker/botpanel` so the panel re-vendors the Drizzle schemas automatically.
@@ -387,4 +388,4 @@ Type-check **locally** (never on the VPS):
 pnpm typecheck
 ```
 
-There is no test framework. Verification is done by running the bot locally or in CI.
+Run unit tests with `pnpm test` (`node:test` via `tsx --test "test/**/*.test.ts"`; also runs in CI).
