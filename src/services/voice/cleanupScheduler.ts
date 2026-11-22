@@ -5,12 +5,28 @@ import { eq } from 'drizzle-orm'
 import { env } from '../../config/env'
 import { logger } from '../logger'
 import { settingOrNumber } from '../settings'
+import { createTimerSlots } from '../../utils/concurrency'
 
-const pendingTimers = new Map<string, ReturnType<typeof setTimeout>>()
+// Keys are reserved synchronously before the first await, so two concurrent
+// scheduleCleanup calls can't each arm a timer (the first would be uncancellable).
+const pendingTimers = createTimerSlots()
 
 export async function scheduleCleanup(client: Client, voiceChannelId: string): Promise<void> {
-  if (pendingTimers.has(voiceChannelId)) return
+  const slot = pendingTimers.reserve(voiceChannelId)
+  if (!slot) return
+  try {
+    await scheduleReserved(client, voiceChannelId, slot)
+  } finally {
+    // No-op once committed to a timer or cancelled; frees early returns/throws.
+    pendingTimers.release(voiceChannelId, slot)
+  }
+}
 
+async function scheduleReserved(
+  client: Client,
+  voiceChannelId: string,
+  slot: NonNullable<ReturnType<typeof pendingTimers.reserve>>,
+): Promise<void> {
   // Reconciler-adopted channels are off-limits for auto-cleanup. The
   // adopt flow stamped `source_hub_id='recovered'` on these rows; that
   // marker is the only thing distinguishing them from genuine
@@ -27,6 +43,9 @@ export async function scheduleCleanup(client: Client, voiceChannelId: string): P
   // Runtime-overridable via /sudo → Settings → Voice; falls back to env.
   const delay = settingOrNumber('voice.cleanup_delay_ms', env.VOICE_CLEANUP_DELAY_MS)
 
+  // cancelCleanup ran during the await (someone rejoined): don't schedule.
+  if (!pendingTimers.holds(voiceChannelId, slot)) return
+
   if (delay === 0) {
     // Instant — run on next tick, still allows a reconnect within the same event loop cycle
     db.update(autoChannels).set({ scheduledCleanupAt: new Date() }).where(eq(autoChannels.voiceChannelId, voiceChannelId)).catch(() => {})
@@ -36,26 +55,25 @@ export async function scheduleCleanup(client: Client, voiceChannelId: string): P
 
   const scheduledAt = new Date(Date.now() + delay)
 
+  const timer = setTimeout(() => {
+    pendingTimers.fired(voiceChannelId, timer)
+    void runCleanupSafe(client, voiceChannelId)
+  }, delay)
+  if (!pendingTimers.commit(voiceChannelId, slot, timer)) {
+    clearTimeout(timer)
+    return
+  }
+
   db.update(autoChannels)
     .set({ scheduledCleanupAt: scheduledAt })
     .where(eq(autoChannels.voiceChannelId, voiceChannelId))
     .catch(() => {})
 
-  const timer = setTimeout(() => {
-    pendingTimers.delete(voiceChannelId)
-    void runCleanupSafe(client, voiceChannelId)
-  }, delay)
-
-  pendingTimers.set(voiceChannelId, timer)
   logger.info(`Cleanup scheduled for vc=${voiceChannelId} in ${delay}ms`)
 }
 
 export function cancelCleanup(voiceChannelId: string): void {
-  const timer = pendingTimers.get(voiceChannelId)
-  if (timer) {
-    clearTimeout(timer)
-    pendingTimers.delete(voiceChannelId)
-  }
+  pendingTimers.cancel(voiceChannelId)
   db.update(autoChannels)
     .set({ scheduledCleanupAt: null })
     .where(eq(autoChannels.voiceChannelId, voiceChannelId))
@@ -118,7 +136,7 @@ export async function restoreScheduledCleanups(client: Client): Promise<void> {
     } else {
       // Reschedule with remaining time
       const timer = setTimeout(() => {
-        pendingTimers.delete(record.voiceChannelId)
+        pendingTimers.fired(record.voiceChannelId, timer)
         void runCleanupSafe(client, record.voiceChannelId)
       }, remaining)
       pendingTimers.set(record.voiceChannelId, timer)

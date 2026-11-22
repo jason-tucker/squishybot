@@ -16,6 +16,8 @@
 | **dev:** drizzle-kit | ^0.31.10 | — | **shipped into the runtime image** (used by `docker-entrypoint.sh`); drags vulnerable `esbuild` via the deprecated `@esbuild-kit/*` chain |
 | **dev:** tsx, typescript, @types/node | — | — | build/dev only |
 
+> **Update 2026-11-15:** the `drizzle-kit`/`esbuild` runtime-image exposure above is resolved. The Dockerfile builder runs `pnpm prune --prod` (Dockerfile:20), so the production image carries no devDependencies.
+
 Production footprint: **29 top-level/direct-transitive packages, 67 transitive nodes**. No package
 with a `postinstall` lifecycle script is approved to run (pnpm reports `esbuild` build scripts as
 **ignored** — the safe default).
@@ -31,6 +33,8 @@ with a `postinstall` lifecycle script is approved to run (pnpm reports `esbuild`
 
 ### Remaining (intentionally not force-upgraded)
 - **GHSA-67mh-4wv8-2f99 — `esbuild@0.18.20` (moderate)** via `drizzle-kit > @esbuild-kit/esm-loader > @esbuild-kit/core-utils > esbuild`. A dev-server CORS issue, **not exploitable at runtime** (no esbuild dev server runs in production). After the **H5** cutover the runtime no longer *executes* `drizzle-kit` at all (startup runs the drizzle-orm `migrate()` runner, not `push`), so this path is unreachable in prod — though `drizzle-kit` is still present in the copied `node_modules`. Fully removing it would require a production-only `node_modules` (e.g. `pnpm install --prod` in the image) or upgrading `drizzle-kit` to a release off `@esbuild-kit`.
+
+> **Update 2026-11-15:** resolved. `pnpm prune --prod` (Dockerfile:20) removes `drizzle-kit` and `esbuild` from the production image.
 
 ## Supply-chain hygiene observations
 - No typosquat-looking or abandoned direct dependencies; all direct deps are well-known and current.

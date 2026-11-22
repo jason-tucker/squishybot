@@ -217,6 +217,11 @@ export async function createStaticChannelText(
       await textChannel.delete().catch(() => {})
       return null
     }
+    // Any other insert error: don't leave the just-created text channel
+    // orphaned (no DB row means no cleanup would ever find it).
+    await textChannel.delete().catch((delErr: unknown) => {
+      logger.warn(`createStaticChannelText: could not delete orphaned text channel tc=${textChannel.id} for vc=${staticVc.id}`, delErr)
+    })
     throw err
   }
   trackAutoChannelText(record.textChannelId)

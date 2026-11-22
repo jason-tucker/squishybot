@@ -2,6 +2,7 @@ import { drizzle } from 'drizzle-orm/postgres-js'
 import postgres from 'postgres'
 import { env } from '../config/env'
 import * as schema from './schema'
+import { constructWithoutLeak } from '../utils/redact'
 
-const queryClient = postgres(env.DATABASE_URL)
+const queryClient = constructWithoutLeak(() => postgres(env.DATABASE_URL), 'db', env.DATABASE_URL, 'postgres')
 export const db = drizzle(queryClient, { schema })

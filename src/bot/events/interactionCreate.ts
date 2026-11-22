@@ -296,7 +296,7 @@ export function registerInteractionCreate(client: Client) {
           : `type=${interaction.type}`
       const userTag = `user=${interaction.user.id}`
       const guildTag = interaction.guildId ? `guild=${interaction.guildId}` : 'guild=dm'
-      console.error(`Interaction error: ${tag} ${userTag} ${guildTag}`, err)
+      // errorReport logs the full error through the redacting logger.
       errorReport(`${tag} ${userTag} ${guildTag}`, err)
       const reply = { content: '❌ An unexpected error occurred.', ephemeral: true }
       if (interaction.isRepliable()) {
